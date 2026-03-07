@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +25,8 @@ def load_steward_substrate() -> StewardSubstrateBindings:
     keeping the top-level package importable when the substrate is not installed.
     """
 
+    _ensure_local_steward_repo_on_path()
+
     from vibe_core.mahamantra.federation.types import (
         CityReport,
         FederationDirective,
@@ -43,3 +47,12 @@ def load_steward_substrate() -> StewardSubstrateBindings:
         NadiOp=NadiOp,
         NadiPriority=NadiPriority,
     )
+
+
+def _ensure_local_steward_repo_on_path() -> None:
+    """Support sibling-repo development without requiring package installation."""
+
+    repo_root = Path(__file__).resolve().parents[1]
+    steward_root = repo_root.parent / "steward-protocol"
+    if steward_root.exists() and str(steward_root) not in sys.path:
+        sys.path.insert(0, str(steward_root))

@@ -6,6 +6,7 @@ from .agent_city_bridge import AgentCityBridge, city_presence_from_report
 from .agent_city_contract import AgentCityFilesystemContract
 from .control_plane import AgentInternetControlPlane
 from .filesystem_transport import FilesystemFederationTransport
+from .filesystem_message_transport import AgentCityFilesystemMessageTransport
 from .interfaces import CityRegistry, DiscoveryService, FederationTransport, InternetRouter, TrustEngine
 from .memory_registry import InMemoryCityRegistry
 from .models import CityEndpoint, CityIdentity, CityPresence, HealthStatus, TrustLevel, TrustRecord
@@ -27,6 +28,7 @@ from .trust import InMemoryTrustEngine, trust_allows
 __all__ = [
     "AgentCityDirectiveFactory",
     "AgentCityDirectiveType",
+    "AgentCityFilesystemMessageTransport",
     "AgentCityBridge",
     "AgentCityFilesystemContract",
     "AgentCityPeer",
