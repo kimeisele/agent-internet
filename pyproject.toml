@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-internet"
+version = "0.1.0"
+description = "Federation control plane for Agent City mesh networking"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "agents"}]
+keywords = ["agents", "federation", "network", "mesh", "control-plane"]
+dependencies = []
+
+[project.optional-dependencies]
+substrate = ["steward-protocol"]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent_internet"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
