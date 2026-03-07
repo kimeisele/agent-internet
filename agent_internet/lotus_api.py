@@ -22,6 +22,13 @@ LOTUS_MUTATING_ACTIONS = frozenset(
 )
 
 
+def _serialize_lotus_route(route: dict) -> dict:
+    payload = dict(route)
+    if "priority" in payload and "nadi_priority" not in payload:
+        payload["nadi_priority"] = payload["priority"]
+    return payload
+
+
 def _sha256_hex(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -126,13 +133,13 @@ class LotusControlPlaneAPI:
                 next_hop_city_id=payload["next_hop_city_id"],
                 metric=int(payload.get("metric", 100)),
                 nadi_type=str(payload.get("nadi_type", "")),
-                priority=str(payload.get("priority", "")),
+                priority=str(payload.get("nadi_priority", payload.get("priority", ""))),
                 ttl_ms=payload.get("ttl_ms"),
                 ttl_s=payload.get("ttl_s"),
                 route_id=payload.get("route_id", ""),
                 labels=dict(payload.get("labels", {})),
             )
-            return {"token_id": token.token_id, "route": asdict(route)}
+            return {"token_id": token.token_id, "route": _serialize_lotus_route(asdict(route))}
         if action == "resolve_handle":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             endpoint = self.plane.resolve_public_handle(payload["public_handle"])
@@ -146,5 +153,5 @@ class LotusControlPlaneAPI:
         if action == "resolve_next_hop":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             resolution = self.plane.resolve_next_hop(payload["source_city_id"], payload["destination"])
-            return {"token_id": token.token_id, "resolved": None if resolution is None else asdict(resolution)}
+            return {"token_id": token.token_id, "resolved": None if resolution is None else _serialize_lotus_route(asdict(resolution))}
         raise ValueError(f"unknown_action:{action}")

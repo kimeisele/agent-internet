@@ -99,3 +99,47 @@ def test_lotus_api_publishes_and_resolves_next_hop():
     )
 
     assert resolved["resolved"]["next_hop_city_id"] == "city-b"
+
+
+def test_lotus_api_accepts_nadi_priority_alias_and_returns_it_explicitly():
+    plane = AgentInternetControlPlane()
+    plane.register_city(
+        CityIdentity(city_id="city-a", slug="a", repo="org/city-a"),
+        CityEndpoint(city_id="city-a", transport="filesystem", location="/tmp/city-a"),
+    )
+    plane.register_city(
+        CityIdentity(city_id="city-b", slug="b", repo="org/city-b"),
+        CityEndpoint(city_id="city-b", transport="git", location="https://example/city-b.git"),
+    )
+    plane.record_trust(TrustRecord("city-a", "city-b", TrustLevel.TRUSTED, reason="route api alias test"))
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="operator",
+        scopes=(LotusApiScope.READ.value, LotusApiScope.SERVICE_WRITE.value),
+        token_secret="route-alias-token",
+        token_id="tok-route-alias",
+        now=10.0,
+    )
+
+    published = api.call(
+        bearer_token=issued.secret,
+        action="publish_route",
+        params={
+            "owner_city_id": "city-a",
+            "destination_prefix": "service:city-z/forum",
+            "target_city_id": "city-z",
+            "next_hop_city_id": "city-b",
+            "metric": 5,
+            "nadi_priority": "suddha",
+        },
+    )
+    resolved = api.call(
+        bearer_token=issued.secret,
+        action="resolve_next_hop",
+        params={"source_city_id": "city-a", "destination": "service:city-z/forum-api"},
+    )
+
+    assert published["route"]["priority"] == "suddha"
+    assert published["route"]["nadi_priority"] == "suddha"
+    assert resolved["resolved"]["priority"] == "suddha"
+    assert resolved["resolved"]["nadi_priority"] == "suddha"

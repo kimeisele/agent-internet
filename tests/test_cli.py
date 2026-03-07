@@ -324,6 +324,44 @@ def test_cli_lotus_issue_token_publish_service_and_api_call(tmp_path, capsys):
     assert payload["resolved"]["location"] == "https://forum.city-a.example/api"
 
 
+def test_cli_lotus_api_call_accepts_nadi_priority_alias(tmp_path, capsys):
+    state_path = tmp_path / "state" / "control_plane.json"
+
+    assert main(
+        [
+            "lotus-issue-token",
+            "--state-path",
+            str(state_path),
+            "--subject",
+            "operator",
+            "--token-id",
+            "tok-route-cli",
+            "--scope",
+            "lotus.read",
+            "--scope",
+            "lotus.write.service",
+        ],
+    ) == 0
+    token = json.loads(capsys.readouterr().out)["secret"]
+
+    assert main(
+        [
+            "lotus-api-call",
+            "--state-path",
+            str(state_path),
+            "--token",
+            token,
+            "--action",
+            "publish_route",
+            "--params-json",
+            '{"owner_city_id":"city-a","destination_prefix":"service:city-z/forum","target_city_id":"city-z","next_hop_city_id":"city-b","nadi_priority":"suddha"}',
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["route"]["priority"] == "suddha"
+    assert payload["route"]["nadi_priority"] == "suddha"
+
+
 def test_cli_lotus_show_steward_protocol(capsys):
     assert main(["lotus-show-steward-protocol"]) == 0
 
@@ -366,10 +404,13 @@ def test_cli_lotus_publish_route_and_resolve_next_hop(tmp_path, capsys):
             "city-b",
             "--metric",
             "5",
+            "--nadi-priority",
+            "suddha",
         ],
     ) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["route"]["nadi_type"] == "vyana"
+    assert payload["route"]["priority"] == "suddha"
 
     assert main(
         [

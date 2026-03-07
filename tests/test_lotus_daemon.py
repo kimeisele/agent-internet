@@ -129,10 +129,13 @@ def test_lotus_daemon_serves_route_resolution_http_api(tmp_path):
                 "target_city_id": "city-z",
                 "next_hop_city_id": "city-b",
                 "metric": 5,
+                "nadi_priority": "suddha",
             },
         )
         assert status == 200
         assert published["route"]["nadi_type"] == "vyana"
+        assert published["route"]["priority"] == "suddha"
+        assert published["route"]["nadi_priority"] == "suddha"
 
         status, resolved = _request_json(
             daemon.base_url,
@@ -141,5 +144,6 @@ def test_lotus_daemon_serves_route_resolution_http_api(tmp_path):
         )
         assert status == 200
         assert resolved["resolved"]["next_hop_city_id"] == "city-b"
+        assert resolved["resolved"]["nadi_priority"] == "suddha"
     finally:
         daemon.shutdown()

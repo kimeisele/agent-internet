@@ -146,7 +146,8 @@ def build_parser() -> argparse.ArgumentParser:
     lotus_publish_route.add_argument("--route-id", default="")
     lotus_publish_route.add_argument("--metric", type=int, default=100)
     lotus_publish_route.add_argument("--nadi-type", default="")
-    lotus_publish_route.add_argument("--priority", default="")
+    lotus_publish_route.add_argument("--priority", dest="priority", default="")
+    lotus_publish_route.add_argument("--nadi-priority", dest="priority")
     lotus_publish_route.add_argument("--ttl-ms", type=int)
     lotus_publish_route.add_argument("--ttl-s", type=float)
 
