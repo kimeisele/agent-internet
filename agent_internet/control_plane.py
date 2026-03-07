@@ -4,8 +4,10 @@ import time
 from dataclasses import dataclass, field
 
 from .agent_city_bridge import AgentCityBridge
+from .assistant_surface import assistant_social_slot_from_snapshot, assistant_space_from_snapshot
 from .memory_registry import InMemoryCityRegistry
 from .models import (
+    AssistantSurfaceSnapshot,
     CityEndpoint,
     CityIdentity,
     CityPresence,
@@ -17,6 +19,8 @@ from .models import (
     LotusRoute,
     LotusRouteResolution,
     LotusServiceAddress,
+    SlotDescriptor,
+    SpaceDescriptor,
     TrustLevel,
     TrustRecord,
 )
@@ -198,6 +202,19 @@ class AgentInternetControlPlane:
 
     def store_api_token(self, token: LotusApiToken) -> None:
         self.registry.upsert_api_token(token)
+
+    def upsert_space(self, space: SpaceDescriptor) -> None:
+        self.registry.upsert_space(space)
+
+    def upsert_slot(self, slot: SlotDescriptor) -> None:
+        self.registry.upsert_slot(slot)
+
+    def publish_assistant_surface(self, snapshot: AssistantSurfaceSnapshot) -> tuple[SpaceDescriptor, SlotDescriptor]:
+        space = assistant_space_from_snapshot(snapshot)
+        slot = assistant_social_slot_from_snapshot(snapshot)
+        self.registry.upsert_space(space)
+        self.registry.upsert_slot(slot)
+        return space, slot
 
     def register_transport(self, scheme: str, transport: object) -> None:
         self.transports.register(scheme, transport)

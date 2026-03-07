@@ -1,8 +1,12 @@
 import json
 
 from agent_internet.agent_city_peer import AgentCityPeer
-from agent_internet.assistant_surface import assistant_surface_snapshot_from_repo_root
-from agent_internet.models import HealthStatus
+from agent_internet.assistant_surface import (
+    assistant_social_slot_from_snapshot,
+    assistant_space_from_snapshot,
+    assistant_surface_snapshot_from_repo_root,
+)
+from agent_internet.models import HealthStatus, SlotStatus, SpaceKind
 
 
 def test_assistant_surface_snapshot_reads_city_artifacts(tmp_path, monkeypatch):
@@ -56,3 +60,26 @@ def test_assistant_surface_snapshot_accepts_city_id_without_peer_descriptor(tmp_
     assert snapshot.following == 1
     assert snapshot.repo == ""
     assert snapshot.city_health == HealthStatus.UNKNOWN
+
+
+def test_assistant_surface_snapshot_projects_space_and_slot(tmp_path):
+    repo_root = tmp_path / "city"
+    reports_dir = repo_root / "data" / "federation" / "reports"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "report_3.json").write_text(
+        json.dumps({"heartbeat": 3, "timestamp": 30.0, "population": 1, "alive": 1, "dead": 0, "chain_valid": True}),
+    )
+    (repo_root / "data" / "assistant_state.json").write_text(json.dumps({"followed": ["alice"], "ops": {"posts": 2}}))
+    AgentCityPeer.from_repo_root(repo_root, city_id="city-space", slug="space", repo="org/city-space").publish_self_description()
+
+    snapshot = assistant_surface_snapshot_from_repo_root(repo_root)
+    space = assistant_space_from_snapshot(snapshot)
+    slot = assistant_social_slot_from_snapshot(snapshot)
+
+    assert space.space_id == "space:city-space:moltbook_assistant"
+    assert space.kind == SpaceKind.ASSISTANT
+    assert space.owner_subject_id == "city-space"
+    assert slot.space_id == space.space_id
+    assert slot.slot_kind == "assistant_social"
+    assert slot.status == SlotStatus.ACTIVE
+    assert slot.labels["total_posts"] == "2"

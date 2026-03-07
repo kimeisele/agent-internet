@@ -7,7 +7,11 @@ from .agent_city_directive_bridge import (
     DirectiveExecutionResult,
     load_agent_city_directive_execution_bindings,
 )
-from .assistant_surface import assistant_surface_snapshot_from_repo_root
+from .assistant_surface import (
+    assistant_social_slot_from_snapshot,
+    assistant_space_from_snapshot,
+    assistant_surface_snapshot_from_repo_root,
+)
 from .agent_city_phase_tick_bridge import (
     AgentCityPhaseTickAdapter,
     AgentCityPhaseTickBindings,
@@ -48,6 +52,10 @@ from .models import (
     LotusRoute,
     LotusRouteResolution,
     LotusServiceAddress,
+    SlotDescriptor,
+    SlotStatus,
+    SpaceDescriptor,
+    SpaceKind,
     TrustLevel,
     TrustRecord,
 )
@@ -86,6 +94,10 @@ __all__ = [
     "AgentCityPeer",
     "AgentInternetControlPlane",
     "AssistantSurfaceSnapshot",
+    "SlotDescriptor",
+    "SlotStatus",
+    "SpaceDescriptor",
+    "SpaceKind",
     "BidirectionalSyncWorker",
     "CityEndpoint",
     "CityIdentity",
@@ -137,6 +149,8 @@ __all__ = [
     "TrustLevel",
     "TrustRecord",
     "update_locked_json_value",
+    "assistant_social_slot_from_snapshot",
+    "assistant_space_from_snapshot",
     "assistant_surface_snapshot_from_repo_root",
     "city_presence_from_report",
     "detect_git_remote_metadata",

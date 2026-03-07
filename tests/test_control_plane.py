@@ -1,10 +1,12 @@
 import json
 
 from agent_internet.agent_city_bridge import AgentCityBridge, city_presence_from_report
+from agent_internet.assistant_surface import assistant_social_slot_from_snapshot, assistant_space_from_snapshot
 from agent_internet.agent_city_contract import AgentCityFilesystemContract
 from agent_internet.control_plane import AgentInternetControlPlane
 from agent_internet.filesystem_transport import FilesystemFederationTransport
-from agent_internet.models import CityEndpoint, CityIdentity, EndpointVisibility, HealthStatus, LotusApiScope, TrustLevel, TrustRecord
+from agent_internet.models import AssistantSurfaceSnapshot, CityEndpoint, CityIdentity, EndpointVisibility, HealthStatus, LotusApiScope, SlotStatus, SpaceKind, TrustLevel, TrustRecord
+from agent_internet.snapshot import restore_control_plane, snapshot_control_plane
 
 
 def test_city_presence_from_report_maps_health_states():
@@ -146,3 +148,28 @@ def test_control_plane_publishes_steward_aligned_route_and_resolves_next_hop():
     assert resolution is not None
     assert resolution.next_hop_city_id == "city-b"
     assert resolution.next_hop_endpoint.location == "https://example/city-b.git"
+
+
+def test_control_plane_publishes_and_restores_assistant_space_and_slot():
+    plane = AgentInternetControlPlane()
+    snapshot = AssistantSurfaceSnapshot(
+        assistant_id="moltbook_assistant",
+        assistant_kind="moltbook_assistant",
+        city_id="city-a",
+        city_slug="a",
+        repo="org/city-a",
+        heartbeat_source="steward-protocol/mahamantra",
+        heartbeat=5,
+        state_present=True,
+        total_posts=2,
+        following=3,
+    )
+
+    space, slot = plane.publish_assistant_surface(snapshot)
+    payload = snapshot_control_plane(plane)
+    restored = restore_control_plane(payload)
+
+    assert space.kind == SpaceKind.ASSISTANT
+    assert slot.status == SlotStatus.ACTIVE
+    assert restored.registry.get_space(space.space_id) == space
+    assert restored.registry.get_slot(slot.slot_id) == slot

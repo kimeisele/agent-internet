@@ -8,7 +8,7 @@ from .agent_city_contract import AgentCityFilesystemContract
 from .file_locking import read_locked_json_value
 from .filesystem_transport import FilesystemFederationTransport
 from .git_federation import detect_git_remote_metadata
-from .models import AssistantSurfaceSnapshot, HealthStatus
+from .models import AssistantSurfaceSnapshot, HealthStatus, SlotDescriptor, SlotStatus, SpaceDescriptor, SpaceKind
 
 
 def assistant_surface_snapshot_from_repo_root(
@@ -74,3 +74,44 @@ def _count_entries(value: object) -> int:
     if isinstance(value, int):
         return value
     return 0
+
+
+def assistant_space_from_snapshot(snapshot: AssistantSurfaceSnapshot) -> SpaceDescriptor:
+    return SpaceDescriptor(
+        space_id=_assistant_space_id(snapshot),
+        kind=SpaceKind.ASSISTANT,
+        owner_subject_id=snapshot.city_id,
+        display_name=snapshot.assistant_id,
+        city_id=snapshot.city_id,
+        repo=snapshot.repo,
+        heartbeat_source=snapshot.heartbeat_source,
+        heartbeat=snapshot.heartbeat,
+        labels={
+            "assistant_id": snapshot.assistant_id,
+            "assistant_kind": snapshot.assistant_kind,
+            "city_slug": snapshot.city_slug,
+        },
+    )
+
+
+def assistant_social_slot_from_snapshot(snapshot: AssistantSurfaceSnapshot) -> SlotDescriptor:
+    return SlotDescriptor(
+        slot_id=f"slot:{snapshot.city_id}:assistant-social",
+        space_id=_assistant_space_id(snapshot),
+        slot_kind="assistant_social",
+        holder_subject_id=snapshot.assistant_id,
+        status=SlotStatus.ACTIVE if snapshot.state_present or snapshot.heartbeat is not None else SlotStatus.DORMANT,
+        capacity=1,
+        heartbeat_source=snapshot.heartbeat_source,
+        heartbeat=snapshot.heartbeat,
+        labels={
+            "following": str(snapshot.following),
+            "invited": str(snapshot.invited),
+            "spotlighted": str(snapshot.spotlighted),
+            "total_posts": str(snapshot.total_posts),
+        },
+    )
+
+
+def _assistant_space_id(snapshot: AssistantSurfaceSnapshot) -> str:
+    return f"space:{snapshot.city_id}:{snapshot.assistant_id}"

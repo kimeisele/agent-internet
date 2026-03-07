@@ -7,6 +7,7 @@ from typing import Callable, TypeVar
 from .file_locking import read_locked_json_value, update_locked_json_value, write_locked_json_value
 from .control_plane import AgentInternetControlPlane
 from .models import (
+    SlotDescriptor,
     CityEndpoint,
     CityIdentity,
     CityPresence,
@@ -18,6 +19,9 @@ from .models import (
     LotusNetworkAddress,
     LotusRoute,
     LotusServiceAddress,
+    SlotStatus,
+    SpaceDescriptor,
+    SpaceKind,
     TrustLevel,
     TrustRecord,
 )
@@ -36,6 +40,8 @@ def snapshot_control_plane(plane: AgentInternetControlPlane) -> dict:
         "service_addresses": [asdict(service) for service in plane.registry.list_service_addresses()],
         "routes": [asdict(route) for route in plane.registry.list_routes()],
         "api_tokens": [asdict(token) for token in plane.registry.list_api_tokens()],
+        "spaces": [asdict(space) for space in plane.registry.list_spaces()],
+        "slots": [asdict(slot) for slot in plane.registry.list_slots()],
         "presence": [asdict(presence) for presence in plane.registry.list_cities()],
         "trust": [asdict(record) for record in plane.trust_engine.list_records()],
         "allocator": plane.registry.allocation_state(),
@@ -114,6 +120,34 @@ def restore_control_plane(payload: dict) -> AgentInternetControlPlane:
                 scopes=tuple(data.get("scopes", ())),
                 issued_at=data.get("issued_at"),
                 revoked_at=data.get("revoked_at"),
+            ),
+        )
+    for data in payload.get("spaces", []):
+        plane.registry.upsert_space(
+            SpaceDescriptor(
+                space_id=data["space_id"],
+                kind=SpaceKind(data.get("kind", SpaceKind.PUBLIC_SURFACE.value)),
+                owner_subject_id=data["owner_subject_id"],
+                display_name=data.get("display_name", ""),
+                city_id=data.get("city_id", ""),
+                repo=data.get("repo", ""),
+                heartbeat_source=data.get("heartbeat_source", ""),
+                heartbeat=data.get("heartbeat"),
+                labels=dict(data.get("labels", {})),
+            ),
+        )
+    for data in payload.get("slots", []):
+        plane.registry.upsert_slot(
+            SlotDescriptor(
+                slot_id=data["slot_id"],
+                space_id=data["space_id"],
+                slot_kind=data.get("slot_kind", ""),
+                holder_subject_id=data.get("holder_subject_id", ""),
+                status=SlotStatus(data.get("status", SlotStatus.UNKNOWN.value)),
+                capacity=int(data.get("capacity", 1)),
+                heartbeat_source=data.get("heartbeat_source", ""),
+                heartbeat=data.get("heartbeat"),
+                labels=dict(data.get("labels", {})),
             ),
         )
     for data in payload.get("presence", []):

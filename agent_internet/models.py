@@ -32,6 +32,21 @@ class LotusApiScope(StrEnum):
     TOKEN_WRITE = "lotus.write.token"
 
 
+class SpaceKind(StrEnum):
+    CITY = "city"
+    HIL = "hil"
+    GUILD = "guild"
+    ASSISTANT = "assistant"
+    CLUSTER = "cluster"
+    PUBLIC_SURFACE = "public_surface"
+
+
+class SlotStatus(StrEnum):
+    UNKNOWN = "unknown"
+    ACTIVE = "active"
+    DORMANT = "dormant"
+
+
 @dataclass(frozen=True, slots=True)
 class CityIdentity:
     city_id: str
@@ -171,6 +186,32 @@ class AssistantSurfaceSnapshot:
     total_posts: int = 0
     last_post_age_s: int | None = None
     series_cursor: int = -1
+
+
+@dataclass(frozen=True, slots=True)
+class SpaceDescriptor:
+    space_id: str
+    kind: SpaceKind
+    owner_subject_id: str
+    display_name: str = ""
+    city_id: str = ""
+    repo: str = ""
+    heartbeat_source: str = ""
+    heartbeat: int | None = None
+    labels: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class SlotDescriptor:
+    slot_id: str
+    space_id: str
+    slot_kind: str
+    holder_subject_id: str
+    status: SlotStatus = SlotStatus.UNKNOWN
+    capacity: int = 1
+    heartbeat_source: str = ""
+    heartbeat: int | None = None
+    labels: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

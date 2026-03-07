@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass, field
 
 from .models import (
+    SlotDescriptor,
     CityEndpoint,
     CityIdentity,
     CityPresence,
@@ -13,6 +14,7 @@ from .models import (
     LotusNetworkAddress,
     LotusRoute,
     LotusServiceAddress,
+    SpaceDescriptor,
 )
 
 
@@ -58,6 +60,8 @@ class InMemoryCityRegistry:
     _routes: dict[str, LotusRoute] = field(default_factory=dict)
     _api_tokens: dict[str, LotusApiToken] = field(default_factory=dict)
     _api_token_hash_index: dict[str, str] = field(default_factory=dict)
+    _spaces: dict[str, SpaceDescriptor] = field(default_factory=dict)
+    _slots: dict[str, SlotDescriptor] = field(default_factory=dict)
     _next_link_id: int = 1
     _next_network_id: int = 1
 
@@ -205,6 +209,24 @@ class InMemoryCityRegistry:
 
     def list_api_tokens(self) -> list[LotusApiToken]:
         return [self._api_tokens[token_id] for token_id in sorted(self._api_tokens)]
+
+    def upsert_space(self, space: SpaceDescriptor) -> None:
+        self._spaces[space.space_id] = space
+
+    def get_space(self, space_id: str) -> SpaceDescriptor | None:
+        return self._spaces.get(space_id)
+
+    def list_spaces(self) -> list[SpaceDescriptor]:
+        return [self._spaces[space_id] for space_id in sorted(self._spaces)]
+
+    def upsert_slot(self, slot: SlotDescriptor) -> None:
+        self._slots[slot.slot_id] = slot
+
+    def get_slot(self, slot_id: str) -> SlotDescriptor | None:
+        return self._slots.get(slot_id)
+
+    def list_slots(self) -> list[SlotDescriptor]:
+        return [self._slots[slot_id] for slot_id in sorted(self._slots)]
 
     def announce(self, presence: CityPresence) -> None:
         self._presence[presence.city_id] = presence
