@@ -119,6 +119,19 @@ def build_parser() -> argparse.ArgumentParser:
     lab_phase_tick.add_argument("--from-agent", default="")
     lab_phase_tick.add_argument("--agent-name", default="")
 
+    lab_execute_code = subparsers.add_parser(
+        "lab-execute-code",
+        help="Issue a real execute_code directive and drive it through the agent-city mission pipeline",
+    )
+    lab_execute_code.add_argument("--root", required=True)
+    lab_execute_code.add_argument("--city-id", required=True)
+    lab_execute_code.add_argument("--contract", required=True)
+    lab_execute_code.add_argument("--directive-id", default="")
+    lab_execute_code.add_argument("--source", default="agent-internet")
+    lab_execute_code.add_argument("--cycles", type=int, default=3)
+    lab_execute_code.add_argument("--no-governance", action="store_true")
+    lab_execute_code.add_argument("--no-federation", action="store_true")
+
     lab_immigrate = subparsers.add_parser(
         "lab-immigrate",
         help="Run a dual-city immigration flow against a host city's real ImmigrationService",
@@ -406,10 +419,40 @@ def cmd_lab_phase_tick(args: argparse.Namespace) -> int:
                 "heartbeats": result.heartbeats,
                 "registry_services": result.registry_services,
                 "council_state": result.council_state,
+                "mission_results": result.mission_results,
                 "pending_directives": result.pending_directives,
                 "queued_ingress_before": result.queued_ingress_before,
                 "queued_ingress_after": result.queued_ingress_after,
                 "agent": None if not args.agent_name else lab.read_agent(args.city_id, args.agent_name),
+            },
+            indent=2,
+        ),
+    )
+    return 0
+
+
+def cmd_lab_execute_code(args: argparse.Namespace) -> int:
+    other_city = "city-b" if args.city_id == "city-a" else "city-a"
+    lab = LocalDualCityLab.create(args.root, city_a_id=args.city_id, city_b_id=other_city)
+    result = lab.run_execute_code_mission(
+        args.city_id,
+        contract=args.contract,
+        directive_id=args.directive_id,
+        source=args.source,
+        cycles=args.cycles,
+        governance=not args.no_governance,
+        federation=not args.no_federation,
+    )
+    print(
+        json.dumps(
+            {
+                "directive_id": result.directive_id,
+                "contract": result.contract,
+                "exec_operations": result.exec_operations,
+                "target_missions": result.target_missions,
+                "mission_results": result.phase_tick.mission_results,
+                "pending_directives": result.phase_tick.pending_directives,
+                "heartbeats": result.phase_tick.heartbeats,
             },
             indent=2,
         ),
@@ -483,6 +526,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_lab_run_directives(args)
     if args.command == "lab-phase-tick":
         return cmd_lab_phase_tick(args)
+    if args.command == "lab-execute-code":
+        return cmd_lab_execute_code(args)
     if args.command == "lab-immigrate":
         return cmd_lab_immigrate(args)
     parser.error(f"Unknown command: {args.command}")

@@ -9,6 +9,7 @@ from secrets import token_hex
 from .agent_city_contract import AgentCityFilesystemContract
 from .agent_city_directive_bridge import AgentCityDirectiveExecutionAdapter, DirectiveExecutionResult
 from .agent_city_immigration import AgentCityImmigrationAdapter
+from .agent_city_mission_bridge import AgentCityMissionExecutionAdapter, MissionExecutionResult
 from .agent_city_phase_tick_bridge import AgentCityPhaseTickAdapter, PhaseTickResult
 from .agent_city_peer import AgentCityPeer
 from .control_plane import AgentInternetControlPlane
@@ -200,6 +201,9 @@ class LocalDualCityLab:
     def phase_tick(self, city_id: str) -> AgentCityPhaseTickAdapter:
         return AgentCityPhaseTickAdapter(self.city_root(city_id))
 
+    def missions(self, city_id: str) -> AgentCityMissionExecutionAdapter:
+        return AgentCityMissionExecutionAdapter(self.city_root(city_id))
+
     def run_phase_ticks(
         self,
         city_id: str,
@@ -214,6 +218,26 @@ class LocalDualCityLab:
             governance=governance,
             federation=federation,
             ingress_items=ingress_items,
+        )
+
+    def run_execute_code_mission(
+        self,
+        city_id: str,
+        *,
+        contract: str,
+        directive_id: str = "",
+        source: str = "agent-internet",
+        cycles: int = 3,
+        governance: bool = True,
+        federation: bool = True,
+    ) -> MissionExecutionResult:
+        return self.missions(city_id).run_execute_code(
+            contract,
+            directive_id=directive_id or None,
+            source=source,
+            cycles=cycles,
+            governance=governance,
+            federation=federation,
         )
 
     def emit_outbox_message(

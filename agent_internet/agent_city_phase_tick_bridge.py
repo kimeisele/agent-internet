@@ -17,18 +17,20 @@ class AgentCityPhaseTickBindings:
     build_city_runtime: object
     persist_city_runtime: object
     SVC_COUNCIL: str
+    SVC_SANKALPA: str
 
 
 def load_agent_city_phase_tick_bindings() -> AgentCityPhaseTickBindings:
     _ensure_local_agent_city_repo_on_path()
 
-    from city.registry import SVC_COUNCIL
+    from city.registry import SVC_COUNCIL, SVC_SANKALPA
     from city.runtime import build_city_runtime, persist_city_runtime
 
     return AgentCityPhaseTickBindings(
         build_city_runtime=build_city_runtime,
         persist_city_runtime=persist_city_runtime,
         SVC_COUNCIL=SVC_COUNCIL,
+        SVC_SANKALPA=SVC_SANKALPA,
     )
 
 
@@ -38,6 +40,7 @@ class PhaseTickResult:
     pending_directives: list[dict]
     registry_services: list[str]
     council_state: dict | None
+    mission_results: list[dict]
     queued_ingress_before: int
     queued_ingress_after: int
 
@@ -89,14 +92,37 @@ class AgentCityPhaseTickAdapter:
             self.bindings.persist_city_runtime(runtime, self.logger)
             council = runtime.registry.get(self.bindings.SVC_COUNCIL)
             council_state = council.to_dict() if council is not None and hasattr(council, "to_dict") else None
+            sankalpa = runtime.registry.get(self.bindings.SVC_SANKALPA)
             return PhaseTickResult(
                 heartbeats=[dict(result) for result in heartbeats],
                 pending_directives=FilesystemFederationTransport(self.contract).list_directives(),
                 registry_services=sorted(runtime.registry.names()),
                 council_state=council_state,
+                mission_results=_collect_mission_results(sankalpa),
                 queued_ingress_before=queue_before,
                 queued_ingress_after=queue_after,
             )
+
+
+def _collect_mission_results(sankalpa: object | None) -> list[dict]:
+    if sankalpa is None or not hasattr(sankalpa, "registry"):
+        return []
+    try:
+        missions = sankalpa.registry.list_missions()
+    except Exception:
+        return []
+    results: list[dict] = []
+    for mission in missions:
+        results.append(
+            {
+                "id": getattr(mission, "id", ""),
+                "name": getattr(mission, "name", ""),
+                "status": mission.status.value if hasattr(mission.status, "value") else str(getattr(mission, "status", "")),
+                "owner": getattr(mission, "owner", "unknown"),
+                "priority": mission.priority.name if hasattr(getattr(mission, "priority", None), "name") else str(getattr(mission, "priority", "")),
+            },
+        )
+    return results
 
 
 @contextmanager

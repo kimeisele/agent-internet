@@ -18,6 +18,7 @@ from .agent_city_immigration import (
     AgentCityImmigrationBindings,
     load_agent_city_immigration_bindings,
 )
+from .agent_city_mission_bridge import AgentCityMissionExecutionAdapter, MissionExecutionResult
 from .agent_city_peer import AgentCityPeer
 from .agent_city_bridge import AgentCityBridge, city_presence_from_report
 from .agent_city_contract import AgentCityFilesystemContract
@@ -55,6 +56,7 @@ __all__ = [
     "AgentCityFilesystemMessageTransport",
     "AgentCityImmigrationAdapter",
     "AgentCityImmigrationBindings",
+    "AgentCityMissionExecutionAdapter",
     "AgentCityPhaseTickAdapter",
     "AgentCityPhaseTickBindings",
     "AgentCityBridge",
@@ -82,6 +84,7 @@ __all__ = [
     "LoopbackTransport",
     "LocalDualCityLab",
     "locked_file",
+    "MissionExecutionResult",
     "OutboxRelayPump",
     "PhaseTickResult",
     "read_locked_json_value",

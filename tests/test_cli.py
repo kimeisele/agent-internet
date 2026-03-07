@@ -326,3 +326,30 @@ def test_cli_lab_phase_tick_runs_real_cycle_with_ingress_and_council(tmp_path, c
     assert payload["queued_ingress_after"] == 0
     assert payload["council_state"]["elected_mayor"] == "MIRA"
     assert payload["agent"]["name"] == "MIRA"
+    assert isinstance(payload["mission_results"], list)
+
+
+def test_cli_lab_execute_code_runs_real_exec_mission_path(tmp_path, capsys):
+    root = tmp_path / "lab"
+
+    assert main(
+        [
+            "lab-execute-code",
+            "--root",
+            str(root),
+            "--city-id",
+            "city-a",
+            "--contract",
+            "tests_pass",
+            "--directive-id",
+            "dir-exec",
+            "--cycles",
+            "3",
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["directive_id"] == "dir-exec"
+    assert payload["pending_directives"] == []
+    assert any(op == "exec_mission:exec_dir-exec_0:pending" for op in payload["exec_operations"])
+    assert payload["target_missions"][0]["id"] == "exec_dir-exec_0"
+    assert payload["target_missions"][0]["status"] == "active"
