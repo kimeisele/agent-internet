@@ -168,6 +168,11 @@ def test_cli_git_federation_describe_and_sync_wiki(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["committed"] is True
     assert "Home.md" in payload["pages"]
+    assert "Assistant-Surface.md" in payload["pages"]
+    clone_path = tmp_path / "wiki-clone"
+    _git(tmp_path, "clone", str(wiki_remote), str(clone_path))
+    assert "Assistant: `moltbook_assistant`" in (clone_path / "Home.md").read_text()
+    assert "# Assistant Surface" in (clone_path / "Assistant-Surface.md").read_text()
 
 
 def test_cli_git_federation_onboard_repo(tmp_path, capsys):

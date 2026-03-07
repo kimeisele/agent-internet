@@ -46,6 +46,9 @@ def test_git_wiki_sync_projects_pages_and_pushes(tmp_path):
     (reports_dir / "report_1.json").write_text(
         json.dumps({"heartbeat": 1, "timestamp": 1.0, "population": 1, "alive": 1, "dead": 0, "chain_valid": True}),
     )
+    (work_root / "data" / "assistant_state.json").write_text(
+        json.dumps({"followed": ["alice"], "ops": {"posts": 1}}),
+    )
     peer = AgentCityPeer.from_repo_root(work_root, city_id="city-a")
     peer_descriptor = peer.publish_self_description()
     plane = AgentInternetControlPlane()
@@ -68,14 +71,37 @@ def test_git_wiki_sync_projects_pages_and_pushes(tmp_path):
         repo_root=work_root,
         wiki_repo_url=str(wiki_remote),
         checkout_path=tmp_path / "wiki-checkout",
-    ).sync(peer_descriptor=peer_descriptor, state_snapshot=snapshot_control_plane(plane), heartbeat_label="test")
+    ).sync(
+        peer_descriptor=peer_descriptor,
+        state_snapshot=snapshot_control_plane(plane),
+        heartbeat_label="test",
+        assistant_snapshot={
+            "assistant_id": "moltbook_assistant",
+            "assistant_kind": "moltbook_assistant",
+            "city_id": "city-a",
+            "repo": "org/agent-city",
+            "heartbeat_source": "steward-protocol/mahamantra",
+            "heartbeat": 1,
+            "city_health": "healthy",
+            "following": 1,
+            "invited": 0,
+            "spotlighted": 0,
+            "total_follows": 1,
+            "total_invites": 0,
+            "total_posts": 1,
+            "last_post_age_s": None,
+            "series_cursor": -1,
+        },
+    )
 
     assert result["committed"] is True
     clone_path = tmp_path / "wiki-clone"
     _git(tmp_path, "clone", str(wiki_remote), str(clone_path))
     assert "Connected City: city-a" in (clone_path / "Home.md").read_text()
+    assert "Assistant: `moltbook_assistant`" in (clone_path / "Home.md").read_text()
     assert "api.forum.city-a.lotus" in (clone_path / "Services.md").read_text()
     assert "service:city-z/forum" in (clone_path / "Routes.md").read_text()
+    assert "Total Posts: `1`" in (clone_path / "Assistant-Surface.md").read_text()
 
 
 def test_ensure_git_checkout_clones_and_pulls_repo(tmp_path):

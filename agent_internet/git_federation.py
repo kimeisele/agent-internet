@@ -74,9 +74,20 @@ class GitWikiFederationSync:
     wiki_repo_url: str
     checkout_path: Path | None = None
 
-    def sync(self, *, peer_descriptor: dict, state_snapshot: dict, heartbeat_label: str = "manual") -> dict:
+    def sync(
+        self,
+        *,
+        peer_descriptor: dict,
+        state_snapshot: dict,
+        heartbeat_label: str = "manual",
+        assistant_snapshot: dict | None = None,
+    ) -> dict:
         wiki_path = self._ensure_checkout()
-        pages = render_wiki_projection(peer_descriptor=peer_descriptor, state_snapshot=state_snapshot)
+        pages = render_wiki_projection(
+            peer_descriptor=peer_descriptor,
+            state_snapshot=state_snapshot,
+            assistant_snapshot=assistant_snapshot,
+        )
         for relative_path, content in pages.items():
             target = wiki_path / relative_path
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -114,23 +125,30 @@ def write_git_federation_manifest(path: Path, *, peer_descriptor: dict, remote: 
     return payload
 
 
-def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict) -> dict[str, str]:
+def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict, assistant_snapshot: dict | None = None) -> dict[str, str]:
     identity = dict(peer_descriptor.get("identity", {}))
     git_manifest = dict(peer_descriptor.get("git_federation", {}))
     cities = list(state_snapshot.get("identities", []))
     services = list(state_snapshot.get("service_addresses", []))
     routes = list(state_snapshot.get("routes", []))
-    summary = "\n".join(
-        [
-            f"## Connected City: {identity.get('city_id', 'unknown')}",
-            f"- Repo: `{identity.get('repo', '')}`",
-            f"- Origin: `{git_manifest.get('origin_url', '')}`",
-            f"- Wiki: `{git_manifest.get('wiki_repo_url', '')}`",
-            f"- Known Cities: `{len(cities)}`",
-            f"- Services: `{len(services)}`",
-            f"- Routes: `{len(routes)}`",
-        ],
-    )
+    summary_lines = [
+        f"## Connected City: {identity.get('city_id', 'unknown')}",
+        f"- Repo: `{identity.get('repo', '')}`",
+        f"- Origin: `{git_manifest.get('origin_url', '')}`",
+        f"- Wiki: `{git_manifest.get('wiki_repo_url', '')}`",
+        f"- Known Cities: `{len(cities)}`",
+        f"- Services: `{len(services)}`",
+        f"- Routes: `{len(routes)}`",
+    ]
+    if assistant_snapshot:
+        summary_lines.extend(
+            [
+                f"- Assistant: `{assistant_snapshot.get('assistant_id', '')}` ({assistant_snapshot.get('assistant_kind', '')})",
+                f"- Assistant Heartbeat: `{assistant_snapshot.get('heartbeat')}` via `{assistant_snapshot.get('heartbeat_source', '')}`",
+                f"- Assistant Activity: follows `{assistant_snapshot.get('total_follows', 0)}`, invites `{assistant_snapshot.get('total_invites', 0)}`, posts `{assistant_snapshot.get('total_posts', 0)}`",
+            ],
+        )
+    summary = "\n".join(summary_lines)
     home = _replace_block("# Agent Internet Federation\n\n", HOME_SUMMARY_START, HOME_SUMMARY_END, summary)
     cities_md = "# Cities\n\n" + "\n".join(f"- `{item['city_id']}` → `{item['repo']}`" for item in cities)
     services_md = "# Services\n\n" + "\n".join(
@@ -141,13 +159,43 @@ def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict) -> di
         for item in routes
     )
     manifest_md = "# Git Federation\n\n" + json.dumps(git_manifest, indent=2, sort_keys=True)
-    return {
+    pages = {
         "Home.md": home,
         "Cities.md": cities_md.rstrip() + "\n",
         "Services.md": services_md.rstrip() + "\n",
         "Routes.md": routes_md.rstrip() + "\n",
         "Git-Federation.md": manifest_md.rstrip() + "\n",
     }
+    if assistant_snapshot:
+        pages["Assistant-Surface.md"] = _render_assistant_surface_page(assistant_snapshot)
+    return pages
+
+
+def _render_assistant_surface_page(assistant_snapshot: dict) -> str:
+    lines = [
+        "# Assistant Surface",
+        "",
+        f"- Assistant: `{assistant_snapshot.get('assistant_id', '')}`",
+        f"- Kind: `{assistant_snapshot.get('assistant_kind', '')}`",
+        f"- City: `{assistant_snapshot.get('city_id', '')}`",
+        f"- Repo: `{assistant_snapshot.get('repo', '')}`",
+        f"- Heartbeat Source: `{assistant_snapshot.get('heartbeat_source', '')}`",
+        f"- Heartbeat: `{assistant_snapshot.get('heartbeat')}`",
+        f"- Health: `{assistant_snapshot.get('city_health', '')}`",
+        f"- Following: `{assistant_snapshot.get('following', 0)}`",
+        f"- Invited: `{assistant_snapshot.get('invited', 0)}`",
+        f"- Spotlighted: `{assistant_snapshot.get('spotlighted', 0)}`",
+        f"- Total Follows: `{assistant_snapshot.get('total_follows', 0)}`",
+        f"- Total Invites: `{assistant_snapshot.get('total_invites', 0)}`",
+        f"- Total Posts: `{assistant_snapshot.get('total_posts', 0)}`",
+        f"- Last Post Age (s): `{assistant_snapshot.get('last_post_age_s')}`",
+        f"- Series Cursor: `{assistant_snapshot.get('series_cursor', -1)}`",
+        "",
+        "## Raw Snapshot",
+        "",
+        json.dumps(assistant_snapshot, indent=2, sort_keys=True),
+    ]
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def _replace_block(content: str, start_marker: str, end_marker: str, new_block: str) -> str:

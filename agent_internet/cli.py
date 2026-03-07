@@ -374,6 +374,7 @@ def cmd_git_federation_sync_wiki(args: argparse.Namespace) -> int:
     store = ControlPlaneStateStore(path=Path(args.state_path))
     plane = store.load()
     peer_descriptor = peer.publish_self_description()
+    assistant_snapshot = asdict(assistant_surface_snapshot_from_repo_root(root, city_id=peer.identity.city_id))
     git_federation = peer_descriptor.get("git_federation", {})
     effective_wiki_repo_url = args.wiki_repo_url or str(git_federation.get("wiki_repo_url", ""))
     if effective_wiki_repo_url:
@@ -387,6 +388,7 @@ def cmd_git_federation_sync_wiki(args: argparse.Namespace) -> int:
         peer_descriptor=peer_descriptor,
         state_snapshot=snapshot_control_plane(plane),
         heartbeat_label=args.heartbeat_label,
+        assistant_snapshot=assistant_snapshot,
     )
     print(json.dumps(result, indent=2))
     return 0
