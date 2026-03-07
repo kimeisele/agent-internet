@@ -42,6 +42,22 @@ def test_relay_delivers_routable_envelope():
     assert received[0].payload == {"heartbeat": 1}
 
 
+def test_delivery_envelope_exposes_steward_nadi_defaults():
+    envelope = DeliveryEnvelope(
+        source_city_id="city-a",
+        target_city_id="city-b",
+        operation="sync",
+        payload={},
+    )
+
+    semantics = envelope.nadi_semantics
+
+    assert semantics.nadi_op == "send"
+    assert semantics.nadi_type == "vyana"
+    assert semantics.priority == "rajas"
+    assert semantics.ttl_ms == 24000
+
+
 def test_relay_rejects_unregistered_transport_scheme():
     plane = AgentInternetControlPlane()
     plane.register_city(

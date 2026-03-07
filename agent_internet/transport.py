@@ -8,6 +8,7 @@ from secrets import token_hex
 from typing import Deque
 
 from .interfaces import InternetRouter
+from .steward_protocol_compat import ResolvedNadiMessageSemantics, resolve_nadi_message_semantics
 from .models import CityEndpoint
 
 
@@ -37,11 +38,26 @@ class DeliveryEnvelope:
     correlation_id: str = ""
     content_type: str = "application/json"
     created_at: float = field(default_factory=time.time)
-    ttl_s: float = 300.0
+    ttl_s: float | None = None
+    nadi_type: str = ""
+    nadi_op: str = ""
+    priority: str = ""
+    ttl_ms: int | None = None
+    maha_header_hex: str = ""
+
+    @property
+    def nadi_semantics(self) -> ResolvedNadiMessageSemantics:
+        return resolve_nadi_message_semantics(
+            nadi_type=self.nadi_type,
+            nadi_op=self.nadi_op,
+            priority=self.priority,
+            ttl_ms=self.ttl_ms,
+            ttl_s=self.ttl_s,
+        )
 
     @property
     def is_expired(self) -> bool:
-        return time.time() > self.created_at + self.ttl_s
+        return time.time() > self.created_at + self.nadi_semantics.ttl_s
 
 
 @dataclass(frozen=True, slots=True)

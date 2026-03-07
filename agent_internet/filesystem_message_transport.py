@@ -7,6 +7,7 @@ from .agent_city_contract import AgentCityFilesystemContract
 from .filesystem_transport import FilesystemFederationTransport
 from .models import CityEndpoint
 from .receipt_store import FilesystemReceiptStore
+from .steward_protocol_compat import build_maha_message_header_hex
 from .steward_substrate import StewardSubstrateBindings, load_steward_substrate
 from .transport import DeliveryEnvelope, DeliveryReceipt, DeliveryStatus
 
@@ -49,17 +50,32 @@ class AgentCityFilesystemMessageTransport:
                 detail="Envelope already recorded in receipt journal",
             )
 
+        semantics = envelope.nadi_semantics
+        priority = getattr(self.bindings.NadiPriority, semantics.priority.upper()).value
         message = self.bindings.FederationMessage(
             source=envelope.source_city_id,
             target=envelope.target_city_id,
             operation=envelope.operation,
             payload=dict(envelope.payload),
+            priority=priority,
             correlation_id=envelope.correlation_id,
             timestamp=envelope.created_at,
-            ttl_s=envelope.ttl_s,
+            ttl_s=semantics.ttl_s,
         )
         raw_message = message.to_dict()
         raw_message["envelope_id"] = envelope.envelope_id
+        raw_message["nadi_type"] = semantics.nadi_type
+        raw_message["nadi_op"] = semantics.nadi_op
+        raw_message["nadi_priority"] = semantics.priority
+        raw_message["ttl_ms"] = semantics.ttl_ms
+        raw_message["maha_header_hex"] = envelope.maha_header_hex or build_maha_message_header_hex(
+            source_key=envelope.source_city_id,
+            target_key=envelope.target_city_id,
+            operation_key=envelope.operation,
+            nadi_type=semantics.nadi_type,
+            priority=semantics.priority,
+            ttl_ms=semantics.ttl_ms,
+        )
         transport.append_to_inbox([raw_message])
         receipt_store.record_delivery(
             envelope_id=envelope.envelope_id,
@@ -81,6 +97,9 @@ class AgentCityFilesystemMessageTransport:
 
     def _from_dict(self, data: dict) -> DeliveryEnvelope:
         message = self.bindings.FederationMessage.from_dict(data)
+        raw_priority = data.get("nadi_priority")
+        if not isinstance(raw_priority, str) or not raw_priority:
+            raw_priority = self.bindings.NadiPriority(int(getattr(message, "priority"))).name.lower()
         return DeliveryEnvelope(
             source_city_id=getattr(message, "source"),
             target_city_id=getattr(message, "target"),
@@ -90,4 +109,9 @@ class AgentCityFilesystemMessageTransport:
             correlation_id=getattr(message, "correlation_id"),
             created_at=float(getattr(message, "timestamp")),
             ttl_s=float(getattr(message, "ttl_s")),
+            nadi_type=str(data.get("nadi_type", "")),
+            nadi_op=str(data.get("nadi_op", "")),
+            priority=raw_priority,
+            ttl_ms=int(data.get("ttl_ms", 0)) or None,
+            maha_header_hex=str(data.get("maha_header_hex", "")),
         )
