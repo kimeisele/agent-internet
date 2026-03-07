@@ -58,3 +58,8 @@ Run locally:
 
 - `python -m pytest -q`
 - `python -m ruff check .`
+
+## CLI
+
+- `python -m agent_internet.cli show-state`
+- `python -m agent_internet.cli onboard-agent-city --root ../agent-city --city-id city-a --repo kimeisele/agent-city`

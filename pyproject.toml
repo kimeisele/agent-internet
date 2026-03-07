@@ -20,6 +20,9 @@ dev = [
     "ruff>=0.6.0",
 ]
 
+[project.scripts]
+agent-internet = "agent_internet.cli:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["agent_internet"]
 
