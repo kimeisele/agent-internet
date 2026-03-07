@@ -13,6 +13,15 @@ from .router import RegistryRouter
 from .snapshot import ControlPlaneStateStore, restore_control_plane, snapshot_control_plane
 from .steward_substrate import StewardSubstrateBindings, load_steward_substrate
 from .steward_federation import StewardFederationAdapter
+from .transport import (
+    DeliveryEnvelope,
+    DeliveryReceipt,
+    DeliveryStatus,
+    LoopbackTransport,
+    RelayService,
+    TransportRegistry,
+    TransportScheme,
+)
 from .trust import InMemoryTrustEngine, trust_allows
 
 __all__ = [
@@ -27,6 +36,9 @@ __all__ = [
     "CityPresence",
     "CityRegistry",
     "ControlPlaneStateStore",
+    "DeliveryEnvelope",
+    "DeliveryReceipt",
+    "DeliveryStatus",
     "DiscoveryService",
     "FederationTransport",
     "FilesystemFederationTransport",
@@ -34,9 +46,13 @@ __all__ = [
     "InMemoryCityRegistry",
     "InMemoryTrustEngine",
     "InternetRouter",
+    "LoopbackTransport",
+    "RelayService",
     "RegistryRouter",
     "StewardFederationAdapter",
     "StewardSubstrateBindings",
+    "TransportRegistry",
+    "TransportScheme",
     "TrustEngine",
     "TrustLevel",
     "TrustRecord",
