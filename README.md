@@ -70,4 +70,5 @@ Run locally:
 - `python -m agent_internet.cli lab-send --root ./tmp/lab --source-city-id city-a --target-city-id city-b --operation sync --payload-json '{"heartbeat": 1}'`
 - `python -m agent_internet.cli lab-emit-outbox --root ./tmp/lab --source-city-id city-a --target-city-id city-b --operation sync --payload-json '{"heartbeat": 1}'`
 - `python -m agent_internet.cli lab-pump-outbox --root ./tmp/lab --source-city-id city-a --drain-delivered`
+- `python -m agent_internet.cli lab-sync --root ./tmp/lab --cycles 3 --drain-delivered`
 - `python -m agent_internet.cli lab-immigrate --root ./tmp/lab --source-city-id city-a --host-city-id city-b --agent-name MIRA --visa-class worker`

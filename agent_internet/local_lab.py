@@ -180,6 +180,16 @@ class LocalDualCityLab:
     def pump_outbox(self, city_id: str, *, drain_delivered: bool = False) -> list[DeliveryReceipt]:
         return self.outbox_pump.pump_city_root(self.city_root(city_id), drain_delivered=drain_delivered)
 
+    def sync_once(self, *, drain_delivered: bool = True, cycle: int = 1):
+        from .sync_worker import BidirectionalSyncWorker
+
+        return BidirectionalSyncWorker(self, drain_delivered=drain_delivered).sync_once(cycle=cycle)
+
+    def sync_cycles(self, cycles: int, *, drain_delivered: bool = True):
+        from .sync_worker import BidirectionalSyncWorker
+
+        return BidirectionalSyncWorker(self, drain_delivered=drain_delivered).sync_cycles(cycles)
+
     def immigration(self, city_id: str) -> AgentCityImmigrationAdapter:
         return AgentCityImmigrationAdapter(self.city_root(city_id))
 

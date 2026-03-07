@@ -66,6 +66,16 @@ def build_parser() -> argparse.ArgumentParser:
     lab_pump_outbox.add_argument("--source-city-id", required=True)
     lab_pump_outbox.add_argument("--drain-delivered", action="store_true")
 
+    lab_sync = subparsers.add_parser(
+        "lab-sync",
+        help="Run bounded bidirectional sync cycles between the two local lab cities",
+    )
+    lab_sync.add_argument("--root", required=True)
+    lab_sync.add_argument("--city-a-id", default="city-a")
+    lab_sync.add_argument("--city-b-id", default="city-b")
+    lab_sync.add_argument("--cycles", type=int, default=1)
+    lab_sync.add_argument("--drain-delivered", action="store_true")
+
     lab_immigrate = subparsers.add_parser(
         "lab-immigrate",
         help="Run a dual-city immigration flow against a host city's real ImmigrationService",
@@ -233,6 +243,40 @@ def cmd_lab_pump_outbox(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_lab_sync(args: argparse.Namespace) -> int:
+    lab = LocalDualCityLab.create(args.root, city_a_id=args.city_a_id, city_b_id=args.city_b_id)
+    cycles = lab.sync_cycles(args.cycles, drain_delivered=args.drain_delivered)
+    print(
+        json.dumps(
+            {
+                "cycles": [
+                    {
+                        "cycle": cycle.cycle,
+                        "receipts_by_city": {
+                            city_id: [
+                                {
+                                    "status": receipt.status,
+                                    "transport": receipt.transport,
+                                    "target_city_id": receipt.target_city_id,
+                                    "detail": receipt.detail,
+                                }
+                                for receipt in receipts
+                            ]
+                            for city_id, receipts in cycle.receipts_by_city.items()
+                        },
+                        "total_receipts": cycle.total_receipts,
+                    }
+                    for cycle in cycles
+                ],
+                "outboxes": {city_id: lab.read_outbox(city_id) for city_id in lab.city_ids},
+                "receipts": {city_id: lab.read_receipts(city_id) for city_id in lab.city_ids},
+            },
+            indent=2,
+        ),
+    )
+    return 0
+
+
 def cmd_lab_immigrate(args: argparse.Namespace) -> int:
     lab = LocalDualCityLab.create(args.root, city_a_id=args.source_city_id, city_b_id=args.host_city_id)
     result = lab.run_immigration_flow(
@@ -289,6 +333,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_lab_emit_outbox(args)
     if args.command == "lab-pump-outbox":
         return cmd_lab_pump_outbox(args)
+    if args.command == "lab-sync":
+        return cmd_lab_sync(args)
     if args.command == "lab-immigrate":
         return cmd_lab_immigrate(args)
     parser.error(f"Unknown command: {args.command}")

@@ -142,3 +142,52 @@ def test_cli_emit_and_pump_outbox(tmp_path, capsys):
     assert payload["receipts"][0]["status"] == "delivered"
     assert payload["remaining_outbox"] == []
     assert payload["target_receipts"][0]["target_city_id"] == "city-b"
+
+
+def test_cli_lab_sync_runs_bounded_bidirectional_cycles(tmp_path, capsys):
+    root = tmp_path / "lab"
+
+    assert main(
+        [
+            "lab-emit-outbox",
+            "--root",
+            str(root),
+            "--source-city-id",
+            "city-a",
+            "--target-city-id",
+            "city-b",
+            "--operation",
+            "sync-a",
+            "--payload-json",
+            '{"from": "a"}',
+            "--correlation-id",
+            "env-a",
+        ],
+    ) == 0
+    _ = capsys.readouterr().out
+
+    assert main(
+        [
+            "lab-emit-outbox",
+            "--root",
+            str(root),
+            "--source-city-id",
+            "city-b",
+            "--target-city-id",
+            "city-a",
+            "--operation",
+            "sync-b",
+            "--payload-json",
+            '{"from": "b"}',
+            "--correlation-id",
+            "env-b",
+        ],
+    ) == 0
+    _ = capsys.readouterr().out
+
+    assert main(["lab-sync", "--root", str(root), "--cycles", "2", "--drain-delivered"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["cycles"][0]["total_receipts"] == 2
+    assert payload["cycles"][1]["total_receipts"] == 0
+    assert payload["outboxes"]["city-a"] == []
+    assert payload["outboxes"]["city-b"] == []
