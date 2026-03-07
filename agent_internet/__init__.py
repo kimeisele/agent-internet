@@ -1,5 +1,6 @@
 """Public entrypoints for the Agent Internet control plane."""
 
+from .agent_city_directives import AgentCityDirectiveFactory, AgentCityDirectiveType, validate_agent_city_directive
 from .agent_city_bridge import AgentCityBridge, city_presence_from_report
 from .agent_city_contract import AgentCityFilesystemContract
 from .control_plane import AgentInternetControlPlane
@@ -14,6 +15,8 @@ from .steward_federation import StewardFederationAdapter
 from .trust import InMemoryTrustEngine, trust_allows
 
 __all__ = [
+    "AgentCityDirectiveFactory",
+    "AgentCityDirectiveType",
     "AgentCityBridge",
     "AgentCityFilesystemContract",
     "AgentInternetControlPlane",
@@ -40,4 +43,5 @@ __all__ = [
     "restore_control_plane",
     "snapshot_control_plane",
     "trust_allows",
+    "validate_agent_city_directive",
 ]
