@@ -9,6 +9,7 @@ from secrets import token_hex
 from .agent_city_contract import AgentCityFilesystemContract
 from .agent_city_directive_bridge import AgentCityDirectiveExecutionAdapter, DirectiveExecutionResult
 from .agent_city_immigration import AgentCityImmigrationAdapter
+from .agent_city_phase_tick_bridge import AgentCityPhaseTickAdapter, PhaseTickResult
 from .agent_city_peer import AgentCityPeer
 from .control_plane import AgentInternetControlPlane
 from .filesystem_message_transport import AgentCityFilesystemMessageTransport
@@ -195,6 +196,25 @@ class LocalDualCityLab:
 
     def read_agent(self, city_id: str, agent_name: str) -> dict | None:
         return self.directives(city_id).get_agent(agent_name)
+
+    def phase_tick(self, city_id: str) -> AgentCityPhaseTickAdapter:
+        return AgentCityPhaseTickAdapter(self.city_root(city_id))
+
+    def run_phase_ticks(
+        self,
+        city_id: str,
+        *,
+        cycles: int = 1,
+        governance: bool = True,
+        federation: bool = True,
+        ingress_items: list[dict] | None = None,
+    ) -> PhaseTickResult:
+        return self.phase_tick(city_id).run(
+            cycles=cycles,
+            governance=governance,
+            federation=federation,
+            ingress_items=ingress_items,
+        )
 
     def emit_outbox_message(
         self,

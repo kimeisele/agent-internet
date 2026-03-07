@@ -281,3 +281,48 @@ def test_cli_issue_and_run_directives_executes_real_agent_city_hook(tmp_path, ca
     assert payload["acknowledged"] == ["dir-mira"]
     assert payload["agent"]["name"] == "MIRA"
     assert payload["pending_directives"] == []
+
+
+def test_cli_lab_phase_tick_runs_real_cycle_with_ingress_and_council(tmp_path, capsys):
+    root = tmp_path / "lab"
+
+    assert main(
+        [
+            "lab-issue-directive",
+            "--root",
+            str(root),
+            "--city-id",
+            "city-a",
+            "--directive-type",
+            "register_agent",
+            "--params-json",
+            '{"name": "MIRA"}',
+            "--directive-id",
+            "dir-mira",
+        ],
+    ) == 0
+    _ = capsys.readouterr().out
+
+    assert main(
+        [
+            "lab-phase-tick",
+            "--root",
+            str(root),
+            "--city-id",
+            "city-a",
+            "--cycles",
+            "3",
+            "--ingress-source",
+            "operator",
+            "--ingress-text",
+            "hello city",
+            "--agent-name",
+            "MIRA",
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [heartbeat["department"] for heartbeat in payload["heartbeats"]] == ["GENESIS", "DHARMA", "KARMA"]
+    assert payload["queued_ingress_before"] == 1
+    assert payload["queued_ingress_after"] == 0
+    assert payload["council_state"]["elected_mayor"] == "MIRA"
+    assert payload["agent"]["name"] == "MIRA"

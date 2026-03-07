@@ -74,4 +74,5 @@ Run locally:
 - `python -m agent_internet.cli lab-compact-receipts --root ./tmp/lab --city-id city-b --max-entries 1000`
 - `python -m agent_internet.cli lab-issue-directive --root ./tmp/lab --city-id city-a --directive-type register_agent --params-json '{"name":"MIRA"}'`
 - `python -m agent_internet.cli lab-run-directives --root ./tmp/lab --city-id city-a --agent-name MIRA`
+- `python -m agent_internet.cli lab-phase-tick --root ./tmp/lab --city-id city-a --cycles 3 --ingress-source operator --ingress-text 'hello city'`
 - `python -m agent_internet.cli lab-immigrate --root ./tmp/lab --source-city-id city-a --host-city-id city-b --agent-name MIRA --visa-class worker`

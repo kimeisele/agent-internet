@@ -104,6 +104,21 @@ def build_parser() -> argparse.ArgumentParser:
     lab_run_directives.add_argument("--city-id", required=True)
     lab_run_directives.add_argument("--agent-name", default="")
 
+    lab_phase_tick = subparsers.add_parser(
+        "lab-phase-tick",
+        help="Run the real agent-city Mayor phase ticks for a local lab city",
+    )
+    lab_phase_tick.add_argument("--root", required=True)
+    lab_phase_tick.add_argument("--city-id", required=True)
+    lab_phase_tick.add_argument("--cycles", type=int, default=1)
+    lab_phase_tick.add_argument("--no-governance", action="store_true")
+    lab_phase_tick.add_argument("--no-federation", action="store_true")
+    lab_phase_tick.add_argument("--ingress-source", default="")
+    lab_phase_tick.add_argument("--ingress-text", default="")
+    lab_phase_tick.add_argument("--conversation-id", default="")
+    lab_phase_tick.add_argument("--from-agent", default="")
+    lab_phase_tick.add_argument("--agent-name", default="")
+
     lab_immigrate = subparsers.add_parser(
         "lab-immigrate",
         help="Run a dual-city immigration flow against a host city's real ImmigrationService",
@@ -365,6 +380,43 @@ def cmd_lab_run_directives(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_lab_phase_tick(args: argparse.Namespace) -> int:
+    other_city = "city-b" if args.city_id == "city-a" else "city-a"
+    lab = LocalDualCityLab.create(args.root, city_a_id=args.city_id, city_b_id=other_city)
+    ingress_items = None
+    if args.ingress_source or args.ingress_text:
+        ingress_items = [
+            {
+                "source": args.ingress_source or "local",
+                "text": args.ingress_text,
+                "conversation_id": args.conversation_id,
+                "from_agent": args.from_agent,
+            },
+        ]
+    result = lab.run_phase_ticks(
+        args.city_id,
+        cycles=args.cycles,
+        governance=not args.no_governance,
+        federation=not args.no_federation,
+        ingress_items=ingress_items,
+    )
+    print(
+        json.dumps(
+            {
+                "heartbeats": result.heartbeats,
+                "registry_services": result.registry_services,
+                "council_state": result.council_state,
+                "pending_directives": result.pending_directives,
+                "queued_ingress_before": result.queued_ingress_before,
+                "queued_ingress_after": result.queued_ingress_after,
+                "agent": None if not args.agent_name else lab.read_agent(args.city_id, args.agent_name),
+            },
+            indent=2,
+        ),
+    )
+    return 0
+
+
 def cmd_lab_immigrate(args: argparse.Namespace) -> int:
     lab = LocalDualCityLab.create(args.root, city_a_id=args.source_city_id, city_b_id=args.host_city_id)
     result = lab.run_immigration_flow(
@@ -429,6 +481,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_lab_issue_directive(args)
     if args.command == "lab-run-directives":
         return cmd_lab_run_directives(args)
+    if args.command == "lab-phase-tick":
+        return cmd_lab_phase_tick(args)
     if args.command == "lab-immigrate":
         return cmd_lab_immigrate(args)
     parser.error(f"Unknown command: {args.command}")

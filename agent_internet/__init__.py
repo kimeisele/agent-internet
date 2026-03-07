@@ -7,6 +7,12 @@ from .agent_city_directive_bridge import (
     DirectiveExecutionResult,
     load_agent_city_directive_execution_bindings,
 )
+from .agent_city_phase_tick_bridge import (
+    AgentCityPhaseTickAdapter,
+    AgentCityPhaseTickBindings,
+    PhaseTickResult,
+    load_agent_city_phase_tick_bindings,
+)
 from .agent_city_immigration import (
     AgentCityImmigrationAdapter,
     AgentCityImmigrationBindings,
@@ -49,6 +55,8 @@ __all__ = [
     "AgentCityFilesystemMessageTransport",
     "AgentCityImmigrationAdapter",
     "AgentCityImmigrationBindings",
+    "AgentCityPhaseTickAdapter",
+    "AgentCityPhaseTickBindings",
     "AgentCityBridge",
     "AgentCityFilesystemContract",
     "AgentCityPeer",
@@ -75,6 +83,7 @@ __all__ = [
     "LocalDualCityLab",
     "locked_file",
     "OutboxRelayPump",
+    "PhaseTickResult",
     "read_locked_json_value",
     "RelayService",
     "RegistryRouter",
@@ -89,6 +98,7 @@ __all__ = [
     "update_locked_json_value",
     "city_presence_from_report",
     "load_agent_city_directive_execution_bindings",
+    "load_agent_city_phase_tick_bindings",
     "load_steward_substrate",
     "load_agent_city_immigration_bindings",
     "restore_control_plane",
