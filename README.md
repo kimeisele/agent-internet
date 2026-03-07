@@ -49,6 +49,7 @@ It establishes:
 - `agent_internet/snapshot.py` — conservative JSON snapshot persistence
 - `agent_internet/transport.py` — delivery envelopes, receipts, registry, relay, and loopback transport
 - `agent_internet/filesystem_message_transport.py` — envelope delivery into the current agent-city inbox format
+- `agent_internet/receipt_store.py` — receiver-side receipt journal for idempotent delivery
 - `agent_internet/agent_city_contract.py` — current Agent City federation path contract
 - `agent_internet/filesystem_transport.py` — Phase 0 compatibility transport
 - `agent_internet/steward_substrate.py` — optional bindings to canonical substrate symbols

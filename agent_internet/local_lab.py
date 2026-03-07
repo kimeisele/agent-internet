@@ -13,6 +13,7 @@ from .filesystem_message_transport import AgentCityFilesystemMessageTransport
 from .filesystem_transport import FilesystemFederationTransport
 from .models import HealthStatus, TrustLevel, TrustRecord
 from .pump import OutboxRelayPump
+from .receipt_store import FilesystemReceiptStore
 from .steward_substrate import load_steward_substrate
 from .transport import DeliveryEnvelope, DeliveryReceipt, TransportScheme
 
@@ -148,6 +149,9 @@ class LocalDualCityLab:
     def read_outbox(self, city_id: str) -> list[dict]:
         return FilesystemFederationTransport(self.contract(city_id)).read_outbox()
 
+    def read_receipts(self, city_id: str) -> list[dict]:
+        return FilesystemReceiptStore(self.contract(city_id)).list_receipts()
+
     def emit_outbox_message(
         self,
         source_city_id: str,
@@ -168,7 +172,10 @@ class LocalDualCityLab:
             correlation_id=correlation_id,
             ttl_s=ttl_s,
         )
-        return transport.append_to_outbox([message])
+        raw_message = message.to_dict()
+        if correlation_id:
+            raw_message["envelope_id"] = correlation_id
+        return transport.append_to_outbox([raw_message])
 
     def pump_outbox(self, city_id: str, *, drain_delivered: bool = False) -> list[DeliveryReceipt]:
         return self.outbox_pump.pump_city_root(self.city_root(city_id), drain_delivered=drain_delivered)

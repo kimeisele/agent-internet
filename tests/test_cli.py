@@ -141,3 +141,4 @@ def test_cli_emit_and_pump_outbox(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["receipts"][0]["status"] == "delivered"
     assert payload["remaining_outbox"] == []
+    assert payload["target_receipts"][0]["target_city_id"] == "city-b"

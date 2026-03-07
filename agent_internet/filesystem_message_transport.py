@@ -6,6 +6,7 @@ from pathlib import Path
 from .agent_city_contract import AgentCityFilesystemContract
 from .filesystem_transport import FilesystemFederationTransport
 from .models import CityEndpoint
+from .receipt_store import FilesystemReceiptStore
 from .steward_substrate import StewardSubstrateBindings, load_steward_substrate
 from .transport import DeliveryEnvelope, DeliveryReceipt, DeliveryStatus
 
@@ -36,7 +37,18 @@ class AgentCityFilesystemMessageTransport:
                 detail=f"Target root does not exist: {root}",
             )
 
-        transport = FilesystemFederationTransport(AgentCityFilesystemContract(root=root))
+        contract = AgentCityFilesystemContract(root=root)
+        transport = FilesystemFederationTransport(contract)
+        receipt_store = FilesystemReceiptStore(contract)
+        if receipt_store.has_envelope(envelope.envelope_id):
+            return DeliveryReceipt(
+                envelope_id=envelope.envelope_id,
+                status=DeliveryStatus.DUPLICATE,
+                transport=endpoint.transport,
+                target_city_id=endpoint.city_id,
+                detail="Envelope already recorded in receipt journal",
+            )
+
         message = self.bindings.FederationMessage(
             source=envelope.source_city_id,
             target=envelope.target_city_id,
@@ -46,7 +58,16 @@ class AgentCityFilesystemMessageTransport:
             timestamp=envelope.created_at,
             ttl_s=envelope.ttl_s,
         )
-        transport.append_to_inbox([message])
+        raw_message = message.to_dict()
+        raw_message["envelope_id"] = envelope.envelope_id
+        transport.append_to_inbox([raw_message])
+        receipt_store.record_delivery(
+            envelope_id=envelope.envelope_id,
+            source_city_id=envelope.source_city_id,
+            target_city_id=envelope.target_city_id,
+            operation=envelope.operation,
+            correlation_id=envelope.correlation_id,
+        )
         return DeliveryReceipt(
             envelope_id=envelope.envelope_id,
             status=DeliveryStatus.DELIVERED,
@@ -56,14 +77,16 @@ class AgentCityFilesystemMessageTransport:
 
     def receive(self, root: Path | str) -> list[DeliveryEnvelope]:
         transport = FilesystemFederationTransport(AgentCityFilesystemContract(root=Path(root)))
-        return [self._from_message(self.bindings.FederationMessage.from_dict(item)) for item in transport.read_inbox()]
+        return [self._from_dict(item) for item in transport.read_inbox()]
 
-    def _from_message(self, message: object) -> DeliveryEnvelope:
+    def _from_dict(self, data: dict) -> DeliveryEnvelope:
+        message = self.bindings.FederationMessage.from_dict(data)
         return DeliveryEnvelope(
             source_city_id=getattr(message, "source"),
             target_city_id=getattr(message, "target"),
             operation=getattr(message, "operation"),
             payload=dict(getattr(message, "payload")),
+            envelope_id=str(data.get("envelope_id", "")) or getattr(message, "correlation_id") or "",
             correlation_id=getattr(message, "correlation_id"),
             created_at=float(getattr(message, "timestamp")),
             ttl_s=float(getattr(message, "ttl_s")),

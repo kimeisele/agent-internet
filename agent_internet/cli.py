@@ -225,6 +225,7 @@ def cmd_lab_pump_outbox(args: argparse.Namespace) -> int:
                     for receipt in receipts
                 ],
                 "remaining_outbox": lab.read_outbox(args.source_city_id),
+                "target_receipts": lab.read_receipts(other_city),
             },
             indent=2,
         ),

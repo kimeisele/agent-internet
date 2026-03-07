@@ -16,6 +16,7 @@ from .interfaces import CityRegistry, DiscoveryService, FederationTransport, Int
 from .local_lab import LocalDualCityLab
 from .memory_registry import InMemoryCityRegistry
 from .models import CityEndpoint, CityIdentity, CityPresence, HealthStatus, TrustLevel, TrustRecord
+from .receipt_store import FilesystemReceiptStore
 from .router import RegistryRouter
 from .snapshot import ControlPlaneStateStore, restore_control_plane, snapshot_control_plane
 from .steward_substrate import StewardSubstrateBindings, load_steward_substrate
@@ -53,6 +54,7 @@ __all__ = [
     "DiscoveryService",
     "FederationTransport",
     "FilesystemFederationTransport",
+    "FilesystemReceiptStore",
     "HealthStatus",
     "InMemoryCityRegistry",
     "InMemoryTrustEngine",

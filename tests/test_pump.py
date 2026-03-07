@@ -8,7 +8,7 @@ def test_outbox_pump_relays_and_optionally_drains_delivered_messages(tmp_path):
         "city-b",
         operation="sync",
         payload={"heartbeat": 9},
-        correlation_id="corr-9",
+        correlation_id="env-9",
     )
 
     receipts = lab.pump_outbox("city-a", drain_delivered=True)
@@ -19,4 +19,23 @@ def test_outbox_pump_relays_and_optionally_drains_delivered_messages(tmp_path):
     inbox = lab.read_inbox("city-b")
     assert len(inbox) == 1
     assert inbox[0].payload == {"heartbeat": 9}
-    assert inbox[0].correlation_id == "corr-9"
+    assert inbox[0].correlation_id == "env-9"
+    assert lab.read_receipts("city-b")[0]["envelope_id"] == "env-9"
+
+
+def test_outbox_pump_treats_duplicate_delivery_as_drainable_success(tmp_path):
+    lab = LocalDualCityLab.create(tmp_path / "lab")
+    lab.emit_outbox_message(
+        "city-a",
+        "city-b",
+        operation="sync",
+        payload={"heartbeat": 10},
+        correlation_id="env-10",
+    )
+
+    first = lab.pump_outbox("city-a", drain_delivered=False)
+    second = lab.pump_outbox("city-a", drain_delivered=True)
+
+    assert first[0].status.value == "delivered"
+    assert second[0].status.value == "duplicate"
+    assert lab.read_outbox("city-a") == []

@@ -28,6 +28,7 @@ def test_filesystem_message_transport_delivers_to_agent_city_inbox(tmp_path):
     assert received[0].source_city_id == "city-a"
     assert received[0].payload == {"heartbeat": 3}
     assert received[0].correlation_id == "corr-1"
+    assert received[0].envelope_id
 
 
 def test_filesystem_message_transport_rejects_missing_target_root(tmp_path):
@@ -63,3 +64,24 @@ def test_filesystem_message_transport_marks_expired_envelope(tmp_path):
     )
 
     assert receipt.status == DeliveryStatus.EXPIRED
+
+
+def test_filesystem_message_transport_dedupes_by_envelope_id(tmp_path):
+    target_root = tmp_path / "city-b"
+    target_root.mkdir()
+    endpoint = CityEndpoint(city_id="city-b", transport=TransportScheme.FILESYSTEM.value, location=str(target_root))
+    transport = AgentCityFilesystemMessageTransport()
+    envelope = DeliveryEnvelope(
+        source_city_id="city-a",
+        target_city_id="city-b",
+        operation="sync",
+        payload={"heartbeat": 3},
+        envelope_id="env-fixed",
+    )
+
+    first = transport.send(endpoint, envelope)
+    second = transport.send(endpoint, envelope)
+
+    assert first.status == DeliveryStatus.DELIVERED
+    assert second.status == DeliveryStatus.DUPLICATE
+    assert len(transport.receive(target_root)) == 1

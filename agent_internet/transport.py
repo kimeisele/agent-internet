@@ -21,6 +21,7 @@ class TransportScheme(StrEnum):
 class DeliveryStatus(StrEnum):
     ACCEPTED = "accepted"
     DELIVERED = "delivered"
+    DUPLICATE = "duplicate"
     REJECTED = "rejected"
     EXPIRED = "expired"
     UNROUTABLE = "unroutable"

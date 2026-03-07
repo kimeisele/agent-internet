@@ -9,6 +9,9 @@ from .filesystem_transport import FilesystemFederationTransport
 from .transport import DeliveryEnvelope, DeliveryReceipt, DeliveryStatus
 
 
+_DRAINABLE_SUCCESS = {DeliveryStatus.DELIVERED, DeliveryStatus.DUPLICATE}
+
+
 @dataclass(slots=True)
 class OutboxRelayPump:
     plane: AgentInternetControlPlane
@@ -31,13 +34,14 @@ class OutboxRelayPump:
                     target_city_id=str(message.get("target", "")),
                     operation=str(message.get("operation", "")),
                     payload=dict(message.get("payload", {})),
+                    envelope_id=str(message.get("envelope_id", "")) or str(message.get("correlation_id", "")),
                     correlation_id=str(message.get("correlation_id", "")),
                     created_at=float(message.get("timestamp", 0.0)) or 0.0,
                     ttl_s=float(message.get("ttl_s", 300.0)),
                 ),
             )
             receipts.append(receipt)
-            if not (drain_delivered and receipt.status == DeliveryStatus.DELIVERED):
+            if not (drain_delivered and receipt.status in _DRAINABLE_SUCCESS):
                 remaining.append(message)
 
         if drain_delivered:
