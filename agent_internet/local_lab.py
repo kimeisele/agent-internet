@@ -76,6 +76,7 @@ class LocalDualCityLab:
                 capabilities=("federation", "dual-city-lab"),
                 endpoint_transport=TransportScheme.FILESYSTEM.value,
             )
+            peer.publish_self_description()
             peer.onboard(plane)
 
         for source_city in lab.city_ids:

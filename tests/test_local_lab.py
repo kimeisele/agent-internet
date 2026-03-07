@@ -7,6 +7,7 @@ def test_local_dual_city_lab_creates_city_roots_and_relays_messages(tmp_path):
 
     assert lab.city_root("city-a").is_dir()
     assert lab.city_root("city-b").is_dir()
+    assert (lab.city_root("city-a") / "data" / "federation" / "peer.json").exists()
     assert lab.lotus_addresses("city-a")["link"]["mac_address"].startswith("02:00:")
     assert lab.lotus_addresses("city-b")["network"]["ip_address"].startswith("fd10:")
 

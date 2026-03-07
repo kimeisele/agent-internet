@@ -44,6 +44,56 @@ def test_cli_onboards_agent_city_and_persists_state(tmp_path, capsys):
     assert state_path.exists()
 
 
+def test_cli_publishes_and_discovers_agent_city_peer(tmp_path, capsys):
+    repo_root = tmp_path / "agent-city"
+    reports_dir = repo_root / "data" / "federation" / "reports"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "report_5.json").write_text(
+        json.dumps(
+            {
+                "heartbeat": 5,
+                "timestamp": 5.0,
+                "population": 2,
+                "alive": 2,
+                "dead": 0,
+                "chain_valid": True,
+            },
+        ),
+    )
+    state_path = tmp_path / "state" / "control_plane.json"
+
+    assert main(
+        [
+            "publish-agent-city-peer",
+            "--root",
+            str(repo_root),
+            "--city-id",
+            "city-z",
+            "--repo",
+            "org/agent-city-z",
+            "--capability",
+            "federation",
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["peer"]["identity"]["city_id"] == "city-z"
+
+    assert main(
+        [
+            "onboard-agent-city",
+            "--root",
+            str(repo_root),
+            "--discover",
+            "--state-path",
+            str(state_path),
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["city_id"] == "city-z"
+    assert payload["discovered"] is True
+    assert payload["observed"]["health"] == "healthy"
+
+
 def test_cli_show_state_prints_snapshot(tmp_path, capsys):
     state_path = tmp_path / "state" / "control_plane.json"
 

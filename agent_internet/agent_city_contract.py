@@ -39,6 +39,10 @@ class AgentCityFilesystemContract:
     def receipts_path(self) -> Path:
         return self.federation_dir / "receipts.json"
 
+    @property
+    def peer_descriptor_path(self) -> Path:
+        return self.federation_dir / "peer.json"
+
     def directive_path(self, directive_id: str) -> Path:
         return self.directives_dir / f"{directive_id}.json"
 

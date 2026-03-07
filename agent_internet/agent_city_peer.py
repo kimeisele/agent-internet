@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .agent_city_bridge import AgentCityBridge
 from .agent_city_contract import AgentCityFilesystemContract
 from .control_plane import AgentInternetControlPlane
+from .file_locking import read_locked_json_value, write_locked_json_value
 from .filesystem_transport import FilesystemFederationTransport
 from .models import CityEndpoint, CityIdentity, CityPresence
 
@@ -18,6 +19,33 @@ class AgentCityPeer:
     contract: AgentCityFilesystemContract
     transport: FilesystemFederationTransport
     bridge: AgentCityBridge
+
+    @classmethod
+    def discover_from_repo_root(cls, root: Path | str) -> "AgentCityPeer":
+        repo_root = Path(root).resolve()
+        contract = AgentCityFilesystemContract(root=repo_root)
+        raw = read_locked_json_value(contract.peer_descriptor_path, default={})
+        if not isinstance(raw, dict) or not raw:
+            raise FileNotFoundError(f"No peer descriptor found at {contract.peer_descriptor_path}")
+
+        identity_raw = raw.get("identity")
+        endpoint_raw = raw.get("endpoint")
+        if not isinstance(identity_raw, dict) or not isinstance(endpoint_raw, dict):
+            raise TypeError(f"Invalid peer descriptor at {contract.peer_descriptor_path}")
+
+        capabilities = tuple(str(item) for item in raw.get("capabilities", ()))
+        identity = CityIdentity(**identity_raw)
+        endpoint = CityEndpoint(**endpoint_raw)
+        transport = FilesystemFederationTransport(contract=contract)
+        bridge = AgentCityBridge(city_id=identity.city_id, transport=transport, capabilities=capabilities)
+        return cls(
+            root=repo_root,
+            identity=identity,
+            endpoint=endpoint,
+            contract=contract,
+            transport=transport,
+            bridge=bridge,
+        )
 
     @classmethod
     def from_repo_root(
@@ -59,3 +87,13 @@ class AgentCityPeer:
     def onboard(self, plane: AgentInternetControlPlane) -> CityPresence | None:
         plane.register_city(self.identity, self.endpoint)
         return plane.observe_agent_city(self.bridge, identity=self.identity, endpoint=self.endpoint)
+
+    def publish_self_description(self) -> dict:
+        self.contract.ensure_dirs()
+        payload = {
+            "identity": asdict(self.identity),
+            "endpoint": asdict(self.endpoint),
+            "capabilities": list(self.bridge.capabilities),
+        }
+        write_locked_json_value(self.contract.peer_descriptor_path, payload)
+        return payload

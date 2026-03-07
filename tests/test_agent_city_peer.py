@@ -43,3 +43,20 @@ def test_peer_onboard_registers_and_observes_city(tmp_path):
     assert observed.health == HealthStatus.HEALTHY
     assert plane.registry.get_identity("city-b") == peer.identity
     assert plane.resolve_route("city-a", "city-b") == peer.endpoint
+
+
+def test_peer_can_publish_and_discover_self_description(tmp_path):
+    peer = AgentCityPeer.from_repo_root(
+        tmp_path,
+        city_id="city-c",
+        repo="org/agent-city-c",
+        slug="gamma",
+        capabilities=("federation", "lotus"),
+    )
+
+    payload = peer.publish_self_description()
+    discovered = AgentCityPeer.discover_from_repo_root(tmp_path)
+
+    assert payload["identity"]["city_id"] == "city-c"
+    assert discovered.identity.repo == "org/agent-city-c"
+    assert discovered.bridge.capabilities == ("federation", "lotus")

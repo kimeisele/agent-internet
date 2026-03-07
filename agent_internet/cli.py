@@ -17,15 +17,29 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-internet")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    publish_peer = subparsers.add_parser(
+        "publish-agent-city-peer",
+        help="Write a self-description file so an agent-city repo can be auto-discovered",
+    )
+    publish_peer.add_argument("--root", required=True)
+    publish_peer.add_argument("--city-id", required=True)
+    publish_peer.add_argument("--repo", required=True)
+    publish_peer.add_argument("--slug")
+    publish_peer.add_argument("--public-key", default="")
+    publish_peer.add_argument("--capability", action="append", default=[])
+    publish_peer.add_argument("--endpoint-transport", default="filesystem")
+    publish_peer.add_argument("--endpoint-location")
+
     onboard = subparsers.add_parser("onboard-agent-city", help="Onboard an agent-city repository root")
     onboard.add_argument("--root", required=True)
-    onboard.add_argument("--city-id", required=True)
-    onboard.add_argument("--repo", required=True)
+    onboard.add_argument("--city-id")
+    onboard.add_argument("--repo")
     onboard.add_argument("--slug")
     onboard.add_argument("--public-key", default="")
     onboard.add_argument("--capability", action="append", default=[])
     onboard.add_argument("--endpoint-transport", default="filesystem")
     onboard.add_argument("--endpoint-location")
+    onboard.add_argument("--discover", action="store_true")
     onboard.add_argument("--state-path", default="data/control_plane/state.json")
     onboard.add_argument("--trust-source", default="agent-internet")
     onboard.add_argument(
@@ -236,9 +250,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def cmd_onboard_agent_city(args: argparse.Namespace) -> int:
-    store = ControlPlaneStateStore(path=Path(args.state_path))
-    plane = store.load()
+def cmd_publish_agent_city_peer(args: argparse.Namespace) -> int:
     peer = AgentCityPeer.from_repo_root(
         args.root,
         city_id=args.city_id,
@@ -249,11 +261,43 @@ def cmd_onboard_agent_city(args: argparse.Namespace) -> int:
         endpoint_transport=args.endpoint_transport,
         endpoint_location=args.endpoint_location,
     )
+    payload = peer.publish_self_description()
+    print(
+        json.dumps(
+            {
+                "root": str(peer.root),
+                "descriptor_path": str(peer.contract.peer_descriptor_path),
+                "peer": payload,
+            },
+            indent=2,
+        ),
+    )
+    return 0
+
+
+def cmd_onboard_agent_city(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    if args.discover:
+        peer = AgentCityPeer.discover_from_repo_root(args.root)
+    else:
+        if not args.city_id or not args.repo:
+            raise SystemExit("onboard-agent-city requires --city-id and --repo unless --discover is set")
+        peer = AgentCityPeer.from_repo_root(
+            args.root,
+            city_id=args.city_id,
+            repo=args.repo,
+            slug=args.slug,
+            public_key=args.public_key,
+            capabilities=tuple(args.capability),
+            endpoint_transport=args.endpoint_transport,
+            endpoint_location=args.endpoint_location,
+        )
     observed = peer.onboard(plane)
     plane.record_trust(
         TrustRecord(
             issuer_city_id=args.trust_source,
-            subject_city_id=args.city_id,
+            subject_city_id=peer.identity.city_id,
             level=TrustLevel(args.trust_level),
             reason="cli onboarding",
         ),
@@ -262,7 +306,8 @@ def cmd_onboard_agent_city(args: argparse.Namespace) -> int:
     print(
         json.dumps(
             {
-                "city_id": args.city_id,
+                "city_id": peer.identity.city_id,
+                "discovered": args.discover,
                 "observed": None
                 if observed is None
                 else {
@@ -765,6 +810,8 @@ def cmd_lab_immigrate(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "publish-agent-city-peer":
+        return cmd_publish_agent_city_peer(args)
     if args.command == "onboard-agent-city":
         return cmd_onboard_agent_city(args)
     if args.command == "show-state":
