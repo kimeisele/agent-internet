@@ -1,5 +1,5 @@
 from agent_internet.memory_registry import InMemoryCityRegistry
-from agent_internet.models import CityEndpoint, CityIdentity, CityPresence, HealthStatus, HostedEndpoint
+from agent_internet.models import CityEndpoint, CityIdentity, CityPresence, HealthStatus, HostedEndpoint, LotusApiToken, LotusServiceAddress
 
 
 def test_registry_stores_identity_and_endpoint():
@@ -46,3 +46,34 @@ def test_registry_assigns_lotus_addresses_and_resolves_hosted_handles():
     assert network.ip_address.startswith("fd10:")
     assert registry.get_hosted_endpoint_by_handle("forum.city-a.lotus", now=20.0).endpoint_id == "city-a:forum"
     assert registry.get_hosted_endpoint_by_handle("forum.city-a.lotus", now=50.0) is None
+
+
+def test_registry_stores_service_addresses_and_api_tokens():
+    registry = InMemoryCityRegistry()
+    registry.upsert_service_address(
+        LotusServiceAddress(
+            service_id="city-a:forum-api",
+            owner_city_id="city-a",
+            service_name="forum-api",
+            public_handle="api.forum.city-a.lotus",
+            transport="https",
+            location="https://forum.city-a.example/api",
+            network_address="fd10:0000:0001:0000::1",
+            required_scopes=("lotus.read",),
+            lease_started_at=5.0,
+            lease_expires_at=50.0,
+        ),
+    )
+    registry.upsert_api_token(
+        LotusApiToken(
+            token_id="tok-1",
+            subject="operator",
+            token_hint="secret12",
+            token_sha256="deadbeef",
+            scopes=("lotus.read",),
+            issued_at=7.0,
+        ),
+    )
+
+    assert registry.get_service_address_by_name("city-a", "forum-api", now=10.0).public_handle == "api.forum.city-a.lotus"
+    assert registry.get_api_token_by_sha256("deadbeef").token_id == "tok-1"

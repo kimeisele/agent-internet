@@ -11,8 +11,10 @@ from .models import (
     CityPresence,
     EndpointVisibility,
     HostedEndpoint,
+    LotusApiToken,
     LotusLinkAddress,
     LotusNetworkAddress,
+    LotusServiceAddress,
     TrustLevel,
     TrustRecord,
 )
@@ -97,6 +99,48 @@ class AgentInternetControlPlane:
 
     def resolve_public_handle(self, public_handle: str, *, now: float | None = None) -> HostedEndpoint | None:
         return self.router.resolve_public_handle(public_handle, now=now)
+
+    def publish_service_address(
+        self,
+        *,
+        owner_city_id: str,
+        service_name: str,
+        public_handle: str,
+        transport: str,
+        location: str,
+        visibility: EndpointVisibility = EndpointVisibility.FEDERATED,
+        auth_required: bool = True,
+        required_scopes: tuple[str, ...] = (),
+        ttl_s: float | None = None,
+        service_id: str = "",
+        labels: dict[str, str] | None = None,
+        now: float | None = None,
+    ) -> LotusServiceAddress:
+        _, network_address = self.assign_lotus_addresses(owner_city_id)
+        started_at = float(time.time() if now is None else now)
+        service = LotusServiceAddress(
+            service_id=service_id or f"{owner_city_id}:{service_name}",
+            owner_city_id=owner_city_id,
+            service_name=service_name,
+            public_handle=public_handle,
+            transport=transport,
+            location=location,
+            network_address=network_address.ip_address,
+            visibility=visibility,
+            auth_required=auth_required,
+            required_scopes=tuple(required_scopes),
+            lease_started_at=started_at,
+            lease_expires_at=None if ttl_s is None else started_at + max(ttl_s, 0.0),
+            labels=dict(labels or {}),
+        )
+        self.registry.upsert_service_address(service)
+        return service
+
+    def resolve_service_address(self, owner_city_id: str, service_name: str, *, now: float | None = None) -> LotusServiceAddress | None:
+        return self.router.resolve_service(owner_city_id, service_name, now=now)
+
+    def store_api_token(self, token: LotusApiToken) -> None:
+        self.registry.upsert_api_token(token)
 
     def register_transport(self, scheme: str, transport: object) -> None:
         self.transports.register(scheme, transport)

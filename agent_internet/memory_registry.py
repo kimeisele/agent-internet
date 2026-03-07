@@ -3,7 +3,16 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
-from .models import CityEndpoint, CityIdentity, CityPresence, HostedEndpoint, LotusLinkAddress, LotusNetworkAddress
+from .models import (
+    CityEndpoint,
+    CityIdentity,
+    CityPresence,
+    HostedEndpoint,
+    LotusApiToken,
+    LotusLinkAddress,
+    LotusNetworkAddress,
+    LotusServiceAddress,
+)
 
 
 def _lease_started_at(now: float | None) -> float:
@@ -43,6 +52,10 @@ class InMemoryCityRegistry:
     _network_addresses: dict[str, LotusNetworkAddress] = field(default_factory=dict)
     _hosted_endpoints: dict[str, HostedEndpoint] = field(default_factory=dict)
     _handle_index: dict[str, str] = field(default_factory=dict)
+    _service_addresses: dict[str, LotusServiceAddress] = field(default_factory=dict)
+    _service_name_index: dict[tuple[str, str], str] = field(default_factory=dict)
+    _api_tokens: dict[str, LotusApiToken] = field(default_factory=dict)
+    _api_token_hash_index: dict[str, str] = field(default_factory=dict)
     _next_link_id: int = 1
     _next_network_id: int = 1
 
@@ -140,6 +153,44 @@ class InMemoryCityRegistry:
 
     def list_hosted_endpoints(self) -> list[HostedEndpoint]:
         return [self._hosted_endpoints[endpoint_id] for endpoint_id in sorted(self._hosted_endpoints)]
+
+    def upsert_service_address(self, service: LotusServiceAddress) -> None:
+        self._service_addresses[service.service_id] = service
+        self._service_name_index[(service.owner_city_id, service.service_name)] = service.service_id
+
+    def get_service_address(self, service_id: str) -> LotusServiceAddress | None:
+        service = self._service_addresses.get(service_id)
+        if service is None or not _lease_active(service.lease_expires_at, None):
+            return None
+        return service
+
+    def get_service_address_by_name(self, owner_city_id: str, service_name: str, *, now: float | None = None) -> LotusServiceAddress | None:
+        service_id = self._service_name_index.get((owner_city_id, service_name))
+        if service_id is None:
+            return None
+        service = self._service_addresses.get(service_id)
+        if service is None or not _lease_active(service.lease_expires_at, now):
+            return None
+        return service
+
+    def list_service_addresses(self) -> list[LotusServiceAddress]:
+        return [self._service_addresses[service_id] for service_id in sorted(self._service_addresses)]
+
+    def upsert_api_token(self, token: LotusApiToken) -> None:
+        self._api_tokens[token.token_id] = token
+        self._api_token_hash_index[token.token_sha256] = token.token_id
+
+    def get_api_token(self, token_id: str) -> LotusApiToken | None:
+        return self._api_tokens.get(token_id)
+
+    def get_api_token_by_sha256(self, token_sha256: str) -> LotusApiToken | None:
+        token_id = self._api_token_hash_index.get(token_sha256)
+        if token_id is None:
+            return None
+        return self._api_tokens.get(token_id)
+
+    def list_api_tokens(self) -> list[LotusApiToken]:
+        return [self._api_tokens[token_id] for token_id in sorted(self._api_tokens)]
 
     def announce(self, presence: CityPresence) -> None:
         self._presence[presence.city_id] = presence

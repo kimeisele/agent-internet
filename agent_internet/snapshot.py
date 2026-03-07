@@ -12,8 +12,10 @@ from .models import (
     EndpointVisibility,
     HealthStatus,
     HostedEndpoint,
+    LotusApiToken,
     LotusLinkAddress,
     LotusNetworkAddress,
+    LotusServiceAddress,
     TrustLevel,
     TrustRecord,
 )
@@ -27,6 +29,8 @@ def snapshot_control_plane(plane: AgentInternetControlPlane) -> dict:
         "link_addresses": [asdict(address) for address in plane.registry.list_link_addresses()],
         "network_addresses": [asdict(address) for address in plane.registry.list_network_addresses()],
         "hosted_endpoints": [asdict(endpoint) for endpoint in plane.registry.list_hosted_endpoints()],
+        "service_addresses": [asdict(service) for service in plane.registry.list_service_addresses()],
+        "api_tokens": [asdict(token) for token in plane.registry.list_api_tokens()],
         "presence": [asdict(presence) for presence in plane.registry.list_cities()],
         "trust": [asdict(record) for record in plane.trust_engine.list_records()],
         "allocator": plane.registry.allocation_state(),
@@ -59,6 +63,36 @@ def restore_control_plane(payload: dict) -> AgentInternetControlPlane:
             labels=dict(data.get("labels", {})),
         )
         plane.registry.upsert_hosted_endpoint(hosted)
+    for data in payload.get("service_addresses", []):
+        plane.registry.upsert_service_address(
+            LotusServiceAddress(
+                service_id=data["service_id"],
+                owner_city_id=data["owner_city_id"],
+                service_name=data["service_name"],
+                public_handle=data["public_handle"],
+                transport=data["transport"],
+                location=data["location"],
+                network_address=data["network_address"],
+                visibility=EndpointVisibility(data.get("visibility", "federated")),
+                auth_required=bool(data.get("auth_required", True)),
+                required_scopes=tuple(data.get("required_scopes", ())),
+                lease_started_at=data.get("lease_started_at"),
+                lease_expires_at=data.get("lease_expires_at"),
+                labels=dict(data.get("labels", {})),
+            ),
+        )
+    for data in payload.get("api_tokens", []):
+        plane.registry.upsert_api_token(
+            LotusApiToken(
+                token_id=data["token_id"],
+                subject=data["subject"],
+                token_hint=data["token_hint"],
+                token_sha256=data["token_sha256"],
+                scopes=tuple(data.get("scopes", ())),
+                issued_at=data.get("issued_at"),
+                revoked_at=data.get("revoked_at"),
+            ),
+        )
     for data in payload.get("presence", []):
         plane.registry.announce(
             CityPresence(

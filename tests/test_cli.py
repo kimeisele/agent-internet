@@ -53,6 +53,7 @@ def test_cli_show_state_prints_snapshot(tmp_path, capsys):
     assert payload["identities"] == []
     assert payload["endpoints"] == []
     assert payload["hosted_endpoints"] == []
+    assert payload["service_addresses"] == []
 
 
 def test_cli_init_dual_city_lab_and_send(tmp_path, capsys):
@@ -140,6 +141,60 @@ def test_cli_lotus_assign_publish_and_resolve(tmp_path, capsys):
     assert main(["lotus-resolve-handle", "--state-path", str(state_path), "--public-handle", "forum.city-a.lotus"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["resolved"]["location"] == "https://forum.city-a.example"
+
+
+def test_cli_lotus_issue_token_publish_service_and_api_call(tmp_path, capsys):
+    state_path = tmp_path / "state" / "control_plane.json"
+
+    assert main(
+        [
+            "lotus-issue-token",
+            "--state-path",
+            str(state_path),
+            "--subject",
+            "operator",
+            "--token-id",
+            "tok-cli",
+            "--scope",
+            "lotus.read",
+            "--scope",
+            "lotus.write.service",
+        ],
+    ) == 0
+    issued = json.loads(capsys.readouterr().out)
+    token = issued["secret"]
+
+    assert main(
+        [
+            "lotus-api-call",
+            "--state-path",
+            str(state_path),
+            "--token",
+            token,
+            "--action",
+            "publish_service",
+            "--params-json",
+            '{"city_id":"city-a","service_name":"forum-api","public_handle":"api.forum.city-a.lotus","transport":"https","location":"https://forum.city-a.example/api","required_scopes":["lotus.read"]}',
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["service_address"]["service_id"] == "city-a:forum-api"
+
+    assert main(
+        [
+            "lotus-api-call",
+            "--state-path",
+            str(state_path),
+            "--token",
+            token,
+            "--action",
+            "resolve_service",
+            "--params-json",
+            '{"city_id":"city-a","service_name":"forum-api"}',
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["resolved"]["location"] == "https://forum.city-a.example/api"
 
 
 def test_cli_emit_and_pump_outbox(tmp_path, capsys):

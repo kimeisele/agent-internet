@@ -1,7 +1,8 @@
 from pathlib import Path
 
 from agent_internet.control_plane import AgentInternetControlPlane
-from agent_internet.models import CityEndpoint, CityIdentity, CityPresence, EndpointVisibility, HealthStatus, TrustLevel, TrustRecord
+from agent_internet.lotus_api import LotusControlPlaneAPI
+from agent_internet.models import CityEndpoint, CityIdentity, CityPresence, EndpointVisibility, HealthStatus, LotusApiScope, TrustLevel, TrustRecord
 from agent_internet.snapshot import ControlPlaneStateStore, restore_control_plane, snapshot_control_plane
 
 
@@ -23,6 +24,22 @@ def _build_plane() -> AgentInternetControlPlane:
         visibility=EndpointVisibility.PUBLIC,
         now=20.0,
     )
+    plane.publish_service_address(
+        owner_city_id="city-b",
+        service_name="forum-api",
+        public_handle="api.forum.city-b.lotus",
+        transport="https",
+        location="https://forum.city-b.example/api",
+        required_scopes=(LotusApiScope.READ.value,),
+        now=21.0,
+    )
+    LotusControlPlaneAPI(plane).issue_token(
+        subject="operator",
+        scopes=(LotusApiScope.READ.value, LotusApiScope.SERVICE_WRITE.value),
+        token_secret="snapshot-token",
+        token_id="tok-snapshot",
+        now=22.0,
+    )
     return plane
 
 
@@ -37,6 +54,8 @@ def test_snapshot_roundtrip_restores_route_resolution():
     assert restored.resolve_route("city-a", "city-b").location == "https://example/city-b.git"
     assert restored.registry.get_link_address("city-b").mac_address.startswith("02:00:")
     assert restored.resolve_public_handle("forum.city-b.lotus").owner_city_id == "city-b"
+    assert restored.resolve_service_address("city-b", "forum-api").public_handle == "api.forum.city-b.lotus"
+    assert restored.registry.get_api_token("tok-snapshot").subject == "operator"
 
 
 def test_state_store_persists_and_loads_control_plane(tmp_path: Path):
@@ -49,3 +68,4 @@ def test_state_store_persists_and_loads_control_plane(tmp_path: Path):
     assert loaded.trust_engine.evaluate("city-a", "city-b") == TrustLevel.TRUSTED
     assert loaded.resolve_route("city-a", "city-b").city_id == "city-b"
     assert loaded.resolve_public_handle("forum.city-b.lotus").location == "https://forum.city-b.example"
+    assert loaded.resolve_service_address("city-b", "forum-api").location == "https://forum.city-b.example/api"

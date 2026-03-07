@@ -7,7 +7,8 @@ from pathlib import Path
 
 from .agent_city_peer import AgentCityPeer
 from .local_lab import LocalDualCityLab
-from .models import EndpointVisibility, TrustLevel, TrustRecord
+from .lotus_api import LotusControlPlaneAPI
+from .models import EndpointVisibility, LotusApiScope, TrustLevel, TrustRecord
 from .snapshot import ControlPlaneStateStore, snapshot_control_plane
 
 
@@ -66,6 +67,52 @@ def build_parser() -> argparse.ArgumentParser:
     )
     lotus_resolve.add_argument("--state-path", default="data/control_plane/state.json")
     lotus_resolve.add_argument("--public-handle", required=True)
+
+    lotus_publish_service = subparsers.add_parser(
+        "lotus-publish-service",
+        help="Publish a Lotus service address for a city's API/service endpoint",
+    )
+    lotus_publish_service.add_argument("--state-path", default="data/control_plane/state.json")
+    lotus_publish_service.add_argument("--city-id", required=True)
+    lotus_publish_service.add_argument("--service-name", required=True)
+    lotus_publish_service.add_argument("--public-handle", required=True)
+    lotus_publish_service.add_argument("--transport", required=True)
+    lotus_publish_service.add_argument("--location", required=True)
+    lotus_publish_service.add_argument("--service-id", default="")
+    lotus_publish_service.add_argument(
+        "--visibility",
+        choices=[visibility.value for visibility in EndpointVisibility],
+        default=EndpointVisibility.FEDERATED.value,
+    )
+    lotus_publish_service.add_argument("--ttl-s", type=float)
+    lotus_publish_service.add_argument("--no-auth", action="store_true")
+    lotus_publish_service.add_argument("--required-scope", action="append", default=[])
+
+    lotus_resolve_service = subparsers.add_parser(
+        "lotus-resolve-service",
+        help="Resolve a Lotus service address by city and service name",
+    )
+    lotus_resolve_service.add_argument("--state-path", default="data/control_plane/state.json")
+    lotus_resolve_service.add_argument("--city-id", required=True)
+    lotus_resolve_service.add_argument("--service-name", required=True)
+
+    lotus_issue_token = subparsers.add_parser(
+        "lotus-issue-token",
+        help="Issue a scoped Lotus bearer token for authenticated API access",
+    )
+    lotus_issue_token.add_argument("--state-path", default="data/control_plane/state.json")
+    lotus_issue_token.add_argument("--subject", required=True)
+    lotus_issue_token.add_argument("--token-id", default="")
+    lotus_issue_token.add_argument("--scope", action="append", default=[])
+
+    lotus_api_call = subparsers.add_parser(
+        "lotus-api-call",
+        help="Execute a direct authenticated Lotus API action against the persisted control plane",
+    )
+    lotus_api_call.add_argument("--state-path", default="data/control_plane/state.json")
+    lotus_api_call.add_argument("--token", required=True)
+    lotus_api_call.add_argument("--action", required=True)
+    lotus_api_call.add_argument("--params-json", default="{}")
 
     lab_init = subparsers.add_parser("init-dual-city-lab", help="Create a local two-city filesystem lab")
     lab_init.add_argument("--root", required=True)
@@ -286,6 +333,80 @@ def cmd_lotus_resolve_handle(args: argparse.Namespace) -> int:
             indent=2,
         ),
     )
+    return 0
+
+
+def cmd_lotus_publish_service(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    service = plane.publish_service_address(
+        owner_city_id=args.city_id,
+        service_name=args.service_name,
+        public_handle=args.public_handle,
+        transport=args.transport,
+        location=args.location,
+        visibility=EndpointVisibility(args.visibility),
+        ttl_s=args.ttl_s,
+        service_id=args.service_id,
+        auth_required=not args.no_auth,
+        required_scopes=tuple(args.required_scope),
+    )
+    store.save(plane)
+    print(json.dumps({"service_address": asdict(service), "state_path": str(store.path)}, indent=2))
+    return 0
+
+
+def cmd_lotus_resolve_service(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    service = plane.resolve_service_address(args.city_id, args.service_name)
+    print(
+        json.dumps(
+            {
+                "city_id": args.city_id,
+                "service_name": args.service_name,
+                "resolved": None if service is None else asdict(service),
+            },
+            indent=2,
+        ),
+    )
+    return 0
+
+
+def cmd_lotus_issue_token(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject=args.subject,
+        scopes=tuple(args.scope or [LotusApiScope.READ.value]),
+        token_id=args.token_id,
+    )
+    store.save(plane)
+    print(
+        json.dumps(
+            {
+                "token": asdict(issued.token),
+                "secret": issued.secret,
+                "state_path": str(store.path),
+            },
+            indent=2,
+        ),
+    )
+    return 0
+
+
+def cmd_lotus_api_call(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    api = LotusControlPlaneAPI(plane)
+    result = api.call(
+        bearer_token=args.token,
+        action=args.action,
+        params=json.loads(args.params_json),
+    )
+    store.save(plane)
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -611,6 +732,14 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_lotus_publish_endpoint(args)
     if args.command == "lotus-resolve-handle":
         return cmd_lotus_resolve_handle(args)
+    if args.command == "lotus-publish-service":
+        return cmd_lotus_publish_service(args)
+    if args.command == "lotus-resolve-service":
+        return cmd_lotus_resolve_service(args)
+    if args.command == "lotus-issue-token":
+        return cmd_lotus_issue_token(args)
+    if args.command == "lotus-api-call":
+        return cmd_lotus_api_call(args)
     if args.command == "init-dual-city-lab":
         return cmd_init_dual_city_lab(args)
     if args.command == "lab-send":

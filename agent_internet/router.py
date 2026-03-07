@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .interfaces import CityRegistry, DiscoveryService, TrustEngine
-from .models import CityEndpoint, HealthStatus, HostedEndpoint, TrustLevel
+from .models import CityEndpoint, HealthStatus, HostedEndpoint, LotusServiceAddress, TrustLevel
 from .trust import trust_allows
 
 
@@ -42,3 +42,15 @@ class RegistryRouter:
                 return None
 
         return endpoint
+
+    def resolve_service(self, owner_city_id: str, service_name: str, *, now: float | None = None) -> LotusServiceAddress | None:
+        service = self.registry.get_service_address_by_name(owner_city_id, service_name, now=now)
+        if service is None:
+            return None
+
+        if self.discovery is not None:
+            presence = self.discovery.get_presence(service.owner_city_id)
+            if presence is not None and presence.health == HealthStatus.OFFLINE:
+                return None
+
+        return service

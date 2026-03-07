@@ -4,7 +4,7 @@ from agent_internet.agent_city_bridge import AgentCityBridge, city_presence_from
 from agent_internet.agent_city_contract import AgentCityFilesystemContract
 from agent_internet.control_plane import AgentInternetControlPlane
 from agent_internet.filesystem_transport import FilesystemFederationTransport
-from agent_internet.models import CityEndpoint, CityIdentity, EndpointVisibility, HealthStatus, TrustLevel, TrustRecord
+from agent_internet.models import CityEndpoint, CityIdentity, EndpointVisibility, HealthStatus, LotusApiScope, TrustLevel, TrustRecord
 
 
 def test_city_presence_from_report_maps_health_states():
@@ -87,3 +87,25 @@ def test_control_plane_publishes_and_resolves_lotus_handle():
 
     assert hosted.visibility == EndpointVisibility.FEDERATED
     assert plane.resolve_public_handle("forum.city-a.lotus", now=10.0).location == "https://forum.city-a.example"
+
+
+def test_control_plane_publishes_and_resolves_service_address():
+    plane = AgentInternetControlPlane()
+    plane.register_city(
+        CityIdentity(city_id="city-a", slug="a", repo="org/city-a"),
+        CityEndpoint(city_id="city-a", transport="filesystem", location="/tmp/city-a"),
+    )
+    plane.announce_city(city_presence_from_report("city-a", {"heartbeat": 1, "timestamp": 1.0, "population": 1, "alive": 1, "dead": 0, "chain_valid": True}))
+
+    service = plane.publish_service_address(
+        owner_city_id="city-a",
+        service_name="forum-api",
+        public_handle="api.forum.city-a.lotus",
+        transport="https",
+        location="https://forum.city-a.example/api",
+        required_scopes=(LotusApiScope.READ.value,),
+        now=5.0,
+    )
+
+    assert service.service_id == "city-a:forum-api"
+    assert plane.resolve_service_address("city-a", "forum-api", now=10.0).location == "https://forum.city-a.example/api"

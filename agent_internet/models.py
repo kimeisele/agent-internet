@@ -24,6 +24,14 @@ class EndpointVisibility(StrEnum):
     PUBLIC = "public"
 
 
+class LotusApiScope(StrEnum):
+    READ = "lotus.read"
+    ADDRESS_WRITE = "lotus.write.address"
+    ENDPOINT_WRITE = "lotus.write.endpoint"
+    SERVICE_WRITE = "lotus.write.service"
+    TOKEN_WRITE = "lotus.write.token"
+
+
 @dataclass(frozen=True, slots=True)
 class CityIdentity:
     city_id: str
@@ -71,6 +79,34 @@ class HostedEndpoint:
     lease_started_at: float | None = None
     lease_expires_at: float | None = None
     labels: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class LotusServiceAddress:
+    service_id: str
+    owner_city_id: str
+    service_name: str
+    public_handle: str
+    transport: str
+    location: str
+    network_address: str
+    visibility: EndpointVisibility = EndpointVisibility.FEDERATED
+    auth_required: bool = True
+    required_scopes: tuple[str, ...] = ()
+    lease_started_at: float | None = None
+    lease_expires_at: float | None = None
+    labels: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class LotusApiToken:
+    token_id: str
+    subject: str
+    token_hint: str
+    token_sha256: str
+    scopes: tuple[str, ...] = ()
+    issued_at: float | None = None
+    revoked_at: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

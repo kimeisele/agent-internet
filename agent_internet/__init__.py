@@ -28,6 +28,7 @@ from .filesystem_transport import FilesystemFederationTransport
 from .filesystem_message_transport import AgentCityFilesystemMessageTransport
 from .interfaces import CityRegistry, DiscoveryService, FederationTransport, InternetRouter, TrustEngine
 from .local_lab import LocalDualCityLab
+from .lotus_api import IssuedLotusApiToken, LotusControlPlaneAPI
 from .memory_registry import InMemoryCityRegistry
 from .models import (
     CityEndpoint,
@@ -36,8 +37,11 @@ from .models import (
     EndpointVisibility,
     HealthStatus,
     HostedEndpoint,
+    LotusApiScope,
+    LotusApiToken,
     LotusLinkAddress,
     LotusNetworkAddress,
+    LotusServiceAddress,
     TrustLevel,
     TrustRecord,
 )
@@ -93,12 +97,17 @@ __all__ = [
     "HostedEndpoint",
     "InMemoryCityRegistry",
     "InMemoryTrustEngine",
+    "IssuedLotusApiToken",
     "InternetRouter",
     "LoopbackTransport",
     "LocalDualCityLab",
     "locked_file",
+    "LotusApiScope",
+    "LotusApiToken",
+    "LotusControlPlaneAPI",
     "LotusLinkAddress",
     "LotusNetworkAddress",
+    "LotusServiceAddress",
     "MissionExecutionResult",
     "OutboxRelayPump",
     "PhaseTickResult",
