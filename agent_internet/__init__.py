@@ -7,6 +7,7 @@ from .agent_city_directive_bridge import (
     DirectiveExecutionResult,
     load_agent_city_directive_execution_bindings,
 )
+from .assistant_surface import assistant_surface_snapshot_from_repo_root
 from .agent_city_phase_tick_bridge import (
     AgentCityPhaseTickAdapter,
     AgentCityPhaseTickBindings,
@@ -33,6 +34,7 @@ from .lotus_api import IssuedLotusApiToken, LotusControlPlaneAPI
 from .lotus_daemon import LotusApiDaemon
 from .memory_registry import InMemoryCityRegistry
 from .models import (
+    AssistantSurfaceSnapshot,
     CityEndpoint,
     CityIdentity,
     CityPresence,
@@ -83,6 +85,7 @@ __all__ = [
     "AgentCityFilesystemContract",
     "AgentCityPeer",
     "AgentInternetControlPlane",
+    "AssistantSurfaceSnapshot",
     "BidirectionalSyncWorker",
     "CityEndpoint",
     "CityIdentity",
@@ -134,6 +137,7 @@ __all__ = [
     "TrustLevel",
     "TrustRecord",
     "update_locked_json_value",
+    "assistant_surface_snapshot_from_repo_root",
     "city_presence_from_report",
     "detect_git_remote_metadata",
     "ensure_git_checkout",

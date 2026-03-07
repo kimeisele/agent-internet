@@ -147,3 +147,44 @@ def test_lotus_daemon_serves_route_resolution_http_api(tmp_path):
         assert resolved["resolved"]["nadi_priority"] == "suddha"
     finally:
         daemon.shutdown()
+
+
+def test_lotus_daemon_serves_assistant_snapshot_http_api(tmp_path):
+    repo_root = tmp_path / "city"
+    reports_dir = repo_root / "data" / "federation" / "reports"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "report_7.json").write_text(
+        json.dumps({"heartbeat": 7, "timestamp": 70.0, "population": 1, "alive": 1, "dead": 0, "chain_valid": True}),
+    )
+    (repo_root / "data" / "assistant_state.json").write_text(
+        json.dumps({"followed": ["alice", "bob"], "ops": {"invites": 3}}),
+    )
+    (repo_root / "data" / "federation" / "peer.json").write_text(
+        json.dumps({"identity": {"city_id": "city-http", "slug": "http", "repo": "org/city-http"}, "capabilities": ["moltbook"]}),
+    )
+
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    root_secret = store.update(
+        lambda plane: LotusControlPlaneAPI(plane).issue_token(
+            subject="root",
+            scopes=(LotusApiScope.READ.value,),
+            token_secret="snapshot-root",
+            token_id="tok-snapshot-root",
+        ).secret,
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        status, payload = _request_json(
+            daemon.base_url,
+            f"/v1/lotus/assistant-snapshot?root={repo_root}",
+            token=root_secret,
+        )
+        assert status == 200
+        assert payload["assistant_snapshot"]["city_id"] == "city-http"
+        assert payload["assistant_snapshot"]["heartbeat"] == 7
+        assert payload["assistant_snapshot"]["following"] == 2
+        assert payload["assistant_snapshot"]["total_invites"] == 3
+    finally:
+        daemon.shutdown()

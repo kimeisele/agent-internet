@@ -221,6 +221,43 @@ def test_cli_show_state_prints_snapshot(tmp_path, capsys):
     assert payload["service_addresses"] == []
 
 
+def test_cli_agent_city_assistant_snapshot(tmp_path, capsys):
+    repo_root = tmp_path / "city"
+    reports_dir = repo_root / "data" / "federation" / "reports"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "report_2.json").write_text(
+        json.dumps({"heartbeat": 2, "timestamp": 20.0, "population": 1, "alive": 1, "dead": 0, "chain_valid": True}),
+    )
+    (repo_root / "data" / "assistant_state.json").write_text(
+        json.dumps({"followed": ["alice", "bob"], "ops": {"posts": 3}}),
+    )
+
+    assert main([
+        "publish-agent-city-peer",
+        "--root",
+        str(repo_root),
+        "--city-id",
+        "city-cli",
+        "--repo",
+        "org/city-cli",
+        "--slug",
+        "cli",
+    ]) == 0
+    _ = capsys.readouterr().out
+
+    assert main([
+        "agent-city-assistant-snapshot",
+        "--root",
+        str(repo_root),
+    ]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["city_id"] == "city-cli"
+    assert payload["assistant_kind"] == "moltbook_assistant"
+    assert payload["following"] == 2
+    assert payload["total_posts"] == 3
+    assert payload["heartbeat"] == 2
+
+
 def test_cli_init_dual_city_lab_and_send(tmp_path, capsys):
     root = tmp_path / "lab"
 

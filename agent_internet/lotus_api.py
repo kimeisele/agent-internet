@@ -5,6 +5,7 @@ import secrets
 import time
 from dataclasses import asdict, dataclass
 
+from .assistant_surface import assistant_surface_snapshot_from_repo_root
 from .control_plane import AgentInternetControlPlane
 from .models import EndpointVisibility, LotusApiScope, LotusApiToken
 from .snapshot import snapshot_control_plane
@@ -82,6 +83,15 @@ class LotusControlPlaneAPI:
         if action == "show_steward_protocol":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "bindings": summarize_steward_protocol_bindings()}
+        if action == "assistant_snapshot":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            snapshot = assistant_surface_snapshot_from_repo_root(
+                payload["root"],
+                city_id=payload.get("city_id"),
+                assistant_id=str(payload.get("assistant_id", "moltbook_assistant")),
+                heartbeat_source=str(payload.get("heartbeat_source", "steward-protocol/mahamantra")),
+            )
+            return {"token_id": token.token_id, "assistant_snapshot": asdict(snapshot)}
         if action == "issue_token":
             self.authenticate(bearer_token, required_scopes=(LotusApiScope.TOKEN_WRITE.value,))
             issued = self.issue_token(

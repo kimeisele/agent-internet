@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from agent_internet.control_plane import AgentInternetControlPlane
@@ -152,3 +154,42 @@ def test_lotus_api_accepts_nadi_priority_alias_and_returns_it_explicitly():
     assert published["route"]["nadi_priority"] == "suddha"
     assert resolved["resolved"]["priority"] == "suddha"
     assert resolved["resolved"]["nadi_priority"] == "suddha"
+
+
+def test_lotus_api_returns_assistant_snapshot(tmp_path):
+    repo_root = tmp_path / "city"
+    reports_dir = repo_root / "data" / "federation" / "reports"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "report_4.json").write_text(
+        json.dumps({"heartbeat": 4, "timestamp": 40.0, "population": 2, "alive": 2, "dead": 0, "chain_valid": True}),
+    )
+    (repo_root / "data" / "assistant_state.json").write_text(
+        json.dumps({"followed": ["alice"], "ops": {"posts": 2}}),
+    )
+    peer_dir = repo_root / "data" / "federation"
+    peer_dir.mkdir(parents=True, exist_ok=True)
+    (peer_dir / "peer.json").write_text(
+        json.dumps({"identity": {"city_id": "city-api", "slug": "api", "repo": "org/city-api"}, "capabilities": ["moltbook"]}),
+    )
+
+    plane = AgentInternetControlPlane()
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="observer",
+        scopes=(LotusApiScope.READ.value,),
+        token_secret="assistant-token",
+        token_id="tok-assistant",
+        now=10.0,
+    )
+
+    response = api.call(
+        bearer_token=issued.secret,
+        action="assistant_snapshot",
+        params={"root": str(repo_root)},
+    )
+
+    assert response["assistant_snapshot"]["city_id"] == "city-api"
+    assert response["assistant_snapshot"]["assistant_kind"] == "moltbook_assistant"
+    assert response["assistant_snapshot"]["heartbeat"] == 4
+    assert response["assistant_snapshot"]["following"] == 1
+    assert response["assistant_snapshot"]["total_posts"] == 2

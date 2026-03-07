@@ -6,6 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .agent_city_peer import AgentCityPeer
+from .assistant_surface import assistant_surface_snapshot_from_repo_root
 from .git_federation import GitWikiFederationSync, detect_git_remote_metadata, ensure_git_checkout
 from .local_lab import LocalDualCityLab
 from .lotus_api import LOTUS_MUTATING_ACTIONS, LotusControlPlaneAPI
@@ -52,6 +53,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     show = subparsers.add_parser("show-state", help="Print the current persisted control-plane state")
     show.add_argument("--state-path", default="data/control_plane/state.json")
+
+    assistant_snapshot = subparsers.add_parser(
+        "agent-city-assistant-snapshot",
+        help="Project the current Moltbook assistant surface from an agent-city repo",
+    )
+    assistant_snapshot.add_argument("--root", required=True)
+    assistant_snapshot.add_argument("--city-id")
+    assistant_snapshot.add_argument("--assistant-id", default="moltbook_assistant")
+    assistant_snapshot.add_argument("--heartbeat-source", default="steward-protocol/mahamantra")
 
     git_describe = subparsers.add_parser(
         "git-federation-describe",
@@ -471,6 +481,17 @@ def cmd_show_state(args: argparse.Namespace) -> int:
     store = ControlPlaneStateStore(path=Path(args.state_path))
     plane = store.load()
     print(json.dumps(snapshot_control_plane(plane), indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_city_assistant_snapshot(args: argparse.Namespace) -> int:
+    snapshot = assistant_surface_snapshot_from_repo_root(
+        args.root,
+        city_id=args.city_id,
+        assistant_id=args.assistant_id,
+        heartbeat_source=args.heartbeat_source,
+    )
+    print(json.dumps(asdict(snapshot), indent=2, sort_keys=True))
     return 0
 
 
@@ -1023,6 +1044,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_onboard_agent_city(args)
     if args.command == "show-state":
         return cmd_show_state(args)
+    if args.command == "agent-city-assistant-snapshot":
+        return cmd_agent_city_assistant_snapshot(args)
     if args.command == "lotus-show-steward-protocol":
         return cmd_lotus_show_steward_protocol(args)
     if args.command == "lotus-assign-addresses":

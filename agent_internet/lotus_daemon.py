@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from .lotus_api import LOTUS_MUTATING_ACTIONS, LotusControlPlaneAPI
 from .snapshot import ControlPlaneStateStore
@@ -96,7 +96,9 @@ class LotusApiDaemon:
         return f"http://{host}:{port}"
 
     def dispatch(self, *, method: str, raw_path: str, authorization: str, body: bytes) -> tuple[int, dict]:
-        path = urlsplit(raw_path).path
+        split = urlsplit(raw_path)
+        path = split.path
+        query = parse_qs(split.query, keep_blank_values=False)
         if method == "GET" and path == "/healthz":
             return 200, {"status": "ok", "state_path": str(self.state_path)}
 
@@ -109,6 +111,17 @@ class LotusApiDaemon:
                 return 200, self._call(token, "show_state", {})
             if method == "GET" and path == "/v1/lotus/steward-protocol":
                 return 200, self._call(token, "show_steward_protocol", {})
+            if method == "GET" and path == "/v1/lotus/assistant-snapshot":
+                return 200, self._call(
+                    token,
+                    "assistant_snapshot",
+                    {
+                        "root": _require_query_param(query, "root"),
+                        "city_id": _query_param(query, "city_id"),
+                        "assistant_id": _query_param(query, "assistant_id") or "moltbook_assistant",
+                        "heartbeat_source": _query_param(query, "heartbeat_source") or "steward-protocol/mahamantra",
+                    },
+                )
             if method == "GET" and path.startswith("/v1/lotus/handles/"):
                 return 200, self._call(
                     token,
@@ -183,3 +196,18 @@ def _decode_json_object(body: bytes) -> dict:
 def _extract_bearer_token(authorization: str) -> str:
     prefix = "Bearer "
     return authorization[len(prefix) :].strip() if authorization.startswith(prefix) else ""
+
+
+def _query_param(query: dict[str, list[str]], name: str) -> str | None:
+    values = query.get(name)
+    if not values:
+        return None
+    value = values[0]
+    return value if value != "" else None
+
+
+def _require_query_param(query: dict[str, list[str]], name: str) -> str:
+    value = _query_param(query, name)
+    if value is None:
+        raise ValueError(f"missing_query_param:{name}")
+    return value

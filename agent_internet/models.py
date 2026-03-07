@@ -150,6 +150,30 @@ class CityPresence:
 
 
 @dataclass(frozen=True, slots=True)
+class AssistantSurfaceSnapshot:
+    assistant_id: str
+    assistant_kind: str
+    city_id: str
+    city_slug: str = ""
+    repo: str = ""
+    repo_root: str = ""
+    heartbeat_source: str = "steward-protocol/mahamantra"
+    heartbeat: int | None = None
+    last_seen_at: float | None = None
+    city_health: HealthStatus = HealthStatus.UNKNOWN
+    capabilities: tuple[str, ...] = ()
+    state_present: bool = False
+    following: int = 0
+    invited: int = 0
+    spotlighted: int = 0
+    total_follows: int = 0
+    total_invites: int = 0
+    total_posts: int = 0
+    last_post_age_s: int | None = None
+    series_cursor: int = -1
+
+
+@dataclass(frozen=True, slots=True)
 class TrustRecord:
     issuer_city_id: str
     subject_city_id: str

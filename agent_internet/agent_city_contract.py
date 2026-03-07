@@ -16,8 +16,16 @@ class AgentCityFilesystemContract:
     root: Path
 
     @property
+    def data_dir(self) -> Path:
+        return self.root / "data"
+
+    @property
     def federation_dir(self) -> Path:
-        return self.root / "data" / "federation"
+        return self.data_dir / "federation"
+
+    @property
+    def assistant_state_path(self) -> Path:
+        return self.data_dir / "assistant_state.json"
 
     @property
     def nadi_outbox(self) -> Path:
