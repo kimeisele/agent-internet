@@ -43,6 +43,8 @@ It establishes:
 - `agent_internet/router.py` — trust-aware route resolution
 - `agent_internet/control_plane.py` — composed control-plane service
 - `agent_internet/agent_city_bridge.py` — projection from current Agent City reports
+- `agent_internet/steward_federation.py` — typed steward-protocol object adapter
+- `agent_internet/snapshot.py` — conservative JSON snapshot persistence
 - `agent_internet/agent_city_contract.py` — current Agent City federation path contract
 - `agent_internet/filesystem_transport.py` — Phase 0 compatibility transport
 - `agent_internet/steward_substrate.py` — optional bindings to canonical substrate symbols

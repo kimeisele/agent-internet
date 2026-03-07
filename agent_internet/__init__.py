@@ -8,7 +8,9 @@ from .interfaces import CityRegistry, DiscoveryService, FederationTransport, Int
 from .memory_registry import InMemoryCityRegistry
 from .models import CityEndpoint, CityIdentity, CityPresence, HealthStatus, TrustLevel, TrustRecord
 from .router import RegistryRouter
+from .snapshot import ControlPlaneStateStore, restore_control_plane, snapshot_control_plane
 from .steward_substrate import StewardSubstrateBindings, load_steward_substrate
+from .steward_federation import StewardFederationAdapter
 from .trust import InMemoryTrustEngine, trust_allows
 
 __all__ = [
@@ -19,6 +21,7 @@ __all__ = [
     "CityIdentity",
     "CityPresence",
     "CityRegistry",
+    "ControlPlaneStateStore",
     "DiscoveryService",
     "FederationTransport",
     "FilesystemFederationTransport",
@@ -27,11 +30,14 @@ __all__ = [
     "InMemoryTrustEngine",
     "InternetRouter",
     "RegistryRouter",
+    "StewardFederationAdapter",
     "StewardSubstrateBindings",
     "TrustEngine",
     "TrustLevel",
     "TrustRecord",
     "city_presence_from_report",
     "load_steward_substrate",
+    "restore_control_plane",
+    "snapshot_control_plane",
     "trust_allows",
 ]

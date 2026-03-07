@@ -29,6 +29,9 @@ class InMemoryTrustEngine:
     def get_record(self, source_city_id: str, target_city_id: str) -> TrustRecord | None:
         return self._records.get((source_city_id, target_city_id))
 
+    def list_records(self) -> list[TrustRecord]:
+        return [self._records[key] for key in sorted(self._records)]
+
     def evaluate(self, source_city_id: str, target_city_id: str) -> TrustLevel:
         if source_city_id == target_city_id:
             return TrustLevel.TRUSTED

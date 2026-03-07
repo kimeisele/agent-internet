@@ -33,6 +33,9 @@ class InMemoryCityRegistry:
     def get_endpoint(self, city_id: str) -> CityEndpoint | None:
         return self._endpoints.get(city_id)
 
+    def list_endpoints(self) -> list[CityEndpoint]:
+        return [self._endpoints[city_id] for city_id in sorted(self._endpoints)]
+
     def announce(self, presence: CityPresence) -> None:
         self._presence[presence.city_id] = presence
 

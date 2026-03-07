@@ -48,3 +48,16 @@ def test_list_reports_reads_report_directory(tmp_path):
     transport = FilesystemFederationTransport(contract=contract)
 
     assert transport.list_reports() == [{"heartbeat": 1}, {"heartbeat": 2}]
+
+
+def test_list_directives_reads_pending_directive_directory(tmp_path):
+    contract = AgentCityFilesystemContract(root=tmp_path)
+    contract.ensure_dirs()
+    contract.directive_path("dir-2").write_text(json.dumps({"id": "dir-2"}))
+    contract.directive_path("dir-1").write_text(json.dumps({"id": "dir-1"}))
+    (contract.directives_dir / "ignored.done.json").write_text(json.dumps({"id": "ignored"}))
+
+    transport = FilesystemFederationTransport(contract=contract)
+
+    assert transport.list_directives() == [{"id": "dir-1"}, {"id": "dir-2"}]
+

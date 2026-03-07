@@ -55,6 +55,17 @@ class FilesystemFederationTransport:
         self.contract.ensure_dirs()
         _atomic_write_json(self.contract.directive_path(directive_id), _coerce_dict(directive))
 
+    def list_directives(self) -> list[dict]:
+        self.contract.ensure_dirs()
+        directives: list[dict] = []
+        for path in sorted(self.contract.directives_dir.glob("*.json")):
+            if path.name.endswith(".done.json"):
+                continue
+            data = json.loads(path.read_text())
+            if isinstance(data, dict):
+                directives.append(dict(data))
+        return directives
+
     def list_reports(self) -> list[dict]:
         self.contract.ensure_dirs()
         reports: list[dict] = []
