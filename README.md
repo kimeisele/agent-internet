@@ -38,6 +38,11 @@ It establishes:
 
 - `agent_internet/models.py` — internet-layer domain models
 - `agent_internet/interfaces.py` — core protocols for registry/routing/trust/transport
+- `agent_internet/memory_registry.py` — concrete in-memory city state registry
+- `agent_internet/trust.py` — explicit city-to-city trust ledger
+- `agent_internet/router.py` — trust-aware route resolution
+- `agent_internet/control_plane.py` — composed control-plane service
+- `agent_internet/agent_city_bridge.py` — projection from current Agent City reports
 - `agent_internet/agent_city_contract.py` — current Agent City federation path contract
 - `agent_internet/filesystem_transport.py` — Phase 0 compatibility transport
 - `agent_internet/steward_substrate.py` — optional bindings to canonical substrate symbols
