@@ -99,6 +99,37 @@ class LotusServiceAddress:
 
 
 @dataclass(frozen=True, slots=True)
+class LotusRoute:
+    route_id: str
+    owner_city_id: str
+    destination_prefix: str
+    target_city_id: str
+    next_hop_city_id: str
+    metric: int = 100
+    nadi_type: str = "vyana"
+    priority: str = "rajas"
+    ttl_ms: int = 24_000
+    maha_header_hex: str = ""
+    lease_started_at: float | None = None
+    lease_expires_at: float | None = None
+    labels: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class LotusRouteResolution:
+    destination: str
+    matched_prefix: str
+    route_id: str
+    target_city_id: str
+    next_hop_city_id: str
+    next_hop_endpoint: CityEndpoint
+    nadi_type: str
+    priority: str
+    ttl_ms: int
+    maha_header_hex: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class LotusApiToken:
     token_id: str
     subject: str

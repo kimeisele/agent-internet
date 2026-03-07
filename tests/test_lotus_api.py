@@ -2,7 +2,7 @@ import pytest
 
 from agent_internet.control_plane import AgentInternetControlPlane
 from agent_internet.lotus_api import LotusControlPlaneAPI
-from agent_internet.models import CityEndpoint, CityIdentity, LotusApiScope
+from agent_internet.models import CityEndpoint, CityIdentity, LotusApiScope, TrustLevel, TrustRecord
 
 
 def test_lotus_api_issues_token_and_allows_scoped_calls():
@@ -59,3 +59,43 @@ def test_lotus_api_rejects_missing_scope():
             action="assign_addresses",
             params={"city_id": "city-a"},
         )
+
+
+def test_lotus_api_publishes_and_resolves_next_hop():
+    plane = AgentInternetControlPlane()
+    plane.register_city(
+        CityIdentity(city_id="city-a", slug="a", repo="org/city-a"),
+        CityEndpoint(city_id="city-a", transport="filesystem", location="/tmp/city-a"),
+    )
+    plane.register_city(
+        CityIdentity(city_id="city-b", slug="b", repo="org/city-b"),
+        CityEndpoint(city_id="city-b", transport="git", location="https://example/city-b.git"),
+    )
+    plane.record_trust(TrustRecord("city-a", "city-b", TrustLevel.TRUSTED, reason="route api test"))
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="operator",
+        scopes=(LotusApiScope.READ.value, LotusApiScope.SERVICE_WRITE.value),
+        token_secret="route-token",
+        token_id="tok-route",
+        now=10.0,
+    )
+
+    api.call(
+        bearer_token=issued.secret,
+        action="publish_route",
+        params={
+            "owner_city_id": "city-a",
+            "destination_prefix": "service:city-z/forum",
+            "target_city_id": "city-z",
+            "next_hop_city_id": "city-b",
+            "metric": 5,
+        },
+    )
+    resolved = api.call(
+        bearer_token=issued.secret,
+        action="resolve_next_hop",
+        params={"source_city_id": "city-a", "destination": "service:city-z/forum-api"},
+    )
+
+    assert resolved["resolved"]["next_hop_city_id"] == "city-b"

@@ -1,6 +1,28 @@
 import json
+import subprocess
 
 from agent_internet.cli import main
+
+
+def _git(cwd, *args):
+    subprocess.run(["git", *args], cwd=str(cwd), check=True, capture_output=True, text=True)
+
+
+def _init_git_repo(tmp_path):
+    repo_remote = tmp_path / "agent-city.git"
+    wiki_remote = tmp_path / "agent-city.wiki.git"
+    repo_root = tmp_path / "agent-city"
+    _git(tmp_path, "init", "--bare", str(repo_remote))
+    _git(tmp_path, "init", "--bare", str(wiki_remote))
+    _git(tmp_path, "clone", str(repo_remote), str(repo_root))
+    _git(repo_root, "config", "user.email", "test@example.com")
+    _git(repo_root, "config", "user.name", "Test User")
+    (repo_root / "README.md").write_text("# agent city\n")
+    _git(repo_root, "add", ".")
+    _git(repo_root, "commit", "-m", "init")
+    _git(repo_root, "push", "origin", "HEAD")
+    _git(repo_root, "remote", "set-url", "origin", "git@github.com:org/agent-city-cli.git")
+    return repo_root, wiki_remote
 
 
 def test_cli_onboards_agent_city_and_persists_state(tmp_path, capsys):
@@ -94,6 +116,60 @@ def test_cli_publishes_and_discovers_agent_city_peer(tmp_path, capsys):
     assert payload["observed"]["health"] == "healthy"
 
 
+def test_cli_git_federation_describe_and_sync_wiki(tmp_path, capsys):
+    repo_root, wiki_remote = _init_git_repo(tmp_path)
+    reports_dir = repo_root / "data" / "federation" / "reports"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "report_2.json").write_text(
+        json.dumps({"heartbeat": 2, "timestamp": 2.0, "population": 1, "alive": 1, "dead": 0, "chain_valid": True}),
+    )
+    state_path = tmp_path / "state" / "control_plane.json"
+
+    assert main(["git-federation-describe", "--root", str(repo_root)]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["repo_ref"] == "org/agent-city-cli"
+
+    assert main(
+        [
+            "publish-agent-city-peer",
+            "--root",
+            str(repo_root),
+            "--city-id",
+            "city-cli",
+        ],
+    ) == 0
+    _ = capsys.readouterr().out
+
+    assert main(
+        [
+            "onboard-agent-city",
+            "--root",
+            str(repo_root),
+            "--discover",
+            "--state-path",
+            str(state_path),
+        ],
+    ) == 0
+    _ = capsys.readouterr().out
+
+    assert main(
+        [
+            "git-federation-sync-wiki",
+            "--root",
+            str(repo_root),
+            "--state-path",
+            str(state_path),
+            "--wiki-repo-url",
+            str(wiki_remote),
+            "--wiki-checkout-path",
+            str(tmp_path / "wiki-checkout"),
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["committed"] is True
+    assert "Home.md" in payload["pages"]
+
+
 def test_cli_show_state_prints_snapshot(tmp_path, capsys):
     state_path = tmp_path / "state" / "control_plane.json"
 
@@ -103,6 +179,7 @@ def test_cli_show_state_prints_snapshot(tmp_path, capsys):
     assert payload["identities"] == []
     assert payload["endpoints"] == []
     assert payload["hosted_endpoints"] == []
+    assert payload["routes"] == []
     assert payload["service_addresses"] == []
 
 
@@ -245,6 +322,68 @@ def test_cli_lotus_issue_token_publish_service_and_api_call(tmp_path, capsys):
     ) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["resolved"]["location"] == "https://forum.city-a.example/api"
+
+
+def test_cli_lotus_show_steward_protocol(capsys):
+    assert main(["lotus-show-steward-protocol"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["default_route_nadi_type"] == "vyana"
+    assert payload["default_timeout_ms"] > 0
+
+
+def test_cli_lotus_publish_route_and_resolve_next_hop(tmp_path, capsys):
+    repo_root = tmp_path / "city-b"
+    state_path = tmp_path / "state" / "control_plane.json"
+
+    assert main(
+        [
+            "onboard-agent-city",
+            "--root",
+            str(repo_root),
+            "--city-id",
+            "city-b",
+            "--repo",
+            "org/city-b",
+            "--state-path",
+            str(state_path),
+        ],
+    ) == 0
+    _ = capsys.readouterr().out
+
+    assert main(
+        [
+            "lotus-publish-route",
+            "--state-path",
+            str(state_path),
+            "--owner-city-id",
+            "city-a",
+            "--destination-prefix",
+            "service:city-z/forum",
+            "--target-city-id",
+            "city-z",
+            "--next-hop-city-id",
+            "city-b",
+            "--metric",
+            "5",
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["route"]["nadi_type"] == "vyana"
+
+    assert main(
+        [
+            "lotus-resolve-next-hop",
+            "--state-path",
+            str(state_path),
+            "--source-city-id",
+            "agent-internet",
+            "--destination",
+            "service:city-z/forum-api",
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["resolved"]["next_hop_city_id"] == "city-b"
 
 
 def test_cli_emit_and_pump_outbox(tmp_path, capsys):

@@ -1,8 +1,13 @@
 import json
+import subprocess
 
 from agent_internet.agent_city_peer import AgentCityPeer
 from agent_internet.control_plane import AgentInternetControlPlane
 from agent_internet.models import HealthStatus, TrustLevel, TrustRecord
+
+
+def _git(cwd, *args):
+    subprocess.run(["git", *args], cwd=str(cwd), check=True, capture_output=True, text=True)
 
 
 def test_peer_from_repo_root_builds_identity_endpoint_and_contract(tmp_path):
@@ -60,3 +65,21 @@ def test_peer_can_publish_and_discover_self_description(tmp_path):
     assert payload["identity"]["city_id"] == "city-c"
     assert discovered.identity.repo == "org/agent-city-c"
     assert discovered.bridge.capabilities == ("federation", "lotus")
+
+
+def test_peer_auto_detects_repo_ref_from_git_origin(tmp_path):
+    remote = tmp_path / "remote.git"
+    repo_root = tmp_path / "repo"
+    _git(tmp_path, "init", "--bare", str(remote))
+    _git(tmp_path, "clone", str(remote), str(repo_root))
+    _git(repo_root, "config", "user.email", "test@example.com")
+    _git(repo_root, "config", "user.name", "Test User")
+    (repo_root / "README.md").write_text("# repo\n")
+    _git(repo_root, "add", ".")
+    _git(repo_root, "commit", "-m", "init")
+    _git(repo_root, "push", "origin", "HEAD")
+    _git(repo_root, "remote", "set-url", "origin", "git@github.com:org/agent-city-d.git")
+
+    peer = AgentCityPeer.from_repo_root(repo_root, city_id="city-d")
+
+    assert peer.identity.repo == "org/agent-city-d"

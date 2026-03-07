@@ -6,7 +6,7 @@ import pytest
 
 from agent_internet.lotus_api import LotusControlPlaneAPI
 from agent_internet.lotus_daemon import LotusApiDaemon
-from agent_internet.models import LotusApiScope
+from agent_internet.models import CityEndpoint, CityIdentity, CityPresence, HealthStatus, LotusApiScope, TrustLevel, TrustRecord
 from agent_internet.snapshot import ControlPlaneStateStore
 
 
@@ -90,5 +90,56 @@ def test_lotus_daemon_rejects_missing_auth(tmp_path):
         assert exc_info.value.code == 401
         payload = json.loads(exc_info.value.read().decode("utf-8"))
         assert payload["error"] == "missing_bearer_token"
+    finally:
+        daemon.shutdown()
+
+
+def test_lotus_daemon_serves_route_resolution_http_api(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    root_secret = store.update(
+        lambda plane: LotusControlPlaneAPI(plane).issue_token(
+            subject="root",
+            scopes=(LotusApiScope.READ.value, LotusApiScope.SERVICE_WRITE.value),
+            token_secret="route-root",
+            token_id="tok-route-root",
+        ).secret,
+    )
+    store.update(
+        lambda plane: (
+            plane.register_city(
+                CityIdentity(city_id="city-b", slug="b", repo="org/city-b"),
+                CityEndpoint(city_id="city-b", transport="git", location="https://example/city-b.git"),
+            ),
+            plane.announce_city(CityPresence(city_id="city-b", health=HealthStatus.HEALTHY)),
+            plane.record_trust(TrustRecord("city-a", "city-b", TrustLevel.TRUSTED, reason="route daemon test")),
+        ),
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        status, published = _request_json(
+            daemon.base_url,
+            "/v1/lotus/routes",
+            method="POST",
+            token=root_secret,
+            payload={
+                "owner_city_id": "city-a",
+                "destination_prefix": "service:city-z/forum",
+                "target_city_id": "city-z",
+                "next_hop_city_id": "city-b",
+                "metric": 5,
+            },
+        )
+        assert status == 200
+        assert published["route"]["nadi_type"] == "vyana"
+
+        status, resolved = _request_json(
+            daemon.base_url,
+            "/v1/lotus/routes/city-a/service%3Acity-z%2Fforum-api",
+            token=root_secret,
+        )
+        assert status == 200
+        assert resolved["resolved"]["next_hop_city_id"] == "city-b"
     finally:
         daemon.shutdown()

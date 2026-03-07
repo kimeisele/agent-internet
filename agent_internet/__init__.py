@@ -24,6 +24,7 @@ from .agent_city_bridge import AgentCityBridge, city_presence_from_report
 from .agent_city_contract import AgentCityFilesystemContract
 from .control_plane import AgentInternetControlPlane
 from .file_locking import locked_file, read_locked_json_value, update_locked_json_value, write_locked_json_value
+from .git_federation import GitRemoteMetadata, GitWikiFederationSync, detect_git_remote_metadata
 from .filesystem_transport import FilesystemFederationTransport
 from .filesystem_message_transport import AgentCityFilesystemMessageTransport
 from .interfaces import CityRegistry, DiscoveryService, FederationTransport, InternetRouter, TrustEngine
@@ -42,6 +43,8 @@ from .models import (
     LotusApiToken,
     LotusLinkAddress,
     LotusNetworkAddress,
+    LotusRoute,
+    LotusRouteResolution,
     LotusServiceAddress,
     TrustLevel,
     TrustRecord,
@@ -49,6 +52,7 @@ from .models import (
 from .receipt_store import FilesystemReceiptStore
 from .router import RegistryRouter
 from .snapshot import ControlPlaneStateStore, restore_control_plane, snapshot_control_plane
+from .steward_protocol_compat import StewardProtocolBindings, load_steward_protocol_bindings
 from .steward_substrate import StewardSubstrateBindings, load_steward_substrate
 from .steward_federation import StewardFederationAdapter
 from .sync_worker import BidirectionalSyncWorker, SyncCycleResult
@@ -94,6 +98,8 @@ __all__ = [
     "FederationTransport",
     "FilesystemFederationTransport",
     "FilesystemReceiptStore",
+    "GitRemoteMetadata",
+    "GitWikiFederationSync",
     "HealthStatus",
     "HostedEndpoint",
     "InMemoryCityRegistry",
@@ -109,6 +115,8 @@ __all__ = [
     "LotusControlPlaneAPI",
     "LotusLinkAddress",
     "LotusNetworkAddress",
+    "LotusRoute",
+    "LotusRouteResolution",
     "LotusServiceAddress",
     "MissionExecutionResult",
     "OutboxRelayPump",
@@ -117,6 +125,7 @@ __all__ = [
     "RelayService",
     "RegistryRouter",
     "StewardFederationAdapter",
+    "StewardProtocolBindings",
     "StewardSubstrateBindings",
     "SyncCycleResult",
     "TransportRegistry",
@@ -126,8 +135,10 @@ __all__ = [
     "TrustRecord",
     "update_locked_json_value",
     "city_presence_from_report",
+    "detect_git_remote_metadata",
     "load_agent_city_directive_execution_bindings",
     "load_agent_city_phase_tick_bindings",
+    "load_steward_protocol_bindings",
     "load_steward_substrate",
     "load_agent_city_immigration_bindings",
     "restore_control_plane",

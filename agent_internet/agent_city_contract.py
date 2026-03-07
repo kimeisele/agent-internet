@@ -43,6 +43,10 @@ class AgentCityFilesystemContract:
     def peer_descriptor_path(self) -> Path:
         return self.federation_dir / "peer.json"
 
+    @property
+    def git_federation_manifest_path(self) -> Path:
+        return self.federation_dir / "git_federation.json"
+
     def directive_path(self, directive_id: str) -> Path:
         return self.directives_dir / f"{directive_id}.json"
 

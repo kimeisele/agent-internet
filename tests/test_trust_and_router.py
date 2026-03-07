@@ -1,5 +1,5 @@
 from agent_internet.memory_registry import InMemoryCityRegistry
-from agent_internet.models import CityEndpoint, CityPresence, HealthStatus, HostedEndpoint, TrustLevel, TrustRecord
+from agent_internet.models import CityEndpoint, CityPresence, HealthStatus, HostedEndpoint, LotusRoute, TrustLevel, TrustRecord
 from agent_internet.router import RegistryRouter
 from agent_internet.trust import InMemoryTrustEngine
 
@@ -68,3 +68,41 @@ def test_router_resolves_public_handle_only_while_owner_online_and_lease_active(
     registry.announce(CityPresence("city-b", health=HealthStatus.OFFLINE))
 
     assert router.resolve_public_handle("forum.city-b.lotus", now=10.0) is None
+
+
+def test_router_resolves_best_next_hop_by_longest_prefix_and_trust():
+    registry = InMemoryCityRegistry()
+    registry.upsert_endpoint(CityEndpoint("city-b", "git", "https://example/b.git"))
+    registry.upsert_endpoint(CityEndpoint("city-c", "git", "https://example/c.git"))
+    registry.upsert_route(
+        LotusRoute(
+            route_id="r1",
+            owner_city_id="city-a",
+            destination_prefix="service:city-z/",
+            target_city_id="city-z",
+            next_hop_city_id="city-b",
+            metric=20,
+        ),
+    )
+    registry.upsert_route(
+        LotusRoute(
+            route_id="r2",
+            owner_city_id="city-a",
+            destination_prefix="service:city-z/forum",
+            target_city_id="city-z",
+            next_hop_city_id="city-c",
+            metric=10,
+        ),
+    )
+    registry.announce(CityPresence("city-b", health=HealthStatus.HEALTHY))
+    registry.announce(CityPresence("city-c", health=HealthStatus.HEALTHY))
+    trust = InMemoryTrustEngine()
+    trust.record(TrustRecord("city-a", "city-b", TrustLevel.OBSERVED, reason="route mesh"))
+    trust.record(TrustRecord("city-a", "city-c", TrustLevel.TRUSTED, reason="route mesh"))
+    router = RegistryRouter(registry=registry, discovery=registry, trust_engine=trust)
+
+    resolution = router.resolve_next_hop("city-a", "service:city-z/forum-api")
+
+    assert resolution is not None
+    assert resolution.route_id == "r2"
+    assert resolution.next_hop_endpoint.city_id == "city-c"

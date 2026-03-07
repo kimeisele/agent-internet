@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from .control_plane import AgentInternetControlPlane
 from .models import EndpointVisibility, LotusApiScope, LotusApiToken
 from .snapshot import snapshot_control_plane
+from .steward_protocol_compat import summarize_steward_protocol_bindings
 
 
 LOTUS_MUTATING_ACTIONS = frozenset(
@@ -15,6 +16,7 @@ LOTUS_MUTATING_ACTIONS = frozenset(
         "assign_addresses",
         "issue_token",
         "publish_endpoint",
+        "publish_route",
         "publish_service",
     },
 )
@@ -70,6 +72,9 @@ class LotusControlPlaneAPI:
         if action == "show_state":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "state": snapshot_control_plane(self.plane)}
+        if action == "show_steward_protocol":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            return {"token_id": token.token_id, "bindings": summarize_steward_protocol_bindings()}
         if action == "issue_token":
             self.authenticate(bearer_token, required_scopes=(LotusApiScope.TOKEN_WRITE.value,))
             issued = self.issue_token(
@@ -112,6 +117,22 @@ class LotusControlPlaneAPI:
                 labels=dict(payload.get("labels", {})),
             )
             return {"token_id": token.token_id, "service_address": asdict(service)}
+        if action == "publish_route":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.SERVICE_WRITE.value,))
+            route = self.plane.publish_route(
+                owner_city_id=payload["owner_city_id"],
+                destination_prefix=payload["destination_prefix"],
+                target_city_id=payload["target_city_id"],
+                next_hop_city_id=payload["next_hop_city_id"],
+                metric=int(payload.get("metric", 100)),
+                nadi_type=str(payload.get("nadi_type", "")),
+                priority=str(payload.get("priority", "")),
+                ttl_ms=payload.get("ttl_ms"),
+                ttl_s=payload.get("ttl_s"),
+                route_id=payload.get("route_id", ""),
+                labels=dict(payload.get("labels", {})),
+            )
+            return {"token_id": token.token_id, "route": asdict(route)}
         if action == "resolve_handle":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             endpoint = self.plane.resolve_public_handle(payload["public_handle"])
@@ -122,4 +143,8 @@ class LotusControlPlaneAPI:
             if service is not None and service.auth_required:
                 self.authenticate(bearer_token, required_scopes=tuple(service.required_scopes))
             return {"token_id": token.token_id, "resolved": None if service is None else asdict(service)}
+        if action == "resolve_next_hop":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            resolution = self.plane.resolve_next_hop(payload["source_city_id"], payload["destination"])
+            return {"token_id": token.token_id, "resolved": None if resolution is None else asdict(resolution)}
         raise ValueError(f"unknown_action:{action}")

@@ -33,6 +33,14 @@ def _build_plane() -> AgentInternetControlPlane:
         required_scopes=(LotusApiScope.READ.value,),
         now=21.0,
     )
+    plane.publish_route(
+        owner_city_id="city-a",
+        destination_prefix="service:city-b/forum",
+        target_city_id="city-b",
+        next_hop_city_id="city-b",
+        metric=7,
+        now=21.5,
+    )
     LotusControlPlaneAPI(plane).issue_token(
         subject="operator",
         scopes=(LotusApiScope.READ.value, LotusApiScope.SERVICE_WRITE.value),
@@ -55,6 +63,7 @@ def test_snapshot_roundtrip_restores_route_resolution():
     assert restored.registry.get_link_address("city-b").mac_address.startswith("02:00:")
     assert restored.resolve_public_handle("forum.city-b.lotus").owner_city_id == "city-b"
     assert restored.resolve_service_address("city-b", "forum-api").public_handle == "api.forum.city-b.lotus"
+    assert restored.registry.get_route("city-a:service:city-b/forum:city-b").target_city_id == "city-b"
     assert restored.registry.get_api_token("tok-snapshot").subject == "operator"
 
 
@@ -69,3 +78,4 @@ def test_state_store_persists_and_loads_control_plane(tmp_path: Path):
     assert loaded.resolve_route("city-a", "city-b").city_id == "city-b"
     assert loaded.resolve_public_handle("forum.city-b.lotus").location == "https://forum.city-b.example"
     assert loaded.resolve_service_address("city-b", "forum-api").location == "https://forum.city-b.example/api"
+    assert loaded.registry.get_route("city-a:service:city-b/forum:city-b").metric == 7

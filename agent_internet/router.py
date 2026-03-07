@@ -3,7 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .interfaces import CityRegistry, DiscoveryService, TrustEngine
-from .models import CityEndpoint, HealthStatus, HostedEndpoint, LotusServiceAddress, TrustLevel
+from .models import (
+    CityEndpoint,
+    HealthStatus,
+    HostedEndpoint,
+    LotusRouteResolution,
+    LotusServiceAddress,
+    TrustLevel,
+)
 from .trust import trust_allows
 
 
@@ -54,3 +61,45 @@ class RegistryRouter:
                 return None
 
         return service
+
+    def resolve_next_hop(self, source_city_id: str, destination: str, *, now: float | None = None) -> LotusRouteResolution | None:
+        routes = sorted(
+            (
+                route
+                for route in self.registry.list_routes()
+                if _matches_destination_prefix(destination, route.destination_prefix)
+            ),
+            key=lambda route: (-len(route.destination_prefix), route.metric, route.route_id),
+        )
+        for route in routes:
+            next_hop_endpoint = self.registry.get_endpoint(route.next_hop_city_id)
+            if next_hop_endpoint is None:
+                continue
+
+            if self.discovery is not None:
+                presence = self.discovery.get_presence(route.next_hop_city_id)
+                if presence is not None and presence.health == HealthStatus.OFFLINE:
+                    continue
+
+            if self.trust_engine is not None:
+                trust = self.trust_engine.evaluate(source_city_id, route.next_hop_city_id)
+                if not trust_allows(trust, self.minimum_trust):
+                    continue
+
+            return LotusRouteResolution(
+                destination=destination,
+                matched_prefix=route.destination_prefix,
+                route_id=route.route_id,
+                target_city_id=route.target_city_id,
+                next_hop_city_id=route.next_hop_city_id,
+                next_hop_endpoint=next_hop_endpoint,
+                nadi_type=route.nadi_type,
+                priority=route.priority,
+                ttl_ms=route.ttl_ms,
+                maha_header_hex=route.maha_header_hex,
+            )
+        return None
+
+
+def _matches_destination_prefix(destination: str, prefix: str) -> bool:
+    return destination == prefix or destination.startswith(prefix)

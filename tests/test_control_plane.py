@@ -109,3 +109,40 @@ def test_control_plane_publishes_and_resolves_service_address():
 
     assert service.service_id == "city-a:forum-api"
     assert plane.resolve_service_address("city-a", "forum-api", now=10.0).location == "https://forum.city-a.example/api"
+
+
+def test_control_plane_publishes_steward_aligned_route_and_resolves_next_hop():
+    plane = AgentInternetControlPlane()
+    plane.register_city(
+        CityIdentity(city_id="city-a", slug="a", repo="org/city-a"),
+        CityEndpoint(city_id="city-a", transport="filesystem", location="/tmp/city-a"),
+    )
+    plane.register_city(
+        CityIdentity(city_id="city-b", slug="b", repo="org/city-b"),
+        CityEndpoint(city_id="city-b", transport="git", location="https://example/city-b.git"),
+    )
+    plane.announce_city(
+        city_presence_from_report(
+            "city-b",
+            {"heartbeat": 1, "timestamp": 1.0, "population": 1, "alive": 1, "dead": 0, "chain_valid": True},
+        ),
+    )
+    plane.record_trust(TrustRecord("city-a", "city-b", TrustLevel.TRUSTED, reason="route federation"))
+
+    route = plane.publish_route(
+        owner_city_id="city-a",
+        destination_prefix="service:city-z/forum",
+        target_city_id="city-z",
+        next_hop_city_id="city-b",
+        metric=5,
+        ttl_s=60.0,
+        now=5.0,
+    )
+    resolution = plane.resolve_next_hop("city-a", "service:city-z/forum-api", now=10.0)
+
+    assert route.nadi_type == "vyana"
+    assert route.priority == "rajas"
+    assert route.ttl_ms == 60000
+    assert resolution is not None
+    assert resolution.next_hop_city_id == "city-b"
+    assert resolution.next_hop_endpoint.location == "https://example/city-b.git"

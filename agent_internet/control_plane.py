@@ -14,11 +14,14 @@ from .models import (
     LotusApiToken,
     LotusLinkAddress,
     LotusNetworkAddress,
+    LotusRoute,
+    LotusRouteResolution,
     LotusServiceAddress,
     TrustLevel,
     TrustRecord,
 )
 from .router import RegistryRouter
+from .steward_protocol_compat import build_maha_route_header_hex, load_steward_protocol_bindings
 from .transport import DeliveryEnvelope, DeliveryReceipt, RelayService, TransportRegistry
 from .trust import InMemoryTrustEngine
 
@@ -138,6 +141,60 @@ class AgentInternetControlPlane:
 
     def resolve_service_address(self, owner_city_id: str, service_name: str, *, now: float | None = None) -> LotusServiceAddress | None:
         return self.router.resolve_service(owner_city_id, service_name, now=now)
+
+    def publish_route(
+        self,
+        *,
+        owner_city_id: str,
+        destination_prefix: str,
+        target_city_id: str,
+        next_hop_city_id: str,
+        metric: int = 100,
+        nadi_type: str = "",
+        priority: str = "",
+        ttl_ms: int | None = None,
+        ttl_s: float | None = None,
+        route_id: str = "",
+        labels: dict[str, str] | None = None,
+        now: float | None = None,
+    ) -> LotusRoute:
+        bindings = load_steward_protocol_bindings()
+        selected_nadi_type = nadi_type or bindings.default_route_nadi_type
+        selected_priority = priority or bindings.default_route_priority
+        if selected_nadi_type not in bindings.allowed_nadi_types:
+            raise ValueError(f"invalid_nadi_type:{selected_nadi_type}")
+        if selected_priority not in bindings.allowed_priorities:
+            raise ValueError(f"invalid_priority:{selected_priority}")
+
+        effective_ttl_ms = int(
+            ttl_ms if ttl_ms is not None else (ttl_s * 1000 if ttl_s is not None else bindings.default_timeout_ms),
+        )
+        started_at = float(time.time() if now is None else now)
+        route = LotusRoute(
+            route_id=route_id or f"{owner_city_id}:{destination_prefix}:{next_hop_city_id}",
+            owner_city_id=owner_city_id,
+            destination_prefix=destination_prefix,
+            target_city_id=target_city_id,
+            next_hop_city_id=next_hop_city_id,
+            metric=int(metric),
+            nadi_type=selected_nadi_type,
+            priority=selected_priority,
+            ttl_ms=max(0, effective_ttl_ms),
+            maha_header_hex=build_maha_route_header_hex(
+                source_key=owner_city_id,
+                target_key=target_city_id,
+                ttl_ms=max(0, effective_ttl_ms),
+                metric=int(metric),
+            ),
+            lease_started_at=started_at,
+            lease_expires_at=None if ttl_s is None else started_at + max(ttl_s, 0.0),
+            labels=dict(labels or {}),
+        )
+        self.registry.upsert_route(route)
+        return route
+
+    def resolve_next_hop(self, source_city_id: str, destination: str, *, now: float | None = None) -> LotusRouteResolution | None:
+        return self.router.resolve_next_hop(source_city_id, destination, now=now)
 
     def store_api_token(self, token: LotusApiToken) -> None:
         self.registry.upsert_api_token(token)

@@ -11,6 +11,7 @@ from .models import (
     LotusApiToken,
     LotusLinkAddress,
     LotusNetworkAddress,
+    LotusRoute,
     LotusServiceAddress,
 )
 
@@ -54,6 +55,7 @@ class InMemoryCityRegistry:
     _handle_index: dict[str, str] = field(default_factory=dict)
     _service_addresses: dict[str, LotusServiceAddress] = field(default_factory=dict)
     _service_name_index: dict[tuple[str, str], str] = field(default_factory=dict)
+    _routes: dict[str, LotusRoute] = field(default_factory=dict)
     _api_tokens: dict[str, LotusApiToken] = field(default_factory=dict)
     _api_token_hash_index: dict[str, str] = field(default_factory=dict)
     _next_link_id: int = 1
@@ -175,6 +177,18 @@ class InMemoryCityRegistry:
 
     def list_service_addresses(self) -> list[LotusServiceAddress]:
         return [self._service_addresses[service_id] for service_id in sorted(self._service_addresses)]
+
+    def upsert_route(self, route: LotusRoute) -> None:
+        self._routes[route.route_id] = route
+
+    def get_route(self, route_id: str) -> LotusRoute | None:
+        route = self._routes.get(route_id)
+        if route is None or not _lease_active(route.lease_expires_at, None):
+            return None
+        return route
+
+    def list_routes(self) -> list[LotusRoute]:
+        return [self._routes[route_id] for route_id in sorted(self._routes)]
 
     def upsert_api_token(self, token: LotusApiToken) -> None:
         self._api_tokens[token.token_id] = token

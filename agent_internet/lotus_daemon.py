@@ -107,6 +107,8 @@ class LotusApiDaemon:
         try:
             if method == "GET" and path == "/v1/lotus/state":
                 return 200, self._call(token, "show_state", {})
+            if method == "GET" and path == "/v1/lotus/steward-protocol":
+                return 200, self._call(token, "show_steward_protocol", {})
             if method == "GET" and path.startswith("/v1/lotus/handles/"):
                 return 200, self._call(
                     token,
@@ -122,6 +124,15 @@ class LotusApiDaemon:
                     "resolve_service",
                     {"city_id": unquote(parts[0]), "service_name": unquote(parts[1])},
                 )
+            if method == "GET" and path.startswith("/v1/lotus/routes/"):
+                parts = path.removeprefix("/v1/lotus/routes/").split("/", 1)
+                if len(parts) != 2 or not parts[0] or not parts[1]:
+                    raise ValueError("invalid_route_path")
+                return 200, self._call(
+                    token,
+                    "resolve_next_hop",
+                    {"source_city_id": unquote(parts[0]), "destination": unquote(parts[1])},
+                )
             if method == "POST" and path == "/v1/lotus/call":
                 request = _decode_json_object(body)
                 return 200, self._call(token, str(request["action"]), dict(request.get("params", {})))
@@ -133,6 +144,8 @@ class LotusApiDaemon:
                 return 200, self._call(token, "publish_endpoint", _decode_json_object(body))
             if method == "POST" and path == "/v1/lotus/services":
                 return 200, self._call(token, "publish_service", _decode_json_object(body))
+            if method == "POST" and path == "/v1/lotus/routes":
+                return 200, self._call(token, "publish_route", _decode_json_object(body))
             return 404, {"error": "not_found", "path": path}
         except PermissionError as exc:
             message = str(exc)

@@ -1,5 +1,5 @@
 from agent_internet.memory_registry import InMemoryCityRegistry
-from agent_internet.models import CityEndpoint, CityIdentity, CityPresence, HealthStatus, HostedEndpoint, LotusApiToken, LotusServiceAddress
+from agent_internet.models import CityEndpoint, CityIdentity, CityPresence, HealthStatus, HostedEndpoint, LotusApiToken, LotusRoute, LotusServiceAddress
 
 
 def test_registry_stores_identity_and_endpoint():
@@ -77,3 +77,18 @@ def test_registry_stores_service_addresses_and_api_tokens():
 
     assert registry.get_service_address_by_name("city-a", "forum-api", now=10.0).public_handle == "api.forum.city-a.lotus"
     assert registry.get_api_token_by_sha256("deadbeef").token_id == "tok-1"
+
+
+def test_registry_stores_routes():
+    registry = InMemoryCityRegistry()
+    registry.upsert_route(
+        LotusRoute(
+            route_id="r1",
+            owner_city_id="city-a",
+            destination_prefix="service:city-z/",
+            target_city_id="city-z",
+            next_hop_city_id="city-b",
+        ),
+    )
+
+    assert registry.get_route("r1").next_hop_city_id == "city-b"

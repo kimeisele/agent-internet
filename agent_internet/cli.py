@@ -6,11 +6,13 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .agent_city_peer import AgentCityPeer
+from .git_federation import GitWikiFederationSync, detect_git_remote_metadata
 from .local_lab import LocalDualCityLab
 from .lotus_api import LOTUS_MUTATING_ACTIONS, LotusControlPlaneAPI
 from .lotus_daemon import LotusApiDaemon
 from .models import EndpointVisibility, LotusApiScope, TrustLevel, TrustRecord
 from .snapshot import ControlPlaneStateStore, snapshot_control_plane
+from .steward_protocol_compat import summarize_steward_protocol_bindings
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -23,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     publish_peer.add_argument("--root", required=True)
     publish_peer.add_argument("--city-id", required=True)
-    publish_peer.add_argument("--repo", required=True)
+    publish_peer.add_argument("--repo")
     publish_peer.add_argument("--slug")
     publish_peer.add_argument("--public-key", default="")
     publish_peer.add_argument("--capability", action="append", default=[])
@@ -50,6 +52,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     show = subparsers.add_parser("show-state", help="Print the current persisted control-plane state")
     show.add_argument("--state-path", default="data/control_plane/state.json")
+
+    git_describe = subparsers.add_parser(
+        "git-federation-describe",
+        help="Autodetect git origin/wiki metadata for a repository root",
+    )
+    git_describe.add_argument("--root", required=True)
+
+    git_sync = subparsers.add_parser(
+        "git-federation-sync-wiki",
+        help="Project the current control-plane view into the repo's git-backed wiki",
+    )
+    git_sync.add_argument("--root", required=True)
+    git_sync.add_argument("--state-path", default="data/control_plane/state.json")
+    git_sync.add_argument("--wiki-repo-url")
+    git_sync.add_argument("--wiki-checkout-path")
+    git_sync.add_argument("--heartbeat-label", default="manual")
+
+    subparsers.add_parser(
+        "lotus-show-steward-protocol",
+        help="Show the currently active steward-protocol compatibility bindings",
+    )
 
     lotus_assign = subparsers.add_parser(
         "lotus-assign-addresses",
@@ -110,6 +133,30 @@ def build_parser() -> argparse.ArgumentParser:
     lotus_resolve_service.add_argument("--state-path", default="data/control_plane/state.json")
     lotus_resolve_service.add_argument("--city-id", required=True)
     lotus_resolve_service.add_argument("--service-name", required=True)
+
+    lotus_publish_route = subparsers.add_parser(
+        "lotus-publish-route",
+        help="Publish a Lotus prefix route with steward-aligned Nadi semantics",
+    )
+    lotus_publish_route.add_argument("--state-path", default="data/control_plane/state.json")
+    lotus_publish_route.add_argument("--owner-city-id", required=True)
+    lotus_publish_route.add_argument("--destination-prefix", required=True)
+    lotus_publish_route.add_argument("--target-city-id", required=True)
+    lotus_publish_route.add_argument("--next-hop-city-id", required=True)
+    lotus_publish_route.add_argument("--route-id", default="")
+    lotus_publish_route.add_argument("--metric", type=int, default=100)
+    lotus_publish_route.add_argument("--nadi-type", default="")
+    lotus_publish_route.add_argument("--priority", default="")
+    lotus_publish_route.add_argument("--ttl-ms", type=int)
+    lotus_publish_route.add_argument("--ttl-s", type=float)
+
+    lotus_resolve_next_hop = subparsers.add_parser(
+        "lotus-resolve-next-hop",
+        help="Resolve the best Lotus next hop for a destination string using prefix routes",
+    )
+    lotus_resolve_next_hop.add_argument("--state-path", default="data/control_plane/state.json")
+    lotus_resolve_next_hop.add_argument("--source-city-id", required=True)
+    lotus_resolve_next_hop.add_argument("--destination", required=True)
 
     lotus_issue_token = subparsers.add_parser(
         "lotus-issue-token",
@@ -275,14 +322,49 @@ def cmd_publish_agent_city_peer(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_git_federation_describe(args: argparse.Namespace) -> int:
+    remote = detect_git_remote_metadata(args.root)
+    print(json.dumps({
+        "repo_root": str(remote.repo_root),
+        "origin_url": remote.origin_url,
+        "repo_ref": remote.repo_ref,
+        "wiki_repo_url": remote.wiki_repo_url,
+    }, indent=2))
+    return 0
+
+
+def cmd_git_federation_sync_wiki(args: argparse.Namespace) -> int:
+    root = Path(args.root).resolve()
+    peer = AgentCityPeer.discover_from_repo_root(root)
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    peer_descriptor = peer.publish_self_description()
+    git_federation = peer_descriptor.get("git_federation", {})
+    effective_wiki_repo_url = args.wiki_repo_url or str(git_federation.get("wiki_repo_url", ""))
+    if effective_wiki_repo_url:
+        peer_descriptor.setdefault("git_federation", {})["wiki_repo_url"] = effective_wiki_repo_url
+    sync = GitWikiFederationSync(
+        repo_root=root,
+        wiki_repo_url=effective_wiki_repo_url,
+        checkout_path=None if not args.wiki_checkout_path else Path(args.wiki_checkout_path),
+    )
+    result = sync.sync(
+        peer_descriptor=peer_descriptor,
+        state_snapshot=snapshot_control_plane(plane),
+        heartbeat_label=args.heartbeat_label,
+    )
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def cmd_onboard_agent_city(args: argparse.Namespace) -> int:
     store = ControlPlaneStateStore(path=Path(args.state_path))
     plane = store.load()
     if args.discover:
         peer = AgentCityPeer.discover_from_repo_root(args.root)
     else:
-        if not args.city_id or not args.repo:
-            raise SystemExit("onboard-agent-city requires --city-id and --repo unless --discover is set")
+        if not args.city_id:
+            raise SystemExit("onboard-agent-city requires --city-id unless --discover is set")
         peer = AgentCityPeer.from_repo_root(
             args.root,
             city_id=args.city_id,
@@ -327,6 +409,11 @@ def cmd_show_state(args: argparse.Namespace) -> int:
     store = ControlPlaneStateStore(path=Path(args.state_path))
     plane = store.load()
     print(json.dumps(snapshot_control_plane(plane), indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_lotus_show_steward_protocol(_args: argparse.Namespace) -> int:
+    print(json.dumps(summarize_steward_protocol_bindings(), indent=2, sort_keys=True))
     return 0
 
 
@@ -420,6 +507,43 @@ def cmd_lotus_resolve_service(args: argparse.Namespace) -> int:
                 "city_id": args.city_id,
                 "service_name": args.service_name,
                 "resolved": None if service is None else asdict(service),
+            },
+            indent=2,
+        ),
+    )
+    return 0
+
+
+def cmd_lotus_publish_route(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    route = store.update(
+        lambda plane: plane.publish_route(
+            owner_city_id=args.owner_city_id,
+            destination_prefix=args.destination_prefix,
+            target_city_id=args.target_city_id,
+            next_hop_city_id=args.next_hop_city_id,
+            route_id=args.route_id,
+            metric=args.metric,
+            nadi_type=args.nadi_type,
+            priority=args.priority,
+            ttl_ms=args.ttl_ms,
+            ttl_s=args.ttl_s,
+        ),
+    )
+    print(json.dumps({"route": asdict(route), "state_path": str(store.path)}, indent=2))
+    return 0
+
+
+def cmd_lotus_resolve_next_hop(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    resolution = plane.resolve_next_hop(args.source_city_id, args.destination)
+    print(
+        json.dumps(
+            {
+                "source_city_id": args.source_city_id,
+                "destination": args.destination,
+                "resolved": None if resolution is None else asdict(resolution),
             },
             indent=2,
         ),
@@ -812,10 +936,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "publish-agent-city-peer":
         return cmd_publish_agent_city_peer(args)
+    if args.command == "git-federation-describe":
+        return cmd_git_federation_describe(args)
+    if args.command == "git-federation-sync-wiki":
+        return cmd_git_federation_sync_wiki(args)
     if args.command == "onboard-agent-city":
         return cmd_onboard_agent_city(args)
     if args.command == "show-state":
         return cmd_show_state(args)
+    if args.command == "lotus-show-steward-protocol":
+        return cmd_lotus_show_steward_protocol(args)
     if args.command == "lotus-assign-addresses":
         return cmd_lotus_assign_addresses(args)
     if args.command == "lotus-publish-endpoint":
@@ -826,6 +956,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_lotus_publish_service(args)
     if args.command == "lotus-resolve-service":
         return cmd_lotus_resolve_service(args)
+    if args.command == "lotus-publish-route":
+        return cmd_lotus_publish_route(args)
+    if args.command == "lotus-resolve-next-hop":
+        return cmd_lotus_resolve_next_hop(args)
     if args.command == "lotus-issue-token":
         return cmd_lotus_issue_token(args)
     if args.command == "lotus-api-call":

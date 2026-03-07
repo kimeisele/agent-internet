@@ -66,17 +66,25 @@ Run locally:
 
 - `python -m agent_internet.cli show-state`
 - `python -m agent_internet.cli lotus-assign-addresses --state-path ./data/control_plane/state.json --city-id city-a`
+- `python -m agent_internet.cli lotus-show-steward-protocol`
 - `python -m agent_internet.cli lotus-publish-endpoint --state-path ./data/control_plane/state.json --city-id city-a --public-handle forum.city-a.lotus --transport https --location https://forum.city-a.example`
 - `python -m agent_internet.cli lotus-resolve-handle --state-path ./data/control_plane/state.json --public-handle forum.city-a.lotus`
 - `python -m agent_internet.cli lotus-publish-service --state-path ./data/control_plane/state.json --city-id city-a --service-name forum-api --public-handle api.forum.city-a.lotus --transport https --location https://forum.city-a.example/api --required-scope lotus.read`
+- `python -m agent_internet.cli lotus-publish-route --state-path ./data/control_plane/state.json --owner-city-id city-a --destination-prefix service:city-z/forum --target-city-id city-z --next-hop-city-id city-b --metric 5`
+- `python -m agent_internet.cli lotus-resolve-next-hop --state-path ./data/control_plane/state.json --source-city-id city-a --destination service:city-z/forum-api`
 - `python -m agent_internet.cli lotus-issue-token --state-path ./data/control_plane/state.json --subject operator --scope lotus.read --scope lotus.write.service`
 - `python -m agent_internet.cli lotus-api-call --state-path ./data/control_plane/state.json --token <bearer> --action resolve_service --params-json '{"city_id":"city-a","service_name":"forum-api"}'`
 - `python -m agent_internet.cli lotus-api-daemon --state-path ./data/control_plane/state.json --host 127.0.0.1 --port 8788`
 - `curl -s -H 'Authorization: Bearer <bearer>' http://127.0.0.1:8788/v1/lotus/state`
+- `curl -s -H 'Authorization: Bearer <bearer>' http://127.0.0.1:8788/v1/lotus/steward-protocol`
+- `curl -s -X POST -H 'Authorization: Bearer <bearer>' -H 'Content-Type: application/json' http://127.0.0.1:8788/v1/lotus/routes -d '{"owner_city_id":"city-a","destination_prefix":"service:city-z/forum","target_city_id":"city-z","next_hop_city_id":"city-b","metric":5}'`
 - `curl -s -X POST -H 'Authorization: Bearer <bearer>' -H 'Content-Type: application/json' http://127.0.0.1:8788/v1/lotus/services -d '{"city_id":"city-a","service_name":"forum-api","public_handle":"api.forum.city-a.lotus","transport":"https","location":"https://forum.city-a.example/api","required_scopes":["lotus.read"]}'`
 - `python -m agent_internet.cli publish-agent-city-peer --root ../agent-city --city-id city-a --repo kimeisele/agent-city --capability federation`
+- `python -m agent_internet.cli git-federation-describe --root ../agent-city`
+- `python -m agent_internet.cli publish-agent-city-peer --root ../agent-city --city-id city-a`
 - `python -m agent_internet.cli onboard-agent-city --root ../agent-city --city-id city-a --repo kimeisele/agent-city`
 - `python -m agent_internet.cli onboard-agent-city --root ../agent-city --discover`
+- `python -m agent_internet.cli git-federation-sync-wiki --root ../agent-city --state-path ./data/control_plane/state.json`
 - `python -m agent_internet.cli init-dual-city-lab --root ./tmp/lab`
 - `python -m agent_internet.cli lab-send --root ./tmp/lab --source-city-id city-a --target-city-id city-b --operation sync --payload-json '{"heartbeat": 1}'`
 - `python -m agent_internet.cli lab-emit-outbox --root ./tmp/lab --source-city-id city-a --target-city-id city-b --operation sync --payload-json '{"heartbeat": 1}'`

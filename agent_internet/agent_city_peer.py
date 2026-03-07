@@ -8,6 +8,7 @@ from .agent_city_contract import AgentCityFilesystemContract
 from .control_plane import AgentInternetControlPlane
 from .file_locking import read_locked_json_value, write_locked_json_value
 from .filesystem_transport import FilesystemFederationTransport
+from .git_federation import detect_git_remote_metadata, write_git_federation_manifest
 from .models import CityEndpoint, CityIdentity, CityPresence
 
 
@@ -53,7 +54,7 @@ class AgentCityPeer:
         root: Path | str,
         *,
         city_id: str,
-        repo: str,
+        repo: str | None = None,
         slug: str | None = None,
         public_key: str = "",
         capabilities: tuple[str, ...] = (),
@@ -61,10 +62,11 @@ class AgentCityPeer:
         endpoint_location: str | None = None,
     ) -> "AgentCityPeer":
         repo_root = Path(root).resolve()
+        repo_ref = repo or detect_git_remote_metadata(repo_root).repo_ref
         identity = CityIdentity(
             city_id=city_id,
             slug=slug or city_id,
-            repo=repo,
+            repo=repo_ref,
             public_key=public_key,
         )
         endpoint = CityEndpoint(
@@ -95,5 +97,16 @@ class AgentCityPeer:
             "endpoint": asdict(self.endpoint),
             "capabilities": list(self.bridge.capabilities),
         }
+        try:
+            remote = detect_git_remote_metadata(self.root)
+        except Exception:
+            remote = None
+        if remote is not None:
+            payload["git_federation"] = write_git_federation_manifest(
+                self.contract.git_federation_manifest_path,
+                peer_descriptor=payload,
+                remote=remote,
+                shared_pages=("Home.md", "Cities.md", "Services.md", "Routes.md", "Git-Federation.md"),
+            )
         write_locked_json_value(self.contract.peer_descriptor_path, payload)
         return payload
