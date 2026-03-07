@@ -1,6 +1,7 @@
 """Public entrypoints for the Agent Internet control plane."""
 
 from .agent_city_directives import AgentCityDirectiveFactory, AgentCityDirectiveType, validate_agent_city_directive
+from .agent_city_peer import AgentCityPeer
 from .agent_city_bridge import AgentCityBridge, city_presence_from_report
 from .agent_city_contract import AgentCityFilesystemContract
 from .control_plane import AgentInternetControlPlane
@@ -19,6 +20,7 @@ __all__ = [
     "AgentCityDirectiveType",
     "AgentCityBridge",
     "AgentCityFilesystemContract",
+    "AgentCityPeer",
     "AgentInternetControlPlane",
     "CityEndpoint",
     "CityIdentity",

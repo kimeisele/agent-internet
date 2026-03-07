@@ -44,6 +44,7 @@ It establishes:
 - `agent_internet/control_plane.py` — composed control-plane service
 - `agent_internet/agent_city_bridge.py` — projection from current Agent City reports
 - `agent_internet/agent_city_directives.py` — validated builders for current agent-city directive types
+- `agent_internet/agent_city_peer.py` — explicit onboarding adapter for existing agent-city repos
 - `agent_internet/steward_federation.py` — typed steward-protocol object adapter
 - `agent_internet/snapshot.py` — conservative JSON snapshot persistence
 - `agent_internet/agent_city_contract.py` — current Agent City federation path contract
