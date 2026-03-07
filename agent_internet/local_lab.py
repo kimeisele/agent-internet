@@ -4,8 +4,10 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from secrets import token_hex
 
 from .agent_city_contract import AgentCityFilesystemContract
+from .agent_city_directive_bridge import AgentCityDirectiveExecutionAdapter, DirectiveExecutionResult
 from .agent_city_immigration import AgentCityImmigrationAdapter
 from .agent_city_peer import AgentCityPeer
 from .control_plane import AgentInternetControlPlane
@@ -149,6 +151,9 @@ class LocalDualCityLab:
     def read_outbox(self, city_id: str) -> list[dict]:
         return FilesystemFederationTransport(self.contract(city_id)).read_outbox()
 
+    def read_directives(self, city_id: str) -> list[dict]:
+        return FilesystemFederationTransport(self.contract(city_id)).list_directives()
+
     def read_receipts(self, city_id: str) -> list[dict]:
         return FilesystemReceiptStore(self.contract(city_id)).list_receipts()
 
@@ -163,6 +168,33 @@ class LocalDualCityLab:
             max_entries=max_entries,
             older_than_s=older_than_s,
         )
+
+    def directives(self, city_id: str) -> AgentCityDirectiveExecutionAdapter:
+        return AgentCityDirectiveExecutionAdapter(self.city_root(city_id))
+
+    def issue_directive(
+        self,
+        city_id: str,
+        *,
+        directive_type: str,
+        params: dict,
+        directive_id: str = "",
+        source: str = "agent-internet",
+    ) -> str:
+        bindings = load_steward_substrate()
+        directive = bindings.FederationDirective(
+            id=directive_id or f"{directive_type}_{token_hex(4)}",
+            directive_type=directive_type,
+            params=dict(params),
+            source=source,
+        )
+        return self.directives(city_id).issue(directive)
+
+    def execute_directives(self, city_id: str) -> DirectiveExecutionResult:
+        return self.directives(city_id).execute_pending()
+
+    def read_agent(self, city_id: str, agent_name: str) -> dict | None:
+        return self.directives(city_id).get_agent(agent_name)
 
     def emit_outbox_message(
         self,

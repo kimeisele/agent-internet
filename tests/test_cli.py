@@ -242,3 +242,42 @@ def test_cli_compacts_receipts(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["removed"] == 1
     assert len(payload["remaining_receipts"]) == 1
+
+
+def test_cli_issue_and_run_directives_executes_real_agent_city_hook(tmp_path, capsys):
+    root = tmp_path / "lab"
+
+    assert main(
+        [
+            "lab-issue-directive",
+            "--root",
+            str(root),
+            "--city-id",
+            "city-a",
+            "--directive-type",
+            "register_agent",
+            "--params-json",
+            '{"name": "MIRA"}',
+            "--directive-id",
+            "dir-mira",
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["directive_id"] == "dir-mira"
+    assert payload["pending_directives"][0]["directive_type"] == "register_agent"
+
+    assert main(
+        [
+            "lab-run-directives",
+            "--root",
+            str(root),
+            "--city-id",
+            "city-a",
+            "--agent-name",
+            "MIRA",
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["acknowledged"] == ["dir-mira"]
+    assert payload["agent"]["name"] == "MIRA"
+    assert payload["pending_directives"] == []

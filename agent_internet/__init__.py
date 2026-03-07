@@ -1,6 +1,12 @@
 """Public entrypoints for the Agent Internet control plane."""
 
 from .agent_city_directives import AgentCityDirectiveFactory, AgentCityDirectiveType, validate_agent_city_directive
+from .agent_city_directive_bridge import (
+    AgentCityDirectiveExecutionAdapter,
+    AgentCityDirectiveExecutionBindings,
+    DirectiveExecutionResult,
+    load_agent_city_directive_execution_bindings,
+)
 from .agent_city_immigration import (
     AgentCityImmigrationAdapter,
     AgentCityImmigrationBindings,
@@ -37,6 +43,8 @@ from .trust import InMemoryTrustEngine, trust_allows
 
 __all__ = [
     "AgentCityDirectiveFactory",
+    "AgentCityDirectiveExecutionAdapter",
+    "AgentCityDirectiveExecutionBindings",
     "AgentCityDirectiveType",
     "AgentCityFilesystemMessageTransport",
     "AgentCityImmigrationAdapter",
@@ -54,6 +62,7 @@ __all__ = [
     "DeliveryEnvelope",
     "DeliveryReceipt",
     "DeliveryStatus",
+    "DirectiveExecutionResult",
     "DiscoveryService",
     "FederationTransport",
     "FilesystemFederationTransport",
@@ -79,6 +88,7 @@ __all__ = [
     "TrustRecord",
     "update_locked_json_value",
     "city_presence_from_report",
+    "load_agent_city_directive_execution_bindings",
     "load_steward_substrate",
     "load_agent_city_immigration_bindings",
     "restore_control_plane",

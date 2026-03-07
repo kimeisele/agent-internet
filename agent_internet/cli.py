@@ -85,6 +85,25 @@ def build_parser() -> argparse.ArgumentParser:
     lab_compact_receipts.add_argument("--max-entries", type=int)
     lab_compact_receipts.add_argument("--older-than-s", type=float)
 
+    lab_issue_directive = subparsers.add_parser(
+        "lab-issue-directive",
+        help="Write an agent-city federation directive into a local lab city's directive intake",
+    )
+    lab_issue_directive.add_argument("--root", required=True)
+    lab_issue_directive.add_argument("--city-id", required=True)
+    lab_issue_directive.add_argument("--directive-type", required=True)
+    lab_issue_directive.add_argument("--params-json", default="{}")
+    lab_issue_directive.add_argument("--directive-id", default="")
+    lab_issue_directive.add_argument("--source", default="agent-internet")
+
+    lab_run_directives = subparsers.add_parser(
+        "lab-run-directives",
+        help="Execute pending agent-city federation directives through the real GENESIS directive hook",
+    )
+    lab_run_directives.add_argument("--root", required=True)
+    lab_run_directives.add_argument("--city-id", required=True)
+    lab_run_directives.add_argument("--agent-name", default="")
+
     lab_immigrate = subparsers.add_parser(
         "lab-immigrate",
         help="Run a dual-city immigration flow against a host city's real ImmigrationService",
@@ -306,6 +325,46 @@ def cmd_lab_compact_receipts(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_lab_issue_directive(args: argparse.Namespace) -> int:
+    other_city = "city-b" if args.city_id == "city-a" else "city-a"
+    lab = LocalDualCityLab.create(args.root, city_a_id=args.city_id, city_b_id=other_city)
+    directive_id = lab.issue_directive(
+        args.city_id,
+        directive_type=args.directive_type,
+        params=json.loads(args.params_json),
+        directive_id=args.directive_id,
+        source=args.source,
+    )
+    print(
+        json.dumps(
+            {
+                "directive_id": directive_id,
+                "pending_directives": lab.read_directives(args.city_id),
+            },
+            indent=2,
+        ),
+    )
+    return 0
+
+
+def cmd_lab_run_directives(args: argparse.Namespace) -> int:
+    other_city = "city-b" if args.city_id == "city-a" else "city-a"
+    lab = LocalDualCityLab.create(args.root, city_a_id=args.city_id, city_b_id=other_city)
+    result = lab.execute_directives(args.city_id)
+    print(
+        json.dumps(
+            {
+                "operations": result.operations,
+                "acknowledged": result.acknowledged,
+                "pending_directives": result.pending_directives,
+                "agent": None if not args.agent_name else lab.read_agent(args.city_id, args.agent_name),
+            },
+            indent=2,
+        ),
+    )
+    return 0
+
+
 def cmd_lab_immigrate(args: argparse.Namespace) -> int:
     lab = LocalDualCityLab.create(args.root, city_a_id=args.source_city_id, city_b_id=args.host_city_id)
     result = lab.run_immigration_flow(
@@ -366,6 +425,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_lab_sync(args)
     if args.command == "lab-compact-receipts":
         return cmd_lab_compact_receipts(args)
+    if args.command == "lab-issue-directive":
+        return cmd_lab_issue_directive(args)
+    if args.command == "lab-run-directives":
+        return cmd_lab_run_directives(args)
     if args.command == "lab-immigrate":
         return cmd_lab_immigrate(args)
     parser.error(f"Unknown command: {args.command}")
