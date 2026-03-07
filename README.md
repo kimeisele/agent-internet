@@ -65,3 +65,5 @@ Run locally:
 
 - `python -m agent_internet.cli show-state`
 - `python -m agent_internet.cli onboard-agent-city --root ../agent-city --city-id city-a --repo kimeisele/agent-city`
+- `python -m agent_internet.cli init-dual-city-lab --root ./tmp/lab`
+- `python -m agent_internet.cli lab-send --root ./tmp/lab --source-city-id city-a --target-city-id city-b --operation sync --payload-json '{"heartbeat": 1}'`

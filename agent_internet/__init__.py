@@ -8,6 +8,7 @@ from .control_plane import AgentInternetControlPlane
 from .filesystem_transport import FilesystemFederationTransport
 from .filesystem_message_transport import AgentCityFilesystemMessageTransport
 from .interfaces import CityRegistry, DiscoveryService, FederationTransport, InternetRouter, TrustEngine
+from .local_lab import LocalDualCityLab
 from .memory_registry import InMemoryCityRegistry
 from .models import CityEndpoint, CityIdentity, CityPresence, HealthStatus, TrustLevel, TrustRecord
 from .router import RegistryRouter
@@ -49,6 +50,7 @@ __all__ = [
     "InMemoryTrustEngine",
     "InternetRouter",
     "LoopbackTransport",
+    "LocalDualCityLab",
     "RelayService",
     "RegistryRouter",
     "StewardFederationAdapter",
