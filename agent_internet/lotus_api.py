@@ -10,6 +10,16 @@ from .models import EndpointVisibility, LotusApiScope, LotusApiToken
 from .snapshot import snapshot_control_plane
 
 
+LOTUS_MUTATING_ACTIONS = frozenset(
+    {
+        "assign_addresses",
+        "issue_token",
+        "publish_endpoint",
+        "publish_service",
+    },
+)
+
+
 def _sha256_hex(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -60,6 +70,15 @@ class LotusControlPlaneAPI:
         if action == "show_state":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "state": snapshot_control_plane(self.plane)}
+        if action == "issue_token":
+            self.authenticate(bearer_token, required_scopes=(LotusApiScope.TOKEN_WRITE.value,))
+            issued = self.issue_token(
+                subject=payload["subject"],
+                scopes=tuple(payload.get("scopes", (LotusApiScope.READ.value,))),
+                token_id=payload.get("token_id", ""),
+                token_secret=payload.get("token_secret", ""),
+            )
+            return {"token": asdict(issued.token), "secret": issued.secret}
         if action == "assign_addresses":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.ADDRESS_WRITE.value,))
             link, network = self.plane.assign_lotus_addresses(payload["city_id"], ttl_s=payload.get("ttl_s"))

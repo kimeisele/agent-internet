@@ -29,6 +29,7 @@ from .filesystem_message_transport import AgentCityFilesystemMessageTransport
 from .interfaces import CityRegistry, DiscoveryService, FederationTransport, InternetRouter, TrustEngine
 from .local_lab import LocalDualCityLab
 from .lotus_api import IssuedLotusApiToken, LotusControlPlaneAPI
+from .lotus_daemon import LotusApiDaemon
 from .memory_registry import InMemoryCityRegistry
 from .models import (
     CityEndpoint,
@@ -102,6 +103,7 @@ __all__ = [
     "LoopbackTransport",
     "LocalDualCityLab",
     "locked_file",
+    "LotusApiDaemon",
     "LotusApiScope",
     "LotusApiToken",
     "LotusControlPlaneAPI",

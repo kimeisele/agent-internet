@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Callable, TypeVar
 
+from .file_locking import read_locked_json_value, update_locked_json_value, write_locked_json_value
 from .control_plane import AgentInternetControlPlane
 from .models import (
     CityEndpoint,
@@ -19,6 +20,8 @@ from .models import (
     TrustLevel,
     TrustRecord,
 )
+
+_T = TypeVar("_T")
 
 
 def snapshot_control_plane(plane: AgentInternetControlPlane) -> dict:
@@ -121,24 +124,36 @@ def restore_control_plane(payload: dict) -> AgentInternetControlPlane:
     return plane
 
 
-def _atomic_write_json(path: Path, payload: object) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True))
-    tmp.replace(path)
-
-
 @dataclass(slots=True)
 class ControlPlaneStateStore:
     path: Path
 
     def load(self) -> AgentInternetControlPlane:
-        if not self.path.exists():
+        data = read_locked_json_value(self.path, default={})
+        if not data:
             return AgentInternetControlPlane()
-        data = json.loads(self.path.read_text())
         if not isinstance(data, dict):
             raise TypeError(f"Expected dict payload in {self.path}")
         return restore_control_plane(data)
 
     def save(self, plane: AgentInternetControlPlane) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        _atomic_write_json(self.path, snapshot_control_plane(plane))
+        write_locked_json_value(self.path, snapshot_control_plane(plane))
+
+    def update(self, updater: Callable[[AgentInternetControlPlane], _T]) -> _T:
+        result: list[_T] = []
+
+        def _update_payload(current: dict) -> dict:
+            if not isinstance(current, dict):
+                raise TypeError(f"Expected dict payload in {self.path}")
+            plane = restore_control_plane(current)
+            result.append(updater(plane))
+            return snapshot_control_plane(plane)
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        update_locked_json_value(
+            self.path,
+            default=snapshot_control_plane(AgentInternetControlPlane()),
+            updater=_update_payload,
+        )
+        return result[0]

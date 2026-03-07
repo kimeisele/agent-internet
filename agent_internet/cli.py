@@ -7,7 +7,8 @@ from pathlib import Path
 
 from .agent_city_peer import AgentCityPeer
 from .local_lab import LocalDualCityLab
-from .lotus_api import LotusControlPlaneAPI
+from .lotus_api import LOTUS_MUTATING_ACTIONS, LotusControlPlaneAPI
+from .lotus_daemon import LotusApiDaemon
 from .models import EndpointVisibility, LotusApiScope, TrustLevel, TrustRecord
 from .snapshot import ControlPlaneStateStore, snapshot_control_plane
 
@@ -113,6 +114,14 @@ def build_parser() -> argparse.ArgumentParser:
     lotus_api_call.add_argument("--token", required=True)
     lotus_api_call.add_argument("--action", required=True)
     lotus_api_call.add_argument("--params-json", default="{}")
+
+    lotus_api_daemon = subparsers.add_parser(
+        "lotus-api-daemon",
+        help="Run the authenticated Lotus HTTP control-plane daemon",
+    )
+    lotus_api_daemon.add_argument("--state-path", default="data/control_plane/state.json")
+    lotus_api_daemon.add_argument("--host", default="127.0.0.1")
+    lotus_api_daemon.add_argument("--port", type=int, default=8788)
 
     lab_init = subparsers.add_parser("init-dual-city-lab", help="Create a local two-city filesystem lab")
     lab_init.add_argument("--root", required=True)
@@ -278,9 +287,9 @@ def cmd_show_state(args: argparse.Namespace) -> int:
 
 def cmd_lotus_assign_addresses(args: argparse.Namespace) -> int:
     store = ControlPlaneStateStore(path=Path(args.state_path))
-    plane = store.load()
-    link_address, network_address = plane.assign_lotus_addresses(args.city_id, ttl_s=args.ttl_s)
-    store.save(plane)
+    link_address, network_address = store.update(
+        lambda plane: plane.assign_lotus_addresses(args.city_id, ttl_s=args.ttl_s),
+    )
     print(
         json.dumps(
             {
@@ -297,17 +306,17 @@ def cmd_lotus_assign_addresses(args: argparse.Namespace) -> int:
 
 def cmd_lotus_publish_endpoint(args: argparse.Namespace) -> int:
     store = ControlPlaneStateStore(path=Path(args.state_path))
-    plane = store.load()
-    endpoint = plane.publish_hosted_endpoint(
-        owner_city_id=args.city_id,
-        public_handle=args.public_handle,
-        transport=args.transport,
-        location=args.location,
-        visibility=EndpointVisibility(args.visibility),
-        ttl_s=args.ttl_s,
-        endpoint_id=args.endpoint_id,
+    endpoint = store.update(
+        lambda plane: plane.publish_hosted_endpoint(
+            owner_city_id=args.city_id,
+            public_handle=args.public_handle,
+            transport=args.transport,
+            location=args.location,
+            visibility=EndpointVisibility(args.visibility),
+            ttl_s=args.ttl_s,
+            endpoint_id=args.endpoint_id,
+        ),
     )
-    store.save(plane)
     print(
         json.dumps(
             {
@@ -338,20 +347,20 @@ def cmd_lotus_resolve_handle(args: argparse.Namespace) -> int:
 
 def cmd_lotus_publish_service(args: argparse.Namespace) -> int:
     store = ControlPlaneStateStore(path=Path(args.state_path))
-    plane = store.load()
-    service = plane.publish_service_address(
-        owner_city_id=args.city_id,
-        service_name=args.service_name,
-        public_handle=args.public_handle,
-        transport=args.transport,
-        location=args.location,
-        visibility=EndpointVisibility(args.visibility),
-        ttl_s=args.ttl_s,
-        service_id=args.service_id,
-        auth_required=not args.no_auth,
-        required_scopes=tuple(args.required_scope),
+    service = store.update(
+        lambda plane: plane.publish_service_address(
+            owner_city_id=args.city_id,
+            service_name=args.service_name,
+            public_handle=args.public_handle,
+            transport=args.transport,
+            location=args.location,
+            visibility=EndpointVisibility(args.visibility),
+            ttl_s=args.ttl_s,
+            service_id=args.service_id,
+            auth_required=not args.no_auth,
+            required_scopes=tuple(args.required_scope),
+        ),
     )
-    store.save(plane)
     print(json.dumps({"service_address": asdict(service), "state_path": str(store.path)}, indent=2))
     return 0
 
@@ -375,14 +384,13 @@ def cmd_lotus_resolve_service(args: argparse.Namespace) -> int:
 
 def cmd_lotus_issue_token(args: argparse.Namespace) -> int:
     store = ControlPlaneStateStore(path=Path(args.state_path))
-    plane = store.load()
-    api = LotusControlPlaneAPI(plane)
-    issued = api.issue_token(
-        subject=args.subject,
-        scopes=tuple(args.scope or [LotusApiScope.READ.value]),
-        token_id=args.token_id,
+    issued = store.update(
+        lambda plane: LotusControlPlaneAPI(plane).issue_token(
+            subject=args.subject,
+            scopes=tuple(args.scope or [LotusApiScope.READ.value]),
+            token_id=args.token_id,
+        ),
     )
-    store.save(plane)
     print(
         json.dumps(
             {
@@ -398,15 +406,50 @@ def cmd_lotus_issue_token(args: argparse.Namespace) -> int:
 
 def cmd_lotus_api_call(args: argparse.Namespace) -> int:
     store = ControlPlaneStateStore(path=Path(args.state_path))
-    plane = store.load()
-    api = LotusControlPlaneAPI(plane)
-    result = api.call(
-        bearer_token=args.token,
-        action=args.action,
-        params=json.loads(args.params_json),
-    )
-    store.save(plane)
+    params = json.loads(args.params_json)
+    if args.action in LOTUS_MUTATING_ACTIONS:
+        result = store.update(
+            lambda plane: LotusControlPlaneAPI(plane).call(
+                bearer_token=args.token,
+                action=args.action,
+                params=params,
+            ),
+        )
+    else:
+        plane = store.load()
+        result = LotusControlPlaneAPI(plane).call(
+            bearer_token=args.token,
+            action=args.action,
+            params=params,
+        )
     print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_lotus_api_daemon(args: argparse.Namespace) -> int:
+    daemon = LotusApiDaemon(
+        state_path=Path(args.state_path),
+        host=args.host,
+        port=args.port,
+    )
+    daemon.start()
+    host, port = daemon.address
+    print(
+        json.dumps(
+            {
+                "status": "listening",
+                "host": host,
+                "port": port,
+                "state_path": str(Path(args.state_path)),
+            },
+            indent=2,
+        ),
+        flush=True,
+    )
+    try:
+        daemon.serve_forever()
+    except KeyboardInterrupt:
+        daemon.shutdown()
     return 0
 
 
@@ -740,6 +783,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_lotus_issue_token(args)
     if args.command == "lotus-api-call":
         return cmd_lotus_api_call(args)
+    if args.command == "lotus-api-daemon":
+        return cmd_lotus_api_daemon(args)
     if args.command == "init-dual-city-lab":
         return cmd_init_dual_city_lab(args)
     if args.command == "lab-send":
