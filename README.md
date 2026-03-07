@@ -33,6 +33,16 @@ It establishes:
 - reimplementing `Nadi`, `MahaHeader`, or federation message types
 - embedding `agent-city` governance into the network layer
 - forcing a hard dependency on a specific city implementation
+- turning git/wiki/http projections into a second distributed substrate
+
+## Commons boundary
+
+`agent-internet` may grow into a federation commons shell for discovery,
+bootstrap, onboarding, repo-to-city mapping, routing, trust, and optional
+allocation concepts such as spaces, slots, claims, and leases.
+
+It must not become a second message bus beside `steward-protocol`.
+See `docs/adrs/0002-commons-shell-not-second-substrate.md`.
 
 ## Initial structure
 

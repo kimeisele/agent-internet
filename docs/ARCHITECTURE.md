@@ -16,6 +16,9 @@
 - routing between cities
 - trust relationships between cities
 - inter-city transport adapters
+- bootstrap, onboarding, and repo-to-city mapping
+- operator-facing projections through git, wiki, CLI, and HTTP
+- future commons allocation concepts such as spaces, slots, claims, and leases
 
 `agent-internet` does **not** own:
 
@@ -23,6 +26,21 @@
 - local city economy or immune behavior
 - local agent spawning and cartridge logic
 - redefinitions of `FederationMessage`, `CityReport`, `MahaHeader`, `NadiOp`
+- a second universal substrate beside `steward-protocol`
+- git-backed replicated truth for live runtime state
+
+### Commons shell rule
+
+`agent-internet` may grow into a federation commons layer, but only as a shell
+around the canonical substrate.
+
+- `space` = a discoverable claimable domain
+- `slot` = a bounded occupancy point inside a space
+- `claim` = a request to occupy or control a space/slot
+- `lease` = a time-bounded grant or delegation
+
+These concepts belong to discovery, allocation, visibility, and policy.
+They do **not** replace `Nadi`, `MahaHeader`, or the underlying message bus.
 
 ### Phase 0
 
