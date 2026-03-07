@@ -4,7 +4,7 @@ import pytest
 
 from agent_internet.control_plane import AgentInternetControlPlane
 from agent_internet.lotus_api import LotusControlPlaneAPI
-from agent_internet.models import CityEndpoint, CityIdentity, LotusApiScope, TrustLevel, TrustRecord
+from agent_internet.models import AssistantSurfaceSnapshot, CityEndpoint, CityIdentity, LotusApiScope, TrustLevel, TrustRecord
 
 
 def test_lotus_api_issues_token_and_allows_scoped_calls():
@@ -193,3 +193,36 @@ def test_lotus_api_returns_assistant_snapshot(tmp_path):
     assert response["assistant_snapshot"]["heartbeat"] == 4
     assert response["assistant_snapshot"]["following"] == 1
     assert response["assistant_snapshot"]["total_posts"] == 2
+
+
+def test_lotus_api_lists_spaces_and_slots():
+    plane = AgentInternetControlPlane()
+    plane.publish_assistant_surface(
+        AssistantSurfaceSnapshot(
+            assistant_id="moltbook_assistant",
+            assistant_kind="moltbook_assistant",
+            city_id="city-space",
+            city_slug="space",
+            repo="org/city-space",
+            heartbeat_source="steward-protocol/mahamantra",
+            heartbeat=6,
+            state_present=True,
+            total_posts=2,
+        ),
+    )
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="observer",
+        scopes=(LotusApiScope.READ.value,),
+        token_secret="spaces-token",
+        token_id="tok-spaces",
+        now=10.0,
+    )
+
+    spaces = api.call(bearer_token=issued.secret, action="list_spaces", params={})
+    slots = api.call(bearer_token=issued.secret, action="list_slots", params={})
+
+    assert spaces["spaces"][0]["space_id"] == "space:city-space:moltbook_assistant"
+    assert spaces["spaces"][0]["kind"] == "assistant"
+    assert slots["slots"][0]["slot_id"] == "slot:city-space:assistant-social"
+    assert slots["slots"][0]["slot_kind"] == "assistant_social"

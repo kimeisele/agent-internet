@@ -111,6 +111,10 @@ class LotusApiDaemon:
                 return 200, self._call(token, "show_state", {})
             if method == "GET" and path == "/v1/lotus/steward-protocol":
                 return 200, self._call(token, "show_steward_protocol", {})
+            if method == "GET" and path == "/v1/lotus/spaces":
+                return 200, self._call(token, "list_spaces", {})
+            if method == "GET" and path == "/v1/lotus/slots":
+                return 200, self._call(token, "list_slots", {})
             if method == "GET" and path == "/v1/lotus/assistant-snapshot":
                 return 200, self._call(
                     token,

@@ -400,6 +400,7 @@ def cmd_git_federation_onboard_repo(args: argparse.Namespace) -> int:
     store = ControlPlaneStateStore(path=Path(args.state_path))
     plane = store.load()
     observed = peer.onboard(plane)
+    projected = _maybe_publish_assistant_surface(plane, checkout, peer.identity.city_id)
     plane.record_trust(
         TrustRecord(
             issuer_city_id=args.trust_source,
@@ -423,6 +424,7 @@ def cmd_git_federation_onboard_repo(args: argparse.Namespace) -> int:
                     "heartbeat": observed.heartbeat,
                     "last_seen_at": observed.last_seen_at,
                 },
+                "assistant_projection": projected,
                 "state_path": str(store.path),
             },
             indent=2,
@@ -450,6 +452,7 @@ def cmd_onboard_agent_city(args: argparse.Namespace) -> int:
             endpoint_location=args.endpoint_location,
         )
     observed = peer.onboard(plane)
+    projected = _maybe_publish_assistant_surface(plane, args.root, peer.identity.city_id)
     plane.record_trust(
         TrustRecord(
             issuer_city_id=args.trust_source,
@@ -471,6 +474,7 @@ def cmd_onboard_agent_city(args: argparse.Namespace) -> int:
                     "heartbeat": observed.heartbeat,
                     "last_seen_at": observed.last_seen_at,
                 },
+                "assistant_projection": projected,
                 "state_path": str(store.path),
             },
             indent=2,
@@ -495,6 +499,32 @@ def cmd_agent_city_assistant_snapshot(args: argparse.Namespace) -> int:
     )
     print(json.dumps(asdict(snapshot), indent=2, sort_keys=True))
     return 0
+
+
+def _maybe_publish_assistant_surface(plane: AgentInternetControlPlane, root: Path | str, city_id: str) -> dict | None:
+    snapshot = assistant_surface_snapshot_from_repo_root(root, city_id=city_id)
+    if not _assistant_surface_has_signal(snapshot):
+        return None
+    space, slot = plane.publish_assistant_surface(snapshot)
+    return {
+        "space_id": space.space_id,
+        "slot_id": slot.slot_id,
+        "status": slot.status,
+    }
+
+
+def _assistant_surface_has_signal(snapshot) -> bool:
+    return bool(
+        snapshot.state_present
+        or "moltbook" in snapshot.capabilities
+        or "moltbook_assistant" in snapshot.capabilities
+        or snapshot.total_follows
+        or snapshot.total_invites
+        or snapshot.total_posts
+        or snapshot.following
+        or snapshot.invited
+        or snapshot.spotlighted
+    )
 
 
 def cmd_lotus_show_steward_protocol(_args: argparse.Namespace) -> int:

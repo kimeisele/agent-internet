@@ -6,7 +6,7 @@ import pytest
 
 from agent_internet.lotus_api import LotusControlPlaneAPI
 from agent_internet.lotus_daemon import LotusApiDaemon
-from agent_internet.models import CityEndpoint, CityIdentity, CityPresence, HealthStatus, LotusApiScope, TrustLevel, TrustRecord
+from agent_internet.models import AssistantSurfaceSnapshot, CityEndpoint, CityIdentity, CityPresence, HealthStatus, LotusApiScope, TrustLevel, TrustRecord
 from agent_internet.snapshot import ControlPlaneStateStore
 
 
@@ -186,5 +186,44 @@ def test_lotus_daemon_serves_assistant_snapshot_http_api(tmp_path):
         assert payload["assistant_snapshot"]["heartbeat"] == 7
         assert payload["assistant_snapshot"]["following"] == 2
         assert payload["assistant_snapshot"]["total_invites"] == 3
+    finally:
+        daemon.shutdown()
+
+
+def test_lotus_daemon_serves_spaces_and_slots_http_api(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    root_secret = store.update(
+        lambda plane: (
+            plane.publish_assistant_surface(
+                AssistantSurfaceSnapshot(
+                    assistant_id="moltbook_assistant",
+                    assistant_kind="moltbook_assistant",
+                    city_id="city-http-space",
+                    city_slug="http-space",
+                    repo="org/city-http-space",
+                    heartbeat_source="steward-protocol/mahamantra",
+                    heartbeat=8,
+                    state_present=True,
+                    total_posts=4,
+                ),
+            ),
+            LotusControlPlaneAPI(plane).issue_token(
+                subject="root",
+                scopes=(LotusApiScope.READ.value,),
+                token_secret="space-root",
+                token_id="tok-space-root",
+            ).secret,
+        )[1],
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        status, spaces = _request_json(daemon.base_url, "/v1/lotus/spaces", token=root_secret)
+        assert status == 200
+        assert spaces["spaces"][0]["space_id"] == "space:city-http-space:moltbook_assistant"
+        status, slots = _request_json(daemon.base_url, "/v1/lotus/slots", token=root_secret)
+        assert status == 200
+        assert slots["slots"][0]["slot_id"] == "slot:city-http-space:assistant-social"
     finally:
         daemon.shutdown()

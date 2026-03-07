@@ -83,6 +83,12 @@ class LotusControlPlaneAPI:
         if action == "show_steward_protocol":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "bindings": summarize_steward_protocol_bindings()}
+        if action == "list_spaces":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            return {"token_id": token.token_id, "spaces": [asdict(space) for space in self.plane.registry.list_spaces()]}
+        if action == "list_slots":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            return {"token_id": token.token_id, "slots": [asdict(slot) for slot in self.plane.registry.list_slots()]}
         if action == "assistant_snapshot":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             snapshot = assistant_surface_snapshot_from_repo_root(

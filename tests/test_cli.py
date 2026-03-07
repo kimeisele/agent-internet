@@ -41,6 +41,9 @@ def test_cli_onboards_agent_city_and_persists_state(tmp_path, capsys):
             },
         ),
     )
+    (repo_root / "data" / "assistant_state.json").write_text(
+        json.dumps({"followed": ["alice"], "ops": {"posts": 1}}),
+    )
     state_path = tmp_path / "state" / "control_plane.json"
 
     exit_code = main(
@@ -63,6 +66,7 @@ def test_cli_onboards_agent_city_and_persists_state(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["city_id"] == "city-a"
     assert payload["observed"]["health"] == "healthy"
+    assert payload["assistant_projection"]["space_id"] == "space:city-a:moltbook_assistant"
     assert state_path.exists()
 
 
@@ -182,6 +186,9 @@ def test_cli_git_federation_onboard_repo(tmp_path, capsys):
     (reports_dir / "report_3.json").write_text(
         json.dumps({"heartbeat": 3, "timestamp": 3.0, "population": 1, "alive": 1, "dead": 0, "chain_valid": True}),
     )
+    (repo_root / "data" / "assistant_state.json").write_text(
+        json.dumps({"followed": ["alice"], "ops": {"posts": 1}}),
+    )
     assert main(
         [
             "publish-agent-city-peer",
@@ -211,6 +218,7 @@ def test_cli_git_federation_onboard_repo(tmp_path, capsys):
     assert payload["city_id"] == "city-remote"
     assert payload["discovered"] is True
     assert payload["observed"]["health"] == "healthy"
+    assert payload["assistant_projection"]["slot_id"] == "slot:city-remote:assistant-social"
 
 
 def test_cli_show_state_prints_snapshot(tmp_path, capsys):
