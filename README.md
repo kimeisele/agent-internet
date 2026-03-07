@@ -82,6 +82,7 @@ Run locally:
 - `python -m agent_internet.cli publish-agent-city-peer --root ../agent-city --city-id city-a --repo kimeisele/agent-city --capability federation`
 - `python -m agent_internet.cli git-federation-describe --root ../agent-city`
 - `python -m agent_internet.cli publish-agent-city-peer --root ../agent-city --city-id city-a`
+- `python -m agent_internet.cli git-federation-onboard-repo --repo-url /path/to/agent-city.git --checkout-path ./tmp/agent-city-checkout --state-path ./data/control_plane/state.json`
 - `python -m agent_internet.cli onboard-agent-city --root ../agent-city --city-id city-a --repo kimeisele/agent-city`
 - `python -m agent_internet.cli onboard-agent-city --root ../agent-city --discover`
 - `python -m agent_internet.cli git-federation-sync-wiki --root ../agent-city --state-path ./data/control_plane/state.json`

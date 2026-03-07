@@ -53,7 +53,7 @@ class LotusControlPlaneAPI:
         now: float | None = None,
     ) -> IssuedLotusApiToken:
         issued_at = float(time.time() if now is None else now)
-        secret = token_secret or secrets.token_urlsafe(24)
+        secret = token_secret or f"lotus_{secrets.token_urlsafe(24)}"
         token = LotusApiToken(
             token_id=token_id or f"tok_{issued_at:.6f}".replace(".", "_"),
             subject=subject,

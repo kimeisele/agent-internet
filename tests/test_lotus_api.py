@@ -61,6 +61,15 @@ def test_lotus_api_rejects_missing_scope():
         )
 
 
+def test_lotus_api_generates_cli_safe_secret_prefix():
+    plane = AgentInternetControlPlane()
+    api = LotusControlPlaneAPI(plane)
+
+    issued = api.issue_token(subject="operator", scopes=(LotusApiScope.READ.value,))
+
+    assert issued.secret.startswith("lotus_")
+
+
 def test_lotus_api_publishes_and_resolves_next_hop():
     plane = AgentInternetControlPlane()
     plane.register_city(

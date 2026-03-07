@@ -170,6 +170,44 @@ def test_cli_git_federation_describe_and_sync_wiki(tmp_path, capsys):
     assert "Home.md" in payload["pages"]
 
 
+def test_cli_git_federation_onboard_repo(tmp_path, capsys):
+    repo_root, _wiki_remote = _init_git_repo(tmp_path)
+    reports_dir = repo_root / "data" / "federation" / "reports"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "report_3.json").write_text(
+        json.dumps({"heartbeat": 3, "timestamp": 3.0, "population": 1, "alive": 1, "dead": 0, "chain_valid": True}),
+    )
+    assert main(
+        [
+            "publish-agent-city-peer",
+            "--root",
+            str(repo_root),
+            "--city-id",
+            "city-remote",
+        ],
+    ) == 0
+    _ = capsys.readouterr().out
+    _git(repo_root, "add", ".")
+    _git(repo_root, "commit", "-m", "publish peer")
+    _git(repo_root, "push", str(tmp_path / "agent-city.git"), "HEAD:refs/heads/master")
+
+    assert main(
+        [
+            "git-federation-onboard-repo",
+            "--repo-url",
+            str(tmp_path / "agent-city.git"),
+            "--checkout-path",
+            str(tmp_path / "checkout"),
+            "--state-path",
+            str(tmp_path / "state" / "control_plane.json"),
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["city_id"] == "city-remote"
+    assert payload["discovered"] is True
+    assert payload["observed"]["health"] == "healthy"
+
+
 def test_cli_show_state_prints_snapshot(tmp_path, capsys):
     state_path = tmp_path / "state" / "control_plane.json"
 

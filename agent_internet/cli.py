@@ -6,7 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .agent_city_peer import AgentCityPeer
-from .git_federation import GitWikiFederationSync, detect_git_remote_metadata
+from .git_federation import GitWikiFederationSync, detect_git_remote_metadata, ensure_git_checkout
 from .local_lab import LocalDualCityLab
 from .lotus_api import LOTUS_MUTATING_ACTIONS, LotusControlPlaneAPI
 from .lotus_daemon import LotusApiDaemon
@@ -68,6 +68,20 @@ def build_parser() -> argparse.ArgumentParser:
     git_sync.add_argument("--wiki-repo-url")
     git_sync.add_argument("--wiki-checkout-path")
     git_sync.add_argument("--heartbeat-label", default="manual")
+
+    git_onboard = subparsers.add_parser(
+        "git-federation-onboard-repo",
+        help="Clone/pull a remote repo, discover its peer descriptor, and onboard it",
+    )
+    git_onboard.add_argument("--repo-url", required=True)
+    git_onboard.add_argument("--checkout-path", required=True)
+    git_onboard.add_argument("--state-path", default="data/control_plane/state.json")
+    git_onboard.add_argument("--trust-source", default="agent-internet")
+    git_onboard.add_argument(
+        "--trust-level",
+        choices=[level.value for level in TrustLevel],
+        default=TrustLevel.OBSERVED.value,
+    )
 
     subparsers.add_parser(
         "lotus-show-steward-protocol",
@@ -365,6 +379,43 @@ def cmd_git_federation_sync_wiki(args: argparse.Namespace) -> int:
         heartbeat_label=args.heartbeat_label,
     )
     print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_git_federation_onboard_repo(args: argparse.Namespace) -> int:
+    checkout = ensure_git_checkout(args.repo_url, args.checkout_path)
+    peer = AgentCityPeer.discover_from_repo_root(checkout)
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    observed = peer.onboard(plane)
+    plane.record_trust(
+        TrustRecord(
+            issuer_city_id=args.trust_source,
+            subject_city_id=peer.identity.city_id,
+            level=TrustLevel(args.trust_level),
+            reason="git federation onboarding",
+        ),
+    )
+    store.save(plane)
+    print(
+        json.dumps(
+            {
+                "city_id": peer.identity.city_id,
+                "repo_url": args.repo_url,
+                "checkout_path": str(checkout),
+                "discovered": True,
+                "observed": None
+                if observed is None
+                else {
+                    "health": observed.health,
+                    "heartbeat": observed.heartbeat,
+                    "last_seen_at": observed.last_seen_at,
+                },
+                "state_path": str(store.path),
+            },
+            indent=2,
+        ),
+    )
     return 0
 
 
@@ -966,6 +1017,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_git_federation_describe(args)
     if args.command == "git-federation-sync-wiki":
         return cmd_git_federation_sync_wiki(args)
+    if args.command == "git-federation-onboard-repo":
+        return cmd_git_federation_onboard_repo(args)
     if args.command == "onboard-agent-city":
         return cmd_onboard_agent_city(args)
     if args.command == "show-state":

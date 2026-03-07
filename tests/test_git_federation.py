@@ -3,7 +3,7 @@ import subprocess
 
 from agent_internet.agent_city_peer import AgentCityPeer
 from agent_internet.control_plane import AgentInternetControlPlane
-from agent_internet.git_federation import GitWikiFederationSync, detect_git_remote_metadata
+from agent_internet.git_federation import GitWikiFederationSync, detect_git_remote_metadata, ensure_git_checkout
 from agent_internet.snapshot import snapshot_control_plane
 
 
@@ -76,4 +76,26 @@ def test_git_wiki_sync_projects_pages_and_pushes(tmp_path):
     assert "Connected City: city-a" in (clone_path / "Home.md").read_text()
     assert "api.forum.city-a.lotus" in (clone_path / "Services.md").read_text()
     assert "service:city-z/forum" in (clone_path / "Routes.md").read_text()
+
+
+def test_ensure_git_checkout_clones_and_pulls_repo(tmp_path):
+    work_root, _wiki_remote = _init_git_workspace(tmp_path)
+    peer = AgentCityPeer.from_repo_root(work_root, city_id="city-checkout")
+    peer.publish_self_description()
+    _git(work_root, "add", ".")
+    _git(work_root, "commit", "-m", "publish peer")
+    _git(work_root, "push", str(work_root.parent / "remotes" / "agent-city.git"), "HEAD:refs/heads/master")
+
+    checkout_path = tmp_path / "checkout"
+    cloned = ensure_git_checkout(str(work_root.parent / "remotes" / "agent-city.git"), checkout_path)
+    discovered = AgentCityPeer.discover_from_repo_root(cloned)
+    assert discovered.identity.city_id == "city-checkout"
+
+    (work_root / "SECOND.md").write_text("second\n")
+    _git(work_root, "add", ".")
+    _git(work_root, "commit", "-m", "second")
+    _git(work_root, "push", str(work_root.parent / "remotes" / "agent-city.git"), "HEAD:refs/heads/master")
+
+    pulled = ensure_git_checkout(str(work_root.parent / "remotes" / "agent-city.git"), checkout_path)
+    assert (pulled / "SECOND.md").exists()
 

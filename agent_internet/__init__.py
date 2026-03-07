@@ -24,7 +24,7 @@ from .agent_city_bridge import AgentCityBridge, city_presence_from_report
 from .agent_city_contract import AgentCityFilesystemContract
 from .control_plane import AgentInternetControlPlane
 from .file_locking import locked_file, read_locked_json_value, update_locked_json_value, write_locked_json_value
-from .git_federation import GitRemoteMetadata, GitWikiFederationSync, detect_git_remote_metadata
+from .git_federation import GitRemoteMetadata, GitWikiFederationSync, detect_git_remote_metadata, ensure_git_checkout
 from .filesystem_transport import FilesystemFederationTransport
 from .filesystem_message_transport import AgentCityFilesystemMessageTransport
 from .interfaces import CityRegistry, DiscoveryService, FederationTransport, InternetRouter, TrustEngine
@@ -136,6 +136,7 @@ __all__ = [
     "update_locked_json_value",
     "city_presence_from_report",
     "detect_git_remote_metadata",
+    "ensure_git_checkout",
     "load_agent_city_directive_execution_bindings",
     "load_agent_city_phase_tick_bindings",
     "load_steward_protocol_bindings",

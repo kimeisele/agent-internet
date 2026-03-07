@@ -20,6 +20,16 @@ class GitRemoteMetadata:
     wiki_repo_url: str
 
 
+def ensure_git_checkout(repo_url: str, checkout_path: Path | str) -> Path:
+    checkout = Path(checkout_path).resolve()
+    if not checkout.exists():
+        checkout.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "clone", repo_url, str(checkout)], check=True, capture_output=True, text=True)
+    else:
+        subprocess.run(["git", "pull", "--rebase"], cwd=str(checkout), check=True, capture_output=True, text=True)
+    return checkout
+
+
 def detect_git_remote_metadata(root: Path | str) -> GitRemoteMetadata:
     repo_root = Path(_run_git(root, "rev-parse", "--show-toplevel")).resolve()
     origin_url = _run_git(repo_root, "config", "--get", "remote.origin.url")
@@ -82,12 +92,7 @@ class GitWikiFederationSync:
     def _ensure_checkout(self) -> Path:
         if not self.wiki_repo_url:
             raise ValueError("missing_wiki_repo_url")
-        checkout = (self.checkout_path or (self.repo_root / ".agent_internet" / "wiki")).resolve()
-        if not checkout.exists():
-            checkout.parent.mkdir(parents=True, exist_ok=True)
-            subprocess.run(["git", "clone", self.wiki_repo_url, str(checkout)], check=True, capture_output=True, text=True)
-        else:
-            subprocess.run(["git", "pull", "--rebase"], cwd=str(checkout), check=True, capture_output=True, text=True)
+        checkout = ensure_git_checkout(self.wiki_repo_url, self.checkout_path or (self.repo_root / ".agent_internet" / "wiki"))
         _ensure_local_git_identity(checkout)
         return checkout
 
