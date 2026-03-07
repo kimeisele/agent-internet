@@ -42,6 +42,8 @@ around the canonical substrate.
 These concepts belong to discovery, allocation, visibility, and policy.
 They do **not** replace `Nadi`, `MahaHeader`, or the underlying message bus.
 
+See `docs/COMMONS_MODEL_V1.md` for the first concrete civic model draft.
+
 ### Phase 0
 
 Phase 0 preserves the current federation contract already present in `agent-city`:
