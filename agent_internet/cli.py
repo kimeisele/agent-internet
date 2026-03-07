@@ -47,6 +47,25 @@ def build_parser() -> argparse.ArgumentParser:
     lab_send.add_argument("--payload-json", default="{}")
     lab_send.add_argument("--correlation-id", default="")
 
+    lab_emit_outbox = subparsers.add_parser(
+        "lab-emit-outbox",
+        help="Append a message to a local lab city's real federation outbox",
+    )
+    lab_emit_outbox.add_argument("--root", required=True)
+    lab_emit_outbox.add_argument("--source-city-id", required=True)
+    lab_emit_outbox.add_argument("--target-city-id", required=True)
+    lab_emit_outbox.add_argument("--operation", required=True)
+    lab_emit_outbox.add_argument("--payload-json", default="{}")
+    lab_emit_outbox.add_argument("--correlation-id", default="")
+
+    lab_pump_outbox = subparsers.add_parser(
+        "lab-pump-outbox",
+        help="Pump a local lab city's federation outbox through agent-internet relay",
+    )
+    lab_pump_outbox.add_argument("--root", required=True)
+    lab_pump_outbox.add_argument("--source-city-id", required=True)
+    lab_pump_outbox.add_argument("--drain-delivered", action="store_true")
+
     lab_immigrate = subparsers.add_parser(
         "lab-immigrate",
         help="Run a dual-city immigration flow against a host city's real ImmigrationService",
@@ -168,6 +187,51 @@ def cmd_lab_send(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_lab_emit_outbox(args: argparse.Namespace) -> int:
+    lab = LocalDualCityLab.create(args.root, city_a_id=args.source_city_id, city_b_id=args.target_city_id)
+    count = lab.emit_outbox_message(
+        args.source_city_id,
+        args.target_city_id,
+        operation=args.operation,
+        payload=json.loads(args.payload_json),
+        correlation_id=args.correlation_id,
+    )
+    print(
+        json.dumps(
+            {
+                "appended": count,
+                "source_outbox": lab.read_outbox(args.source_city_id),
+            },
+            indent=2,
+        ),
+    )
+    return 0
+
+
+def cmd_lab_pump_outbox(args: argparse.Namespace) -> int:
+    other_city = "city-b" if args.source_city_id == "city-a" else "city-a"
+    lab = LocalDualCityLab.create(args.root, city_a_id=args.source_city_id, city_b_id=other_city)
+    receipts = lab.pump_outbox(args.source_city_id, drain_delivered=args.drain_delivered)
+    print(
+        json.dumps(
+            {
+                "receipts": [
+                    {
+                        "status": receipt.status,
+                        "transport": receipt.transport,
+                        "target_city_id": receipt.target_city_id,
+                        "detail": receipt.detail,
+                    }
+                    for receipt in receipts
+                ],
+                "remaining_outbox": lab.read_outbox(args.source_city_id),
+            },
+            indent=2,
+        ),
+    )
+    return 0
+
+
 def cmd_lab_immigrate(args: argparse.Namespace) -> int:
     lab = LocalDualCityLab.create(args.root, city_a_id=args.source_city_id, city_b_id=args.host_city_id)
     result = lab.run_immigration_flow(
@@ -220,6 +284,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_init_dual_city_lab(args)
     if args.command == "lab-send":
         return cmd_lab_send(args)
+    if args.command == "lab-emit-outbox":
+        return cmd_lab_emit_outbox(args)
+    if args.command == "lab-pump-outbox":
+        return cmd_lab_pump_outbox(args)
     if args.command == "lab-immigrate":
         return cmd_lab_immigrate(args)
     parser.error(f"Unknown command: {args.command}")

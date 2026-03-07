@@ -44,6 +44,17 @@ class FilesystemFederationTransport:
     def read_outbox(self) -> list[dict]:
         return _read_json_list(self.contract.nadi_outbox)
 
+    def append_to_outbox(self, messages: list[object]) -> int:
+        self.contract.ensure_dirs()
+        existing = _read_json_list(self.contract.nadi_outbox)
+        merged = existing + [_coerce_dict(message) for message in messages]
+        _atomic_write_json(self.contract.nadi_outbox, merged)
+        return len(messages)
+
+    def replace_outbox(self, messages: list[object]) -> None:
+        self.contract.ensure_dirs()
+        _atomic_write_json(self.contract.nadi_outbox, [_coerce_dict(message) for message in messages])
+
     def read_inbox(self) -> list[dict]:
         return _read_json_list(self.contract.nadi_inbox)
 

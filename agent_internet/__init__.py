@@ -20,6 +20,7 @@ from .router import RegistryRouter
 from .snapshot import ControlPlaneStateStore, restore_control_plane, snapshot_control_plane
 from .steward_substrate import StewardSubstrateBindings, load_steward_substrate
 from .steward_federation import StewardFederationAdapter
+from .pump import OutboxRelayPump
 from .transport import (
     DeliveryEnvelope,
     DeliveryReceipt,
@@ -58,6 +59,7 @@ __all__ = [
     "InternetRouter",
     "LoopbackTransport",
     "LocalDualCityLab",
+    "OutboxRelayPump",
     "RelayService",
     "RegistryRouter",
     "StewardFederationAdapter",

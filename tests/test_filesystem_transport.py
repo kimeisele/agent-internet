@@ -14,6 +14,18 @@ def test_read_outbox_accepts_single_dict_payload(tmp_path):
     assert transport.read_outbox() == [{"source": "city-a", "operation": "report"}]
 
 
+def test_append_and_replace_outbox(tmp_path):
+    contract = AgentCityFilesystemContract(root=tmp_path)
+    transport = FilesystemFederationTransport(contract=contract)
+
+    assert transport.append_to_outbox([{"id": 1}, {"id": 2}]) == 2
+    assert transport.read_outbox() == [{"id": 1}, {"id": 2}]
+
+    transport.replace_outbox([{"id": 3}])
+
+    assert transport.read_outbox() == [{"id": 3}]
+
+
 def test_append_to_inbox_merges_existing_messages(tmp_path):
     contract = AgentCityFilesystemContract(root=tmp_path)
     contract.ensure_dirs()

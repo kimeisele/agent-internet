@@ -104,3 +104,40 @@ def test_cli_lab_immigrate_runs_real_immigration_flow(tmp_path, capsys):
     assert payload["receipt"]["status"] == "delivered"
     assert payload["application"]["status"] == "citizenship_granted"
     assert payload["visa"]["visa_class"] == "worker"
+
+
+def test_cli_emit_and_pump_outbox(tmp_path, capsys):
+    root = tmp_path / "lab"
+
+    assert main(
+        [
+            "lab-emit-outbox",
+            "--root",
+            str(root),
+            "--source-city-id",
+            "city-a",
+            "--target-city-id",
+            "city-b",
+            "--operation",
+            "sync",
+            "--payload-json",
+            '{"heartbeat": 11}',
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["appended"] == 1
+    assert payload["source_outbox"][0]["payload"] == {"heartbeat": 11}
+
+    assert main(
+        [
+            "lab-pump-outbox",
+            "--root",
+            str(root),
+            "--source-city-id",
+            "city-a",
+            "--drain-delivered",
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["receipts"][0]["status"] == "delivered"
+    assert payload["remaining_outbox"] == []

@@ -10,7 +10,10 @@ from .agent_city_immigration import AgentCityImmigrationAdapter
 from .agent_city_peer import AgentCityPeer
 from .control_plane import AgentInternetControlPlane
 from .filesystem_message_transport import AgentCityFilesystemMessageTransport
+from .filesystem_transport import FilesystemFederationTransport
 from .models import HealthStatus, TrustLevel, TrustRecord
+from .pump import OutboxRelayPump
+from .steward_substrate import load_steward_substrate
 from .transport import DeliveryEnvelope, DeliveryReceipt, TransportScheme
 
 
@@ -36,6 +39,7 @@ class LocalDualCityLab:
     message_transport: AgentCityFilesystemMessageTransport = field(
         default_factory=AgentCityFilesystemMessageTransport,
     )
+    outbox_pump: OutboxRelayPump = field(init=False)
 
     @classmethod
     def create(
@@ -50,6 +54,7 @@ class LocalDualCityLab:
         plane = AgentInternetControlPlane()
         lab = cls(root=lab_root, city_ids=(city_a_id, city_b_id), plane=plane)
         plane.register_transport(TransportScheme.FILESYSTEM.value, lab.message_transport)
+        lab.outbox_pump = OutboxRelayPump(plane)
 
         for city_id in lab.city_ids:
             city_root = lab.city_root(city_id)
@@ -139,6 +144,34 @@ class LocalDualCityLab:
 
     def read_inbox(self, city_id: str):
         return self.message_transport.receive(self.city_root(city_id))
+
+    def read_outbox(self, city_id: str) -> list[dict]:
+        return FilesystemFederationTransport(self.contract(city_id)).read_outbox()
+
+    def emit_outbox_message(
+        self,
+        source_city_id: str,
+        target_city_id: str,
+        *,
+        operation: str,
+        payload: dict,
+        correlation_id: str = "",
+        ttl_s: float = 300.0,
+    ) -> int:
+        bindings = load_steward_substrate()
+        transport = FilesystemFederationTransport(self.contract(source_city_id))
+        message = bindings.FederationMessage(
+            source=source_city_id,
+            target=target_city_id,
+            operation=operation,
+            payload=dict(payload),
+            correlation_id=correlation_id,
+            ttl_s=ttl_s,
+        )
+        return transport.append_to_outbox([message])
+
+    def pump_outbox(self, city_id: str, *, drain_delivered: bool = False) -> list[DeliveryReceipt]:
+        return self.outbox_pump.pump_city_root(self.city_root(city_id), drain_delivered=drain_delivered)
 
     def immigration(self, city_id: str) -> AgentCityImmigrationAdapter:
         return AgentCityImmigrationAdapter(self.city_root(city_id))
