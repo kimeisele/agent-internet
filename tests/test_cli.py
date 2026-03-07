@@ -402,11 +402,24 @@ def test_cli_emit_and_pump_outbox(tmp_path, capsys):
             "sync",
             "--payload-json",
             '{"heartbeat": 11}',
+            "--nadi-type",
+            "udana",
+            "--nadi-op",
+            "delegate",
+            "--nadi-priority",
+            "suddha",
+            "--ttl-ms",
+            "48000",
         ],
     ) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["appended"] == 1
     assert payload["source_outbox"][0]["payload"] == {"heartbeat": 11}
+    assert payload["source_outbox"][0]["nadi_type"] == "udana"
+    assert payload["source_outbox"][0]["nadi_op"] == "delegate"
+    assert payload["source_outbox"][0]["nadi_priority"] == "suddha"
+    assert payload["source_outbox"][0]["ttl_ms"] == 48000
+    assert payload["source_outbox"][0]["maha_header_hex"]
 
     assert main(
         [
@@ -422,6 +435,40 @@ def test_cli_emit_and_pump_outbox(tmp_path, capsys):
     assert payload["receipts"][0]["status"] == "delivered"
     assert payload["remaining_outbox"] == []
     assert payload["target_receipts"][0]["target_city_id"] == "city-b"
+
+
+def test_cli_lab_send_shows_nadi_metadata(tmp_path, capsys):
+    root = tmp_path / "lab"
+
+    assert main(
+        [
+            "lab-send",
+            "--root",
+            str(root),
+            "--source-city-id",
+            "city-a",
+            "--target-city-id",
+            "city-b",
+            "--operation",
+            "sync",
+            "--payload-json",
+            '{"heartbeat": 12}',
+            "--nadi-type",
+            "udana",
+            "--nadi-op",
+            "delegate",
+            "--nadi-priority",
+            "suddha",
+            "--ttl-ms",
+            "48000",
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["target_inbox"][0]["nadi_type"] == "udana"
+    assert payload["target_inbox"][0]["nadi_op"] == "delegate"
+    assert payload["target_inbox"][0]["nadi_priority"] == "suddha"
+    assert payload["target_inbox"][0]["ttl_ms"] == 48000
+    assert payload["target_inbox"][0]["maha_header_hex"]
 
 
 def test_cli_lab_sync_runs_bounded_bidirectional_cycles(tmp_path, capsys):

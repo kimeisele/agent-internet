@@ -9,6 +9,10 @@ def test_outbox_pump_relays_and_optionally_drains_delivered_messages(tmp_path):
         operation="sync",
         payload={"heartbeat": 9},
         correlation_id="env-9",
+        nadi_type="udana",
+        nadi_op="delegate",
+        priority="suddha",
+        ttl_ms=48000,
     )
 
     receipts = lab.pump_outbox("city-a", drain_delivered=True)
@@ -20,6 +24,10 @@ def test_outbox_pump_relays_and_optionally_drains_delivered_messages(tmp_path):
     assert len(inbox) == 1
     assert inbox[0].payload == {"heartbeat": 9}
     assert inbox[0].correlation_id == "env-9"
+    assert inbox[0].nadi_type == "udana"
+    assert inbox[0].nadi_op == "delegate"
+    assert inbox[0].priority == "suddha"
+    assert inbox[0].ttl_ms == 48000
     assert lab.read_receipts("city-b")[0]["envelope_id"] == "env-9"
 
 

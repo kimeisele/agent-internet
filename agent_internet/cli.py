@@ -196,6 +196,11 @@ def build_parser() -> argparse.ArgumentParser:
     lab_send.add_argument("--operation", required=True)
     lab_send.add_argument("--payload-json", default="{}")
     lab_send.add_argument("--correlation-id", default="")
+    lab_send.add_argument("--nadi-type", default="")
+    lab_send.add_argument("--nadi-op", default="")
+    lab_send.add_argument("--nadi-priority", default="")
+    lab_send.add_argument("--ttl-ms", type=int)
+    lab_send.add_argument("--ttl-s", type=float)
 
     lab_emit_outbox = subparsers.add_parser(
         "lab-emit-outbox",
@@ -207,6 +212,11 @@ def build_parser() -> argparse.ArgumentParser:
     lab_emit_outbox.add_argument("--operation", required=True)
     lab_emit_outbox.add_argument("--payload-json", default="{}")
     lab_emit_outbox.add_argument("--correlation-id", default="")
+    lab_emit_outbox.add_argument("--nadi-type", default="")
+    lab_emit_outbox.add_argument("--nadi-op", default="")
+    lab_emit_outbox.add_argument("--nadi-priority", default="")
+    lab_emit_outbox.add_argument("--ttl-ms", type=int)
+    lab_emit_outbox.add_argument("--ttl-s", type=float)
 
     lab_pump_outbox = subparsers.add_parser(
         "lab-pump-outbox",
@@ -655,6 +665,11 @@ def cmd_lab_send(args: argparse.Namespace) -> int:
         operation=args.operation,
         payload=json.loads(args.payload_json),
         correlation_id=args.correlation_id,
+        nadi_type=args.nadi_type,
+        nadi_op=args.nadi_op,
+        priority=args.nadi_priority,
+        ttl_ms=args.ttl_ms,
+        ttl_s=args.ttl_s,
     )
     inbox = lab.read_inbox(args.target_city_id)
     print(
@@ -673,6 +688,11 @@ def cmd_lab_send(args: argparse.Namespace) -> int:
                         "operation": env.operation,
                         "payload": env.payload,
                         "correlation_id": env.correlation_id,
+                        "nadi_type": env.nadi_type,
+                        "nadi_op": env.nadi_op,
+                        "nadi_priority": env.priority,
+                        "ttl_ms": env.ttl_ms,
+                        "maha_header_hex": env.maha_header_hex,
                     }
                     for env in inbox
                 ],
@@ -691,6 +711,11 @@ def cmd_lab_emit_outbox(args: argparse.Namespace) -> int:
         operation=args.operation,
         payload=json.loads(args.payload_json),
         correlation_id=args.correlation_id,
+        nadi_type=args.nadi_type,
+        nadi_op=args.nadi_op,
+        priority=args.nadi_priority,
+        ttl_ms=args.ttl_ms,
+        ttl_s=args.ttl_s,
     )
     print(
         json.dumps(

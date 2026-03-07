@@ -37,7 +37,12 @@ class OutboxRelayPump:
                     envelope_id=str(message.get("envelope_id", "")) or str(message.get("correlation_id", "")),
                     correlation_id=str(message.get("correlation_id", "")),
                     created_at=float(message.get("timestamp", 0.0)) or 0.0,
-                    ttl_s=float(message.get("ttl_s", 300.0)),
+                    ttl_s=float(message.get("ttl_s", 0.0)) or None,
+                    nadi_type=str(message.get("nadi_type", "")),
+                    nadi_op=str(message.get("nadi_op", "")),
+                    priority=str(message.get("nadi_priority", "")),
+                    ttl_ms=int(message.get("ttl_ms", 0)) or None,
+                    maha_header_hex=str(message.get("maha_header_hex", "")),
                 ),
             )
             receipts.append(receipt)

@@ -17,6 +17,10 @@ def test_local_dual_city_lab_creates_city_roots_and_relays_messages(tmp_path):
         operation="sync",
         payload={"heartbeat": 2},
         correlation_id="corr-7",
+        nadi_type="udana",
+        nadi_op="delegate",
+        priority="suddha",
+        ttl_ms=48000,
     )
 
     assert receipt.status == DeliveryStatus.DELIVERED
@@ -25,3 +29,7 @@ def test_local_dual_city_lab_creates_city_roots_and_relays_messages(tmp_path):
     assert inbox[0].operation == "sync"
     assert inbox[0].payload == {"heartbeat": 2}
     assert inbox[0].correlation_id == "corr-7"
+    assert inbox[0].nadi_type == "udana"
+    assert inbox[0].nadi_op == "delegate"
+    assert inbox[0].priority == "suddha"
+    assert inbox[0].ttl_ms == 48000

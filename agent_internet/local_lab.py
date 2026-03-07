@@ -19,6 +19,7 @@ from .filesystem_transport import FilesystemFederationTransport
 from .models import HealthStatus, TrustLevel, TrustRecord
 from .pump import OutboxRelayPump
 from .receipt_store import FilesystemReceiptStore
+from .steward_protocol_compat import build_maha_message_header_hex
 from .steward_substrate import load_steward_substrate
 from .transport import DeliveryEnvelope, DeliveryReceipt, TransportScheme
 
@@ -144,7 +145,12 @@ class LocalDualCityLab:
         operation: str,
         payload: dict,
         correlation_id: str = "",
-        ttl_s: float = 300.0,
+        ttl_s: float | None = None,
+        nadi_type: str = "",
+        nadi_op: str = "",
+        priority: str = "",
+        ttl_ms: int | None = None,
+        maha_header_hex: str = "",
     ) -> DeliveryReceipt:
         return self.plane.relay_envelope(
             DeliveryEnvelope(
@@ -154,6 +160,11 @@ class LocalDualCityLab:
                 payload=dict(payload),
                 correlation_id=correlation_id,
                 ttl_s=ttl_s,
+                nadi_type=nadi_type,
+                nadi_op=nadi_op,
+                priority=priority,
+                ttl_ms=ttl_ms,
+                maha_header_hex=maha_header_hex,
             ),
         )
 
@@ -258,21 +269,55 @@ class LocalDualCityLab:
         operation: str,
         payload: dict,
         correlation_id: str = "",
-        ttl_s: float = 300.0,
+        ttl_s: float | None = None,
+        nadi_type: str = "",
+        nadi_op: str = "",
+        priority: str = "",
+        ttl_ms: int | None = None,
+        maha_header_hex: str = "",
     ) -> int:
         bindings = load_steward_substrate()
         transport = FilesystemFederationTransport(self.contract(source_city_id))
+        envelope = DeliveryEnvelope(
+            source_city_id=source_city_id,
+            target_city_id=target_city_id,
+            operation=operation,
+            payload=dict(payload),
+            envelope_id=correlation_id,
+            correlation_id=correlation_id,
+            ttl_s=ttl_s,
+            nadi_type=nadi_type,
+            nadi_op=nadi_op,
+            priority=priority,
+            ttl_ms=ttl_ms,
+            maha_header_hex=maha_header_hex,
+        )
+        semantics = envelope.nadi_semantics
+        raw_priority = getattr(bindings.NadiPriority, semantics.priority.upper()).value
         message = bindings.FederationMessage(
             source=source_city_id,
             target=target_city_id,
             operation=operation,
             payload=dict(payload),
+            priority=raw_priority,
             correlation_id=correlation_id,
-            ttl_s=ttl_s,
+            ttl_s=semantics.ttl_s,
         )
         raw_message = message.to_dict()
         if correlation_id:
             raw_message["envelope_id"] = correlation_id
+        raw_message["nadi_type"] = semantics.nadi_type
+        raw_message["nadi_op"] = semantics.nadi_op
+        raw_message["nadi_priority"] = semantics.priority
+        raw_message["ttl_ms"] = semantics.ttl_ms
+        raw_message["maha_header_hex"] = maha_header_hex or build_maha_message_header_hex(
+            source_key=source_city_id,
+            target_key=target_city_id,
+            operation_key=operation,
+            nadi_type=semantics.nadi_type,
+            priority=semantics.priority,
+            ttl_ms=semantics.ttl_ms,
+        )
         return transport.append_to_outbox([raw_message])
 
     def pump_outbox(self, city_id: str, *, drain_delivered: bool = False) -> list[DeliveryReceipt]:
