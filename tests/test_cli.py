@@ -191,3 +191,54 @@ def test_cli_lab_sync_runs_bounded_bidirectional_cycles(tmp_path, capsys):
     assert payload["cycles"][1]["total_receipts"] == 0
     assert payload["outboxes"]["city-a"] == []
     assert payload["outboxes"]["city-b"] == []
+
+
+def test_cli_compacts_receipts(tmp_path, capsys):
+    root = tmp_path / "lab"
+
+    assert main(
+        [
+            "lab-emit-outbox",
+            "--root",
+            str(root),
+            "--source-city-id",
+            "city-a",
+            "--target-city-id",
+            "city-b",
+            "--operation",
+            "sync",
+            "--payload-json",
+            '{"n": 1}',
+            "--correlation-id",
+            "env-1",
+        ],
+    ) == 0
+    _ = capsys.readouterr().out
+    assert main(["lab-pump-outbox", "--root", str(root), "--source-city-id", "city-a", "--drain-delivered"]) == 0
+    _ = capsys.readouterr().out
+
+    assert main(
+        [
+            "lab-emit-outbox",
+            "--root",
+            str(root),
+            "--source-city-id",
+            "city-a",
+            "--target-city-id",
+            "city-b",
+            "--operation",
+            "sync",
+            "--payload-json",
+            '{"n": 2}',
+            "--correlation-id",
+            "env-2",
+        ],
+    ) == 0
+    _ = capsys.readouterr().out
+    assert main(["lab-pump-outbox", "--root", str(root), "--source-city-id", "city-a", "--drain-delivered"]) == 0
+    _ = capsys.readouterr().out
+
+    assert main(["lab-compact-receipts", "--root", str(root), "--city-id", "city-b", "--max-entries", "1"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["removed"] == 1
+    assert len(payload["remaining_receipts"]) == 1

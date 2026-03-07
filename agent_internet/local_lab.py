@@ -152,6 +152,18 @@ class LocalDualCityLab:
     def read_receipts(self, city_id: str) -> list[dict]:
         return FilesystemReceiptStore(self.contract(city_id)).list_receipts()
 
+    def compact_receipts(
+        self,
+        city_id: str,
+        *,
+        max_entries: int | None = None,
+        older_than_s: float | None = None,
+    ) -> int:
+        return FilesystemReceiptStore(self.contract(city_id)).compact(
+            max_entries=max_entries,
+            older_than_s=older_than_s,
+        )
+
     def emit_outbox_message(
         self,
         source_city_id: str,

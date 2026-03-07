@@ -76,6 +76,15 @@ def build_parser() -> argparse.ArgumentParser:
     lab_sync.add_argument("--cycles", type=int, default=1)
     lab_sync.add_argument("--drain-delivered", action="store_true")
 
+    lab_compact_receipts = subparsers.add_parser(
+        "lab-compact-receipts",
+        help="Compact a local lab city's receipt journal by age and/or max retained entries",
+    )
+    lab_compact_receipts.add_argument("--root", required=True)
+    lab_compact_receipts.add_argument("--city-id", required=True)
+    lab_compact_receipts.add_argument("--max-entries", type=int)
+    lab_compact_receipts.add_argument("--older-than-s", type=float)
+
     lab_immigrate = subparsers.add_parser(
         "lab-immigrate",
         help="Run a dual-city immigration flow against a host city's real ImmigrationService",
@@ -277,6 +286,26 @@ def cmd_lab_sync(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_lab_compact_receipts(args: argparse.Namespace) -> int:
+    other_city = "city-b" if args.city_id == "city-a" else "city-a"
+    lab = LocalDualCityLab.create(args.root, city_a_id=args.city_id, city_b_id=other_city)
+    removed = lab.compact_receipts(
+        args.city_id,
+        max_entries=args.max_entries,
+        older_than_s=args.older_than_s,
+    )
+    print(
+        json.dumps(
+            {
+                "removed": removed,
+                "remaining_receipts": lab.read_receipts(args.city_id),
+            },
+            indent=2,
+        ),
+    )
+    return 0
+
+
 def cmd_lab_immigrate(args: argparse.Namespace) -> int:
     lab = LocalDualCityLab.create(args.root, city_a_id=args.source_city_id, city_b_id=args.host_city_id)
     result = lab.run_immigration_flow(
@@ -335,6 +364,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_lab_pump_outbox(args)
     if args.command == "lab-sync":
         return cmd_lab_sync(args)
+    if args.command == "lab-compact-receipts":
+        return cmd_lab_compact_receipts(args)
     if args.command == "lab-immigrate":
         return cmd_lab_immigrate(args)
     parser.error(f"Unknown command: {args.command}")
