@@ -79,3 +79,28 @@ def test_cli_init_dual_city_lab_and_send(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["receipt"]["status"] == "delivered"
     assert payload["target_inbox"][0]["payload"] == {"heartbeat": 5}
+
+
+def test_cli_lab_immigrate_runs_real_immigration_flow(tmp_path, capsys):
+    root = tmp_path / "lab"
+
+    assert main(
+        [
+            "lab-immigrate",
+            "--root",
+            str(root),
+            "--source-city-id",
+            "city-a",
+            "--host-city-id",
+            "city-b",
+            "--agent-name",
+            "MIRA",
+            "--visa-class",
+            "worker",
+        ],
+    ) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["receipt"]["status"] == "delivered"
+    assert payload["application"]["status"] == "citizenship_granted"
+    assert payload["visa"]["visa_class"] == "worker"

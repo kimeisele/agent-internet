@@ -47,6 +47,18 @@ def build_parser() -> argparse.ArgumentParser:
     lab_send.add_argument("--payload-json", default="{}")
     lab_send.add_argument("--correlation-id", default="")
 
+    lab_immigrate = subparsers.add_parser(
+        "lab-immigrate",
+        help="Run a dual-city immigration flow against a host city's real ImmigrationService",
+    )
+    lab_immigrate.add_argument("--root", required=True)
+    lab_immigrate.add_argument("--source-city-id", required=True)
+    lab_immigrate.add_argument("--host-city-id", required=True)
+    lab_immigrate.add_argument("--agent-name", required=True)
+    lab_immigrate.add_argument("--visa-class", default="worker")
+    lab_immigrate.add_argument("--reason", default="temporary_visitor")
+    lab_immigrate.add_argument("--sponsor", default="city_genesis")
+
     return parser
 
 
@@ -156,6 +168,47 @@ def cmd_lab_send(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_lab_immigrate(args: argparse.Namespace) -> int:
+    lab = LocalDualCityLab.create(args.root, city_a_id=args.source_city_id, city_b_id=args.host_city_id)
+    result = lab.run_immigration_flow(
+        source_city_id=args.source_city_id,
+        host_city_id=args.host_city_id,
+        agent_name=args.agent_name,
+        visa_class=args.visa_class,
+        reason=args.reason,
+        sponsor=args.sponsor,
+    )
+    application = result["application"]
+    visa = result["visa"]
+    receipt = result["receipt"]
+    print(
+        json.dumps(
+            {
+                "receipt": {
+                    "status": receipt.status,
+                    "transport": receipt.transport,
+                    "target_city_id": receipt.target_city_id,
+                },
+                "application": {
+                    "application_id": application.application_id,
+                    "agent_name": application.agent_name,
+                    "status": application.status.value,
+                    "requested_visa_class": application.requested_visa_class.value,
+                },
+                "visa": {
+                    "agent_name": visa.agent_name,
+                    "visa_class": visa.visa_class.value,
+                    "sponsor": visa.sponsor,
+                    "lineage_depth": visa.lineage_depth,
+                },
+                "stats": result["stats"],
+            },
+            indent=2,
+        ),
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -167,6 +220,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_init_dual_city_lab(args)
     if args.command == "lab-send":
         return cmd_lab_send(args)
+    if args.command == "lab-immigrate":
+        return cmd_lab_immigrate(args)
     parser.error(f"Unknown command: {args.command}")
     return 2
 

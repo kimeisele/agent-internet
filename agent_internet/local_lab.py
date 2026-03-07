@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .agent_city_contract import AgentCityFilesystemContract
+from .agent_city_immigration import AgentCityImmigrationAdapter
 from .agent_city_peer import AgentCityPeer
 from .control_plane import AgentInternetControlPlane
 from .filesystem_message_transport import AgentCityFilesystemMessageTransport
@@ -138,3 +139,45 @@ class LocalDualCityLab:
 
     def read_inbox(self, city_id: str):
         return self.message_transport.receive(self.city_root(city_id))
+
+    def immigration(self, city_id: str) -> AgentCityImmigrationAdapter:
+        return AgentCityImmigrationAdapter(self.city_root(city_id))
+
+    def run_immigration_flow(
+        self,
+        *,
+        source_city_id: str,
+        host_city_id: str,
+        agent_name: str,
+        visa_class: str = "worker",
+        reason: str = "temporary_visitor",
+        sponsor: str = "city_genesis",
+    ) -> dict[str, object]:
+        receipt = self.send(
+            source_city_id,
+            host_city_id,
+            operation="visa_request",
+            payload={
+                "agent_name": agent_name,
+                "requested_visa_class": visa_class,
+                "reason": reason,
+            },
+        )
+        immigration = self.immigration(host_city_id)
+        application = immigration.submit_application(
+            agent_name,
+            reason=reason,
+            visa_class=visa_class,
+        )
+        visa = immigration.approve_and_grant(
+            application.application_id,
+            reviewer=f"dual-city-lab:{host_city_id}",
+            sponsor=sponsor,
+        )
+        updated_application = immigration.get_application(application.application_id)
+        return {
+            "receipt": receipt,
+            "application": updated_application or application,
+            "visa": visa,
+            "stats": immigration.stats(),
+        }
