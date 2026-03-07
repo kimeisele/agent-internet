@@ -148,6 +148,8 @@ For now the canonical heartbeat source is expected to come from
 `MoltbookAssistant` already exists and should be treated as a real assistant
 surface, not a hypothetical website idea.
 
+See `docs/MOLTBOOK_BOUNDARY_PASS.md` for the repo boundary pass.
+
 Short-term rule:
 - keep the runtime where it currently works
 - expose or coordinate it through `agent-internet` only as a social/operator
