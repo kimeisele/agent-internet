@@ -18,6 +18,12 @@ class TrustLevel(StrEnum):
     TRUSTED = "trusted"
 
 
+class EndpointVisibility(StrEnum):
+    PRIVATE = "private"
+    FEDERATED = "federated"
+    PUBLIC = "public"
+
+
 @dataclass(frozen=True, slots=True)
 class CityIdentity:
     city_id: str
@@ -32,6 +38,39 @@ class CityEndpoint:
     city_id: str
     transport: str
     location: str
+
+
+@dataclass(frozen=True, slots=True)
+class LotusLinkAddress:
+    city_id: str
+    mac_address: str
+    interface: str = "lotus0"
+    lease_started_at: float | None = None
+    lease_expires_at: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LotusNetworkAddress:
+    city_id: str
+    ip_address: str
+    prefix_length: int = 64
+    lease_started_at: float | None = None
+    lease_expires_at: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class HostedEndpoint:
+    endpoint_id: str
+    owner_city_id: str
+    public_handle: str
+    transport: str
+    location: str
+    link_address: str
+    network_address: str
+    visibility: EndpointVisibility = EndpointVisibility.PUBLIC
+    lease_started_at: float | None = None
+    lease_expires_at: float | None = None
+    labels: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

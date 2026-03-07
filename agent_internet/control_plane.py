@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 from .agent_city_bridge import AgentCityBridge
 from .memory_registry import InMemoryCityRegistry
-from .models import CityEndpoint, CityIdentity, CityPresence, TrustLevel, TrustRecord
+from .models import (
+    CityEndpoint,
+    CityIdentity,
+    CityPresence,
+    EndpointVisibility,
+    HostedEndpoint,
+    LotusLinkAddress,
+    LotusNetworkAddress,
+    TrustLevel,
+    TrustRecord,
+)
 from .router import RegistryRouter
 from .transport import DeliveryEnvelope, DeliveryReceipt, RelayService, TransportRegistry
 from .trust import InMemoryTrustEngine
@@ -31,6 +42,7 @@ class AgentInternetControlPlane:
     def register_city(self, identity: CityIdentity, endpoint: CityEndpoint) -> None:
         self.registry.upsert_identity(identity)
         self.registry.upsert_endpoint(endpoint)
+        self.assign_lotus_addresses(identity.city_id)
 
     def announce_city(self, presence: CityPresence) -> None:
         self.registry.announce(presence)
@@ -40,6 +52,51 @@ class AgentInternetControlPlane:
 
     def resolve_route(self, source_city_id: str, target_city_id: str) -> CityEndpoint | None:
         return self.router.resolve(source_city_id, target_city_id)
+
+    def assign_lotus_addresses(
+        self,
+        city_id: str,
+        *,
+        ttl_s: float | None = None,
+    ) -> tuple[LotusLinkAddress, LotusNetworkAddress]:
+        return (
+            self.registry.assign_link_address(city_id, ttl_s=ttl_s),
+            self.registry.assign_network_address(city_id, ttl_s=ttl_s),
+        )
+
+    def publish_hosted_endpoint(
+        self,
+        *,
+        owner_city_id: str,
+        public_handle: str,
+        transport: str,
+        location: str,
+        visibility: EndpointVisibility = EndpointVisibility.PUBLIC,
+        ttl_s: float | None = None,
+        endpoint_id: str = "",
+        labels: dict[str, str] | None = None,
+        now: float | None = None,
+    ) -> HostedEndpoint:
+        link_address, network_address = self.assign_lotus_addresses(owner_city_id)
+        started_at = float(time.time() if now is None else now)
+        hosted = HostedEndpoint(
+            endpoint_id=endpoint_id or f"{owner_city_id}:{public_handle}",
+            owner_city_id=owner_city_id,
+            public_handle=public_handle,
+            transport=transport,
+            location=location,
+            link_address=link_address.mac_address,
+            network_address=network_address.ip_address,
+            visibility=visibility,
+            lease_started_at=started_at,
+            lease_expires_at=None if ttl_s is None else started_at + max(ttl_s, 0.0),
+            labels=dict(labels or {}),
+        )
+        self.registry.upsert_hosted_endpoint(hosted)
+        return hosted
+
+    def resolve_public_handle(self, public_handle: str, *, now: float | None = None) -> HostedEndpoint | None:
+        return self.router.resolve_public_handle(public_handle, now=now)
 
     def register_transport(self, scheme: str, transport: object) -> None:
         self.transports.register(scheme, transport)

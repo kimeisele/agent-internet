@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import asdict
 from pathlib import Path
 
 from .agent_city_peer import AgentCityPeer
 from .local_lab import LocalDualCityLab
-from .models import TrustLevel, TrustRecord
+from .models import EndpointVisibility, TrustLevel, TrustRecord
 from .snapshot import ControlPlaneStateStore, snapshot_control_plane
 
 
@@ -33,6 +34,38 @@ def build_parser() -> argparse.ArgumentParser:
 
     show = subparsers.add_parser("show-state", help="Print the current persisted control-plane state")
     show.add_argument("--state-path", default="data/control_plane/state.json")
+
+    lotus_assign = subparsers.add_parser(
+        "lotus-assign-addresses",
+        help="Allocate MAC- and IPv6-like Lotus addresses for a city in the persisted control plane",
+    )
+    lotus_assign.add_argument("--state-path", default="data/control_plane/state.json")
+    lotus_assign.add_argument("--city-id", required=True)
+    lotus_assign.add_argument("--ttl-s", type=float)
+
+    lotus_publish = subparsers.add_parser(
+        "lotus-publish-endpoint",
+        help="Publish a leaseable Lotus public handle for a city's hosted endpoint",
+    )
+    lotus_publish.add_argument("--state-path", default="data/control_plane/state.json")
+    lotus_publish.add_argument("--city-id", required=True)
+    lotus_publish.add_argument("--public-handle", required=True)
+    lotus_publish.add_argument("--transport", required=True)
+    lotus_publish.add_argument("--location", required=True)
+    lotus_publish.add_argument("--endpoint-id", default="")
+    lotus_publish.add_argument(
+        "--visibility",
+        choices=[visibility.value for visibility in EndpointVisibility],
+        default=EndpointVisibility.PUBLIC.value,
+    )
+    lotus_publish.add_argument("--ttl-s", type=float)
+
+    lotus_resolve = subparsers.add_parser(
+        "lotus-resolve-handle",
+        help="Resolve an active Lotus public handle from the persisted control plane",
+    )
+    lotus_resolve.add_argument("--state-path", default="data/control_plane/state.json")
+    lotus_resolve.add_argument("--public-handle", required=True)
 
     lab_init = subparsers.add_parser("init-dual-city-lab", help="Create a local two-city filesystem lab")
     lab_init.add_argument("--root", required=True)
@@ -196,6 +229,66 @@ def cmd_show_state(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_lotus_assign_addresses(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    link_address, network_address = plane.assign_lotus_addresses(args.city_id, ttl_s=args.ttl_s)
+    store.save(plane)
+    print(
+        json.dumps(
+            {
+                "city_id": args.city_id,
+                "link_address": asdict(link_address),
+                "network_address": asdict(network_address),
+                "state_path": str(store.path),
+            },
+            indent=2,
+        ),
+    )
+    return 0
+
+
+def cmd_lotus_publish_endpoint(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    endpoint = plane.publish_hosted_endpoint(
+        owner_city_id=args.city_id,
+        public_handle=args.public_handle,
+        transport=args.transport,
+        location=args.location,
+        visibility=EndpointVisibility(args.visibility),
+        ttl_s=args.ttl_s,
+        endpoint_id=args.endpoint_id,
+    )
+    store.save(plane)
+    print(
+        json.dumps(
+            {
+                "hosted_endpoint": asdict(endpoint),
+                "state_path": str(store.path),
+            },
+            indent=2,
+        ),
+    )
+    return 0
+
+
+def cmd_lotus_resolve_handle(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    endpoint = plane.resolve_public_handle(args.public_handle)
+    print(
+        json.dumps(
+            {
+                "public_handle": args.public_handle,
+                "resolved": None if endpoint is None else asdict(endpoint),
+            },
+            indent=2,
+        ),
+    )
+    return 0
+
+
 def cmd_init_dual_city_lab(args: argparse.Namespace) -> int:
     lab = LocalDualCityLab.create(
         args.root,
@@ -207,7 +300,11 @@ def cmd_init_dual_city_lab(args: argparse.Namespace) -> int:
             {
                 "root": str(lab.root),
                 "cities": [
-                    {"city_id": city_id, "root": str(lab.city_root(city_id))}
+                    {
+                        "city_id": city_id,
+                        "root": str(lab.city_root(city_id)),
+                        "lotus_addresses": lab.lotus_addresses(city_id),
+                    }
                     for city_id in lab.city_ids
                 ],
             },
@@ -508,6 +605,12 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_onboard_agent_city(args)
     if args.command == "show-state":
         return cmd_show_state(args)
+    if args.command == "lotus-assign-addresses":
+        return cmd_lotus_assign_addresses(args)
+    if args.command == "lotus-publish-endpoint":
+        return cmd_lotus_publish_endpoint(args)
+    if args.command == "lotus-resolve-handle":
+        return cmd_lotus_resolve_handle(args)
     if args.command == "init-dual-city-lab":
         return cmd_init_dual_city_lab(args)
     if args.command == "lab-send":

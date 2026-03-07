@@ -29,7 +29,18 @@ from .filesystem_message_transport import AgentCityFilesystemMessageTransport
 from .interfaces import CityRegistry, DiscoveryService, FederationTransport, InternetRouter, TrustEngine
 from .local_lab import LocalDualCityLab
 from .memory_registry import InMemoryCityRegistry
-from .models import CityEndpoint, CityIdentity, CityPresence, HealthStatus, TrustLevel, TrustRecord
+from .models import (
+    CityEndpoint,
+    CityIdentity,
+    CityPresence,
+    EndpointVisibility,
+    HealthStatus,
+    HostedEndpoint,
+    LotusLinkAddress,
+    LotusNetworkAddress,
+    TrustLevel,
+    TrustRecord,
+)
 from .receipt_store import FilesystemReceiptStore
 from .router import RegistryRouter
 from .snapshot import ControlPlaneStateStore, restore_control_plane, snapshot_control_plane
@@ -74,16 +85,20 @@ __all__ = [
     "DeliveryStatus",
     "DirectiveExecutionResult",
     "DiscoveryService",
+    "EndpointVisibility",
     "FederationTransport",
     "FilesystemFederationTransport",
     "FilesystemReceiptStore",
     "HealthStatus",
+    "HostedEndpoint",
     "InMemoryCityRegistry",
     "InMemoryTrustEngine",
     "InternetRouter",
     "LoopbackTransport",
     "LocalDualCityLab",
     "locked_file",
+    "LotusLinkAddress",
+    "LotusNetworkAddress",
     "MissionExecutionResult",
     "OutboxRelayPump",
     "PhaseTickResult",

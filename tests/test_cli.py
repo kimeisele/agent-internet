@@ -52,6 +52,7 @@ def test_cli_show_state_prints_snapshot(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["identities"] == []
     assert payload["endpoints"] == []
+    assert payload["hosted_endpoints"] == []
 
 
 def test_cli_init_dual_city_lab_and_send(tmp_path, capsys):
@@ -60,6 +61,7 @@ def test_cli_init_dual_city_lab_and_send(tmp_path, capsys):
     assert main(["init-dual-city-lab", "--root", str(root)]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["cities"][0]["city_id"] == "city-a"
+    assert payload["cities"][0]["lotus_addresses"]["link"]["mac_address"].startswith("02:00:")
 
     assert main(
         [
@@ -104,6 +106,40 @@ def test_cli_lab_immigrate_runs_real_immigration_flow(tmp_path, capsys):
     assert payload["receipt"]["status"] == "delivered"
     assert payload["application"]["status"] == "citizenship_granted"
     assert payload["visa"]["visa_class"] == "worker"
+
+
+def test_cli_lotus_assign_publish_and_resolve(tmp_path, capsys):
+    state_path = tmp_path / "state" / "control_plane.json"
+
+    assert main(["lotus-assign-addresses", "--state-path", str(state_path), "--city-id", "city-a"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["link_address"]["mac_address"].startswith("02:00:")
+    assert payload["network_address"]["ip_address"].startswith("fd10:")
+
+    assert main(
+        [
+            "lotus-publish-endpoint",
+            "--state-path",
+            str(state_path),
+            "--city-id",
+            "city-a",
+            "--public-handle",
+            "forum.city-a.lotus",
+            "--transport",
+            "https",
+            "--location",
+            "https://forum.city-a.example",
+            "--visibility",
+            "federated",
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["hosted_endpoint"]["public_handle"] == "forum.city-a.lotus"
+    assert payload["hosted_endpoint"]["visibility"] == "federated"
+
+    assert main(["lotus-resolve-handle", "--state-path", str(state_path), "--public-handle", "forum.city-a.lotus"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["resolved"]["location"] == "https://forum.city-a.example"
 
 
 def test_cli_emit_and_pump_outbox(tmp_path, capsys):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import asdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from secrets import token_hex
@@ -97,6 +98,14 @@ class LocalDualCityLab:
 
     def contract(self, city_id: str) -> AgentCityFilesystemContract:
         return AgentCityFilesystemContract(root=self.city_root(city_id))
+
+    def lotus_addresses(self, city_id: str) -> dict[str, dict | None]:
+        link = self.plane.registry.get_link_address(city_id)
+        network = self.plane.registry.get_network_address(city_id)
+        return {
+            "link": None if link is None else asdict(link),
+            "network": None if network is None else asdict(network),
+        }
 
     def seed_report(self, city_id: str, *, heartbeat: int, timestamp: float | None = None) -> Path:
         contract = self.contract(city_id)

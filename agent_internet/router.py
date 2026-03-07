@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .interfaces import CityRegistry, DiscoveryService, TrustEngine
-from .models import CityEndpoint, HealthStatus, TrustLevel
+from .models import CityEndpoint, HealthStatus, HostedEndpoint, TrustLevel
 from .trust import trust_allows
 
 
@@ -27,6 +27,18 @@ class RegistryRouter:
         if self.trust_engine is not None:
             trust = self.trust_engine.evaluate(source_city_id, target_city_id)
             if not trust_allows(trust, self.minimum_trust):
+                return None
+
+        return endpoint
+
+    def resolve_public_handle(self, public_handle: str, *, now: float | None = None) -> HostedEndpoint | None:
+        endpoint = self.registry.get_hosted_endpoint_by_handle(public_handle, now=now)
+        if endpoint is None:
+            return None
+
+        if self.discovery is not None:
+            presence = self.discovery.get_presence(endpoint.owner_city_id)
+            if presence is not None and presence.health == HealthStatus.OFFLINE:
                 return None
 
         return endpoint

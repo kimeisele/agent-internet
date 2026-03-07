@@ -4,7 +4,7 @@ from agent_internet.agent_city_bridge import AgentCityBridge, city_presence_from
 from agent_internet.agent_city_contract import AgentCityFilesystemContract
 from agent_internet.control_plane import AgentInternetControlPlane
 from agent_internet.filesystem_transport import FilesystemFederationTransport
-from agent_internet.models import CityEndpoint, CityIdentity, HealthStatus, TrustLevel, TrustRecord
+from agent_internet.models import CityEndpoint, CityIdentity, EndpointVisibility, HealthStatus, TrustLevel, TrustRecord
 
 
 def test_city_presence_from_report_maps_health_states():
@@ -63,3 +63,27 @@ def test_control_plane_registers_observes_and_routes(tmp_path):
 
     assert observed.health == HealthStatus.HEALTHY
     assert plane.resolve_route("city-a", "city-b") == endpoint
+    assert plane.registry.get_link_address("city-b").city_id == "city-b"
+    assert plane.registry.get_network_address("city-b").city_id == "city-b"
+
+
+def test_control_plane_publishes_and_resolves_lotus_handle():
+    plane = AgentInternetControlPlane()
+    plane.register_city(
+        CityIdentity(city_id="city-a", slug="a", repo="org/city-a"),
+        CityEndpoint(city_id="city-a", transport="filesystem", location="/tmp/city-a"),
+    )
+    plane.announce_city(city_presence_from_report("city-a", {"heartbeat": 1, "timestamp": 1.0, "population": 1, "alive": 1, "dead": 0, "chain_valid": True}))
+
+    hosted = plane.publish_hosted_endpoint(
+        owner_city_id="city-a",
+        public_handle="forum.city-a.lotus",
+        transport="https",
+        location="https://forum.city-a.example",
+        visibility=EndpointVisibility.FEDERATED,
+        ttl_s=60.0,
+        now=5.0,
+    )
+
+    assert hosted.visibility == EndpointVisibility.FEDERATED
+    assert plane.resolve_public_handle("forum.city-a.lotus", now=10.0).location == "https://forum.city-a.example"

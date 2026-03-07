@@ -65,6 +65,9 @@ Run locally:
 ## CLI
 
 - `python -m agent_internet.cli show-state`
+- `python -m agent_internet.cli lotus-assign-addresses --state-path ./data/control_plane/state.json --city-id city-a`
+- `python -m agent_internet.cli lotus-publish-endpoint --state-path ./data/control_plane/state.json --city-id city-a --public-handle forum.city-a.lotus --transport https --location https://forum.city-a.example`
+- `python -m agent_internet.cli lotus-resolve-handle --state-path ./data/control_plane/state.json --public-handle forum.city-a.lotus`
 - `python -m agent_internet.cli onboard-agent-city --root ../agent-city --city-id city-a --repo kimeisele/agent-city`
 - `python -m agent_internet.cli init-dual-city-lab --root ./tmp/lab`
 - `python -m agent_internet.cli lab-send --root ./tmp/lab --source-city-id city-a --target-city-id city-b --operation sync --payload-json '{"heartbeat": 1}'`

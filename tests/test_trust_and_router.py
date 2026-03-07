@@ -1,5 +1,5 @@
 from agent_internet.memory_registry import InMemoryCityRegistry
-from agent_internet.models import CityEndpoint, CityPresence, HealthStatus, TrustLevel, TrustRecord
+from agent_internet.models import CityEndpoint, CityPresence, HealthStatus, HostedEndpoint, TrustLevel, TrustRecord
 from agent_internet.router import RegistryRouter
 from agent_internet.trust import InMemoryTrustEngine
 
@@ -40,3 +40,31 @@ def test_router_blocks_offline_target_even_if_trusted():
     router = RegistryRouter(registry=registry, discovery=registry, trust_engine=trust)
 
     assert router.resolve("city-a", "city-b") is None
+
+
+def test_router_resolves_public_handle_only_while_owner_online_and_lease_active():
+    registry = InMemoryCityRegistry()
+    link = registry.assign_link_address("city-b", now=5.0)
+    network = registry.assign_network_address("city-b", now=5.0)
+    registry.upsert_hosted_endpoint(
+        HostedEndpoint(
+            endpoint_id="city-b:public-forum",
+            owner_city_id="city-b",
+            public_handle="forum.city-b.lotus",
+            transport="https",
+            location="https://forum.city-b.example",
+            link_address=link.mac_address,
+            network_address=network.ip_address,
+            lease_started_at=5.0,
+            lease_expires_at=35.0,
+        ),
+    )
+    registry.announce(CityPresence("city-b", health=HealthStatus.HEALTHY))
+    router = RegistryRouter(registry=registry, discovery=registry)
+
+    assert router.resolve_public_handle("forum.city-b.lotus", now=10.0).endpoint_id == "city-b:public-forum"
+    assert router.resolve_public_handle("forum.city-b.lotus", now=50.0) is None
+
+    registry.announce(CityPresence("city-b", health=HealthStatus.OFFLINE))
+
+    assert router.resolve_public_handle("forum.city-b.lotus", now=10.0) is None
