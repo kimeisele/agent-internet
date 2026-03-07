@@ -10,6 +10,7 @@ from .agent_city_peer import AgentCityPeer
 from .agent_city_bridge import AgentCityBridge, city_presence_from_report
 from .agent_city_contract import AgentCityFilesystemContract
 from .control_plane import AgentInternetControlPlane
+from .file_locking import locked_file, read_locked_json_value, update_locked_json_value, write_locked_json_value
 from .filesystem_transport import FilesystemFederationTransport
 from .filesystem_message_transport import AgentCityFilesystemMessageTransport
 from .interfaces import CityRegistry, DiscoveryService, FederationTransport, InternetRouter, TrustEngine
@@ -61,7 +62,9 @@ __all__ = [
     "InternetRouter",
     "LoopbackTransport",
     "LocalDualCityLab",
+    "locked_file",
     "OutboxRelayPump",
+    "read_locked_json_value",
     "RelayService",
     "RegistryRouter",
     "StewardFederationAdapter",
@@ -71,6 +74,7 @@ __all__ = [
     "TrustEngine",
     "TrustLevel",
     "TrustRecord",
+    "update_locked_json_value",
     "city_presence_from_report",
     "load_steward_substrate",
     "load_agent_city_immigration_bindings",
@@ -78,4 +82,5 @@ __all__ = [
     "snapshot_control_plane",
     "trust_allows",
     "validate_agent_city_directive",
+    "write_locked_json_value",
 ]
