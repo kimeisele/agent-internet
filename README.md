@@ -88,6 +88,8 @@ Run locally:
 - `python -m agent_internet.cli lotus-publish-route --state-path ./data/control_plane/state.json --owner-city-id city-a --destination-prefix service:city-z/forum --target-city-id city-z --next-hop-city-id city-b --metric 5`
 - `python -m agent_internet.cli lotus-resolve-next-hop --state-path ./data/control_plane/state.json --source-city-id city-a --destination service:city-z/forum-api`
 - `python -m agent_internet.cli lotus-issue-token --state-path ./data/control_plane/state.json --subject operator --scope lotus.read --scope lotus.write.service`
+- `python -m agent_internet.cli lotus-issue-token --state-path ./data/control_plane/state.json --subject steward-protocol-public-bridge --token-id tok-public-bridge --scope lotus.read --scope lotus.write.intent`
+- `python -m agent_internet.cli lotus-issue-token --state-path ./data/control_plane/state.json --subject steward-protocol-verified-bridge --token-id tok-verified-bridge --scope lotus.read --scope lotus.write.intent --scope lotus.write.intent.subject`
 - `python -m agent_internet.cli lotus-api-call --state-path ./data/control_plane/state.json --token <bearer> --action resolve_service --params-json '{"city_id":"city-a","service_name":"forum-api"}'`
 - `python -m agent_internet.cli lotus-api-daemon --state-path ./data/control_plane/state.json --host 127.0.0.1 --port 8788`
 - `curl -s -H 'Authorization: Bearer <bearer>' http://127.0.0.1:8788/v1/lotus/state`
@@ -106,6 +108,24 @@ Run locally:
 - `python -m agent_internet.cli lab-emit-outbox --root ./tmp/lab --source-city-id city-a --target-city-id city-b --operation sync --payload-json '{"heartbeat": 1}'`
 - `python -m agent_internet.cli lab-pump-outbox --root ./tmp/lab --source-city-id city-a --drain-delivered`
 - `python -m agent_internet.cli lab-sync --root ./tmp/lab --cycles 3 --drain-delivered`
+
+## Bridge token runbook
+
+For the `steward-protocol` edge, issue two Lotus bearer tokens:
+
+- public bridge: `lotus.read`, `lotus.write.intent`
+- verified bridge: `lotus.read`, `lotus.write.intent`, `lotus.write.intent.subject`
+
+Set them in `steward-protocol` as:
+
+- `AGENT_INTERNET_LOTUS_BASE_URL`
+- `AGENT_INTERNET_LOTUS_TOKEN`
+- `AGENT_INTERNET_VERIFIED_LOTUS_TOKEN`
+- `AGENT_INTERNET_LOTUS_TIMEOUT_S`
+
+The verified bridge needs `lotus.write.intent.subject` so verified requests can
+persist `requested_by_subject_id=verified_agent:{agent_id}` instead of collapsing
+to the bridge service identity.
 - `python -m agent_internet.cli lab-compact-receipts --root ./tmp/lab --city-id city-b --max-entries 1000`
 - `python -m agent_internet.cli lab-issue-directive --root ./tmp/lab --city-id city-a --directive-type register_agent --params-json '{"name":"MIRA"}'`
 - `python -m agent_internet.cli lab-run-directives --root ./tmp/lab --city-id city-a --agent-name MIRA`
