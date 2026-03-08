@@ -5,7 +5,7 @@ from agent_internet.assistant_surface import assistant_social_slot_from_snapshot
 from agent_internet.agent_city_contract import AgentCityFilesystemContract
 from agent_internet.control_plane import AgentInternetControlPlane
 from agent_internet.filesystem_transport import FilesystemFederationTransport
-from agent_internet.models import AssistantSurfaceSnapshot, CityEndpoint, CityIdentity, EndpointVisibility, HealthStatus, LotusApiScope, SlotStatus, SpaceKind, TrustLevel, TrustRecord
+from agent_internet.models import AssistantSurfaceSnapshot, CityEndpoint, CityIdentity, EndpointVisibility, ForkLineageRecord, ForkMode, HealthStatus, LotusApiScope, SlotStatus, SpaceKind, TrustLevel, TrustRecord, UpstreamSyncPolicy
 from agent_internet.snapshot import restore_control_plane, snapshot_control_plane
 
 
@@ -173,3 +173,27 @@ def test_control_plane_publishes_and_restores_assistant_space_and_slot():
     assert slot.status == SlotStatus.ACTIVE
     assert restored.registry.get_space(space.space_id) == space
     assert restored.registry.get_slot(slot.slot_id) == slot
+
+
+def test_control_plane_publishes_and_restores_fork_lineage():
+    plane = AgentInternetControlPlane()
+    lineage = ForkLineageRecord(
+        lineage_id="lineage:city-b",
+        repo="org/city-b",
+        upstream_repo="org/city-a",
+        line_root_repo="org/city-a",
+        fork_mode=ForkMode.SOVEREIGN,
+        sync_policy=UpstreamSyncPolicy.TRACKED,
+        space_id="space:city-b:moltbook_assistant",
+        upstream_space_id="space:city-a:moltbook_assistant",
+        forked_by_subject_id="human:ss",
+        created_at=123.0,
+        labels={"channel": "github"},
+    )
+
+    plane.upsert_fork_lineage(lineage)
+    payload = snapshot_control_plane(plane)
+    restored = restore_control_plane(payload)
+
+    assert payload["fork_lineage"][0]["repo"] == "org/city-b"
+    assert restored.registry.get_fork_lineage("lineage:city-b") == lineage

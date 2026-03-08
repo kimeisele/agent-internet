@@ -43,6 +43,8 @@ from .models import (
     CityIdentity,
     CityPresence,
     EndpointVisibility,
+    ForkLineageRecord,
+    ForkMode,
     HealthStatus,
     HostedEndpoint,
     LotusApiScope,
@@ -58,6 +60,7 @@ from .models import (
     SpaceKind,
     TrustLevel,
     TrustRecord,
+    UpstreamSyncPolicy,
 )
 from .receipt_store import FilesystemReceiptStore
 from .router import RegistryRouter
@@ -98,6 +101,9 @@ __all__ = [
     "SlotStatus",
     "SpaceDescriptor",
     "SpaceKind",
+    "ForkLineageRecord",
+    "ForkMode",
+    "UpstreamSyncPolicy",
     "BidirectionalSyncWorker",
     "CityEndpoint",
     "CityIdentity",

@@ -12,6 +12,7 @@ from .models import (
     CityIdentity,
     CityPresence,
     EndpointVisibility,
+    ForkLineageRecord,
     HostedEndpoint,
     LotusApiToken,
     LotusLinkAddress,
@@ -208,6 +209,9 @@ class AgentInternetControlPlane:
 
     def upsert_slot(self, slot: SlotDescriptor) -> None:
         self.registry.upsert_slot(slot)
+
+    def upsert_fork_lineage(self, lineage: ForkLineageRecord) -> None:
+        self.registry.upsert_fork_lineage(lineage)
 
     def publish_assistant_surface(self, snapshot: AssistantSurfaceSnapshot) -> tuple[SpaceDescriptor, SlotDescriptor]:
         space = assistant_space_from_snapshot(snapshot)

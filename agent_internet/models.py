@@ -47,6 +47,22 @@ class SlotStatus(StrEnum):
     DORMANT = "dormant"
 
 
+class ForkMode(StrEnum):
+    MIRROR = "mirror"
+    EXPERIMENT = "experiment"
+    SOVEREIGN = "sovereign"
+    SERVICE_DERIVATIVE = "service_derivative"
+    ASSISTANT_DERIVATIVE = "assistant_derivative"
+
+
+class UpstreamSyncPolicy(StrEnum):
+    MANUAL_ONLY = "manual_only"
+    TRACKED = "tracked"
+    ADVISORY = "advisory"
+    MERGE_CANDIDATE = "merge_candidate"
+    ISOLATED = "isolated"
+
+
 @dataclass(frozen=True, slots=True)
 class CityIdentity:
     city_id: str
@@ -211,6 +227,21 @@ class SlotDescriptor:
     capacity: int = 1
     heartbeat_source: str = ""
     heartbeat: int | None = None
+    labels: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class ForkLineageRecord:
+    lineage_id: str
+    repo: str
+    upstream_repo: str
+    line_root_repo: str
+    fork_mode: ForkMode = ForkMode.EXPERIMENT
+    sync_policy: UpstreamSyncPolicy = UpstreamSyncPolicy.MANUAL_ONLY
+    space_id: str = ""
+    upstream_space_id: str = ""
+    forked_by_subject_id: str = ""
+    created_at: float | None = None
     labels: dict[str, str] = field(default_factory=dict)
 
 

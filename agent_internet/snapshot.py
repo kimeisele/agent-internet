@@ -12,6 +12,8 @@ from .models import (
     CityIdentity,
     CityPresence,
     EndpointVisibility,
+    ForkLineageRecord,
+    ForkMode,
     HealthStatus,
     HostedEndpoint,
     LotusApiToken,
@@ -24,6 +26,7 @@ from .models import (
     SpaceKind,
     TrustLevel,
     TrustRecord,
+    UpstreamSyncPolicy,
 )
 
 _T = TypeVar("_T")
@@ -42,6 +45,7 @@ def snapshot_control_plane(plane: AgentInternetControlPlane) -> dict:
         "api_tokens": [asdict(token) for token in plane.registry.list_api_tokens()],
         "spaces": [asdict(space) for space in plane.registry.list_spaces()],
         "slots": [asdict(slot) for slot in plane.registry.list_slots()],
+        "fork_lineage": [asdict(lineage) for lineage in plane.registry.list_fork_lineage()],
         "presence": [asdict(presence) for presence in plane.registry.list_cities()],
         "trust": [asdict(record) for record in plane.trust_engine.list_records()],
         "allocator": plane.registry.allocation_state(),
@@ -147,6 +151,22 @@ def restore_control_plane(payload: dict) -> AgentInternetControlPlane:
                 capacity=int(data.get("capacity", 1)),
                 heartbeat_source=data.get("heartbeat_source", ""),
                 heartbeat=data.get("heartbeat"),
+                labels=dict(data.get("labels", {})),
+            ),
+        )
+    for data in payload.get("fork_lineage", []):
+        plane.registry.upsert_fork_lineage(
+            ForkLineageRecord(
+                lineage_id=data["lineage_id"],
+                repo=data["repo"],
+                upstream_repo=data.get("upstream_repo", ""),
+                line_root_repo=data.get("line_root_repo", ""),
+                fork_mode=ForkMode(data.get("fork_mode", ForkMode.EXPERIMENT.value)),
+                sync_policy=UpstreamSyncPolicy(data.get("sync_policy", UpstreamSyncPolicy.MANUAL_ONLY.value)),
+                space_id=data.get("space_id", ""),
+                upstream_space_id=data.get("upstream_space_id", ""),
+                forked_by_subject_id=data.get("forked_by_subject_id", ""),
+                created_at=data.get("created_at"),
                 labels=dict(data.get("labels", {})),
             ),
         )

@@ -8,6 +8,7 @@ from .models import (
     CityEndpoint,
     CityIdentity,
     CityPresence,
+    ForkLineageRecord,
     HostedEndpoint,
     LotusApiToken,
     LotusLinkAddress,
@@ -62,6 +63,7 @@ class InMemoryCityRegistry:
     _api_token_hash_index: dict[str, str] = field(default_factory=dict)
     _spaces: dict[str, SpaceDescriptor] = field(default_factory=dict)
     _slots: dict[str, SlotDescriptor] = field(default_factory=dict)
+    _fork_lineage: dict[str, ForkLineageRecord] = field(default_factory=dict)
     _next_link_id: int = 1
     _next_network_id: int = 1
 
@@ -227,6 +229,15 @@ class InMemoryCityRegistry:
 
     def list_slots(self) -> list[SlotDescriptor]:
         return [self._slots[slot_id] for slot_id in sorted(self._slots)]
+
+    def upsert_fork_lineage(self, lineage: ForkLineageRecord) -> None:
+        self._fork_lineage[lineage.lineage_id] = lineage
+
+    def get_fork_lineage(self, lineage_id: str) -> ForkLineageRecord | None:
+        return self._fork_lineage.get(lineage_id)
+
+    def list_fork_lineage(self) -> list[ForkLineageRecord]:
+        return [self._fork_lineage[lineage_id] for lineage_id in sorted(self._fork_lineage)]
 
     def announce(self, presence: CityPresence) -> None:
         self._presence[presence.city_id] = presence
