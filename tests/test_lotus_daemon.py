@@ -593,6 +593,7 @@ def test_lotus_daemon_refreshes_and_reads_federated_index_http_api(tmp_path):
     registry_path = tmp_path / "registry.json"
     index_path = tmp_path / "federated_index.json"
     overlay_path = tmp_path / "semantic_overlay.json"
+    wordnet_path = tmp_path / "wordnet_bridge.json"
     repo_a = tmp_path / "city-a"
     repo_b = tmp_path / "city-b"
     for repo_root, city_id, repo_name, campaign_title in (
@@ -606,7 +607,8 @@ def test_lotus_daemon_refreshes_and_reads_federated_index_http_api(tmp_path):
         (reports_dir / "report_10.json").write_text(json.dumps({"heartbeat": 10, "timestamp": 100.0, "population": 1, "alive": 1, "dead": 0, "chain_valid": True, "active_campaigns": [{"id": campaign_title.lower().replace(' ', '-'), "title": campaign_title, "north_star": campaign_title, "status": "active", "last_gap_summary": ["keep execution bounded"]}]}))
     upsert_agent_web_source_registry_entry(registry_path, root=repo_a)
     upsert_agent_web_source_registry_entry(registry_path, root=repo_b)
-    upsert_agent_web_semantic_bridge(overlay_path, bridge_kind="synonym", terms=["bazaar"], expansions=["marketplace"])
+    wordnet_path.write_text('{"synsets": ["market.n.01", "commerce.n.01"], "words": {"w1": {"t": ["bazaar"], "c": [0, 1]}, "w2": {"t": ["marketplace"], "c": [0, 1]}, "w3": {"t": ["commerce"], "c": [0, 1]}}}')
+    upsert_agent_web_semantic_bridge(overlay_path, bridge_kind="wordnet", terms=["marketplace"], expansions=["commerce"], weight=0.8)
 
     store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
     root_secret = store.update(lambda plane: LotusControlPlaneAPI(plane).issue_token(subject="root", scopes=(LotusApiScope.READ.value, LotusApiScope.TOKEN_WRITE.value), token_secret="root-secret", token_id="tok-root").secret)
@@ -633,13 +635,14 @@ def test_lotus_daemon_refreshes_and_reads_federated_index_http_api(tmp_path):
         assert status == 200
         assert payload["agent_web_semantic_overlay"]["stats"]["bridge_count"] == 1
 
-        status, payload = _request_json(daemon.base_url, f"/v1/lotus/agent-web-semantic-expand?overlay_path={overlay_path}&q=bazaar", token=root_secret)
+        status, payload = _request_json(daemon.base_url, f"/v1/lotus/agent-web-semantic-expand?overlay_path={overlay_path}&wordnet_path={wordnet_path}&q=bazaar", token=root_secret)
         assert status == 200
         assert "marketplace" in payload["agent_web_semantic_expand"]["expanded_terms"]
 
-        status, payload = _request_json(daemon.base_url, f"/v1/lotus/agent-web-federated-search?index_path={index_path}&overlay_path={overlay_path}&q=bazaar&limit=3", token=root_secret)
+        status, payload = _request_json(daemon.base_url, f"/v1/lotus/agent-web-federated-search?index_path={index_path}&overlay_path={overlay_path}&wordnet_path={wordnet_path}&q=bazaar&limit=3", token=root_secret)
         assert status == 200
         assert payload["agent_web_federated_search"]["results"][0]["source_city_id"] == "city-b"
+        assert payload["agent_web_federated_search"]["wordnet_bridge"]["available"] is True
     finally:
         daemon.shutdown()
 

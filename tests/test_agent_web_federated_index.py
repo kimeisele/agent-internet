@@ -6,6 +6,7 @@ from agent_internet.agent_web_federated_index import (
     search_agent_web_federated_index,
 )
 from agent_internet.agent_web_semantic_overlay import upsert_agent_web_semantic_bridge, load_agent_web_semantic_overlay
+from agent_internet.agent_web_wordnet_bridge import load_agent_web_wordnet_bridge
 from agent_internet.agent_web_source_registry import upsert_agent_web_source_registry_entry
 
 
@@ -13,11 +14,13 @@ def test_refresh_and_search_agent_web_federated_index(tmp_path):
     registry_path = tmp_path / "registry.json"
     index_path = tmp_path / "federated_index.json"
     overlay_path = tmp_path / "semantic_overlay.json"
+    wordnet_path = tmp_path / "wordnet_bridge.json"
     repo_a = _write_repo(tmp_path / "city-a", city_id="city-a", repo="org/city-a", campaign_title="Internet adaptation")
     repo_b = _write_repo(tmp_path / "city-b", city_id="city-b", repo="org/city-b", campaign_title="Marketplace integration")
     upsert_agent_web_source_registry_entry(registry_path, root=repo_a)
     upsert_agent_web_source_registry_entry(registry_path, root=repo_b)
-    upsert_agent_web_semantic_bridge(overlay_path, bridge_kind="synonym", terms=["bazaar"], expansions=["marketplace"])
+    wordnet_path.write_text('{"synsets": ["market.n.01", "commerce.n.01"], "words": {"w1": {"t": ["bazaar"], "c": [0, 1]}, "w2": {"t": ["marketplace"], "c": [0, 1]}, "w3": {"t": ["commerce"], "c": [0, 1]}}}')
+    upsert_agent_web_semantic_bridge(overlay_path, bridge_kind="wordnet", terms=["marketplace"], expansions=["commerce"], weight=0.8)
 
     index = refresh_agent_web_federated_index(
         index_path,
@@ -49,10 +52,17 @@ def test_refresh_and_search_agent_web_federated_index(tmp_path):
     loaded = load_agent_web_federated_index(index_path)
     assert loaded["stats"]["record_count"] == index["stats"]["record_count"]
 
-    results = search_agent_web_federated_index(loaded, query="bazaar", limit=5, semantic_overlay=load_agent_web_semantic_overlay(overlay_path))
+    results = search_agent_web_federated_index(
+        loaded,
+        query="bazaar",
+        limit=5,
+        semantic_overlay=load_agent_web_semantic_overlay(overlay_path),
+        wordnet_bridge=load_agent_web_wordnet_bridge(wordnet_path),
+    )
     assert results["kind"] == "agent_web_federated_search_results"
     assert results["results"][0]["source_city_id"] == "city-b"
-    assert results["query_interpretation"]["semantic_bridges_applied"] == ["synonym:bazaar"]
+    assert results["query_interpretation"]["semantic_bridges_applied"] == ["wordnet:marketplace"]
+    assert results["wordnet_bridge"]["available"] is True
 
 
 def _write_repo(repo_root, *, city_id: str, repo: str, campaign_title: str):

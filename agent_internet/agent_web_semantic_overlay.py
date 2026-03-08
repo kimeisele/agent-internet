@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 from .file_locking import read_locked_json_value, update_locked_json_value, write_locked_json_value
+from .agent_web_wordnet_bridge import load_agent_web_wordnet_bridge, wordnet_phrase_score
 
 DEFAULT_AGENT_WEB_SEMANTIC_OVERLAY_PATH = "data/control_plane/agent_web_semantic_overlay.json"
 
@@ -32,6 +33,7 @@ def upsert_agent_web_semantic_bridge(
     terms: list[str] | tuple[str, ...],
     expansions: list[str] | tuple[str, ...],
     bridge_id: str | None = None,
+    weight: float | None = None,
     notes: str = "",
     enabled: bool = True,
 ) -> dict:
@@ -60,6 +62,7 @@ def upsert_agent_web_semantic_bridge(
             "bridge_kind": bridge_kind_value,
             "terms": normalized_terms,
             "expansions": normalized_expansions,
+            "weight": _normalize_weight(weight if weight is not None else _default_bridge_weight(bridge_kind_value)),
             "enabled": bool(enabled),
             "notes": str(notes),
         }
@@ -96,10 +99,11 @@ def remove_agent_web_semantic_bridge(
     return update_locked_json_value(Path(path), default=_default_semantic_overlay(), updater=updater)
 
 
-def expand_query_with_agent_web_semantic_overlay(overlay: dict, *, query: str) -> dict:
+def expand_query_with_agent_web_semantic_overlay(overlay: dict, *, query: str, wordnet_bridge: dict | None = None) -> dict:
     query_value = str(query).strip()
     query_terms = _term_tokens(query_value)
-    expanded_phrases: list[str] = []
+    active_wordnet_bridge = wordnet_bridge or load_agent_web_wordnet_bridge()
+    weighted_terms: dict[str, dict[str, object]] = {}
     matched_bridges: list[dict[str, object]] = []
 
     for bridge in overlay.get("bridges", []):
@@ -109,29 +113,63 @@ def expand_query_with_agent_web_semantic_overlay(overlay: dict, *, query: str) -
         bridge_expansions = _clean_phrase_list(bridge.get("expansions", []))
         if not bridge_terms or not bridge_expansions:
             continue
-        if not _bridge_matches_query(query_value, query_terms, bridge_terms):
+        lexical_score = _bridge_match_score(query_value, query_terms, bridge_terms)
+        wordnet_score = max((wordnet_phrase_score(query_value, term, bridge=active_wordnet_bridge) for term in bridge_terms), default=0.0)
+        match_score = max(lexical_score, wordnet_score)
+        if match_score <= 0:
             continue
-        expanded_phrases.extend(bridge_expansions)
+        bridge_weight = _normalize_weight(bridge.get("weight", _default_bridge_weight(str(bridge.get("bridge_kind", "concept")))))
+        effective_weight = _normalize_weight(bridge_weight * match_score)
+        for candidate_term in _clean_phrase_list([*bridge_terms, *bridge_expansions]):
+            candidate_score = max(match_score, _bridge_match_score(query_value, query_terms, [candidate_term]), wordnet_phrase_score(query_value, candidate_term, bridge=active_wordnet_bridge))
+            term_weight = _normalize_weight(bridge_weight * candidate_score)
+            slot = weighted_terms.setdefault(candidate_term, {"term": candidate_term, "weight": 0.0, "source_bridge_ids": []})
+            slot["weight"] = max(float(slot["weight"]), term_weight)
+            if str(bridge.get("bridge_id", "")) and str(bridge.get("bridge_id", "")) not in slot["source_bridge_ids"]:
+                slot["source_bridge_ids"].append(str(bridge.get("bridge_id", "")))
         matched_bridges.append(
             {
                 "bridge_id": str(bridge.get("bridge_id", "")),
                 "bridge_kind": str(bridge.get("bridge_kind", "concept")),
                 "terms": bridge_terms,
                 "expansions": bridge_expansions,
+                "bridge_weight": bridge_weight,
+                "lexical_score": lexical_score,
+                "wordnet_score": wordnet_score,
+                "effective_weight": effective_weight,
             },
         )
 
-    expanded_terms = _clean_phrase_list([query_value, *query_terms, *expanded_phrases])
+    weighted_expanded_terms = sorted(
+        (
+            {
+                "term": str(item["term"]),
+                "weight": _normalize_weight(item["weight"]),
+                "source_bridge_ids": sorted({str(source) for source in item.get("source_bridge_ids", []) if str(source)}),
+            }
+            for item in weighted_terms.values()
+        ),
+        key=lambda item: (-float(item.get("weight", 0.0)), str(item.get("term", ""))),
+    )
+    expanded_terms = _clean_phrase_list([query_value, *query_terms, *[str(item.get("term", "")) for item in weighted_expanded_terms]])
     return {
         "kind": "agent_web_semantic_query_expansion",
         "version": 1,
         "raw_query": query_value,
         "input_terms": query_terms,
         "expanded_terms": expanded_terms,
-        "matched_bridges": matched_bridges,
+        "weighted_expanded_terms": weighted_expanded_terms,
+        "matched_bridges": sorted(matched_bridges, key=lambda item: (-float(item.get("effective_weight", 0.0)), str(item.get("bridge_id", "")))),
+        "wordnet_bridge": {
+            "available": bool(active_wordnet_bridge.get("available", False)),
+            "path": str(active_wordnet_bridge.get("path", "")),
+            "source": str(active_wordnet_bridge.get("source", "unavailable")),
+            "stats": dict(active_wordnet_bridge.get("stats", {})),
+        },
         "stats": {
             "matched_bridge_count": len(matched_bridges),
             "expanded_term_count": len(expanded_terms),
+            "weighted_term_count": len(weighted_expanded_terms),
         },
     }
 
@@ -170,6 +208,7 @@ def _normalize_semantic_overlay(payload: object) -> dict:
                 "bridge_kind": bridge_kind,
                 "terms": terms,
                 "expansions": expansions,
+                "weight": _normalize_weight(item.get("weight", _default_bridge_weight(bridge_kind))),
                 "enabled": bool(item.get("enabled", True)),
                 "notes": str(item.get("notes", "")),
             },
@@ -187,6 +226,7 @@ def _normalize_semantic_overlay(payload: object) -> dict:
             "bridge_kind_counts": _count_bridge_kinds(bridges),
             "term_count": len({term for item in bridges for term in item.get("terms", [])}),
             "expansion_count": len({term for item in bridges for term in item.get("expansions", [])}),
+            "average_weight": round(sum(float(item.get("weight", 0.0)) for item in bridges) / len(bridges), 4) if bridges else 0.0,
         },
     }
 
@@ -207,24 +247,41 @@ def _term_tokens(value: str) -> list[str]:
     return sorted({term for term in re.findall(r"[a-z0-9_./:-]+", value.lower()) if term})
 
 
-def _bridge_matches_query(query_value: str, query_terms: list[str], bridge_terms: list[str]) -> bool:
+def _bridge_match_score(query_value: str, query_terms: list[str], bridge_terms: list[str]) -> float:
     query_term_set = set(query_terms)
     for term in bridge_terms:
         if term == query_value:
-            return True
+            return 1.0
         if term in query_term_set:
-            return True
+            return 0.95
         if term and term in query_value:
-            return True
+            return 0.75
         term_tokens = set(_term_tokens(term))
         if term_tokens and term_tokens.issubset(query_term_set):
-            return True
-    return False
+            return 0.65
+    return 0.0
 
 
 def _suggest_bridge_id(bridge_kind: str, seed: str) -> str:
     safe_seed = re.sub(r"[^a-z0-9]+", "-", seed.lower()).strip("-")
     return f"{bridge_kind}:{safe_seed}".strip(":")
+
+
+def _default_bridge_weight(bridge_kind: str) -> float:
+    return {
+        "alias": 1.0,
+        "synonym": 0.9,
+        "wordnet": 0.78,
+        "concept": 0.65,
+        "resonance": 0.55,
+    }.get(str(bridge_kind).strip().lower(), 0.6)
+
+
+def _normalize_weight(value: object) -> float:
+    try:
+        return max(0.0, min(1.0, round(float(value), 6)))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _count_bridge_kinds(bridges: list[dict[str, object]]) -> dict[str, int]:

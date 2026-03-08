@@ -248,6 +248,7 @@ class LotusApiDaemon:
                     {
                         "index_path": _query_param(query, "index_path") or "data/control_plane/agent_web_federated_index.json",
                         "overlay_path": _query_param(query, "overlay_path") or "data/control_plane/agent_web_semantic_overlay.json",
+                        "wordnet_path": _query_param(query, "wordnet_path"),
                         "query": _require_query_param(query, "q"),
                         "limit": int(_query_param(query, "limit") or "10"),
                     },
@@ -266,6 +267,7 @@ class LotusApiDaemon:
                     "agent_web_semantic_expand",
                     {
                         "overlay_path": _query_param(query, "overlay_path") or "data/control_plane/agent_web_semantic_overlay.json",
+                        "wordnet_path": _query_param(query, "wordnet_path"),
                         "query": _require_query_param(query, "q"),
                     },
                 )

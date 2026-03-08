@@ -9,6 +9,7 @@ from .agent_web_source_registry import (
     DEFAULT_AGENT_WEB_SOURCE_REGISTRY_PATH,
     build_agent_web_crawl_bootstrap_from_registry,
 )
+from .agent_web_wordnet_bridge import load_agent_web_wordnet_bridge
 from .file_locking import read_locked_json_value, write_locked_json_value
 from .snapshot import snapshot_control_plane
 
@@ -71,14 +72,30 @@ def refresh_agent_web_federated_index_for_plane(
     )
 
 
-def search_agent_web_federated_index(index: dict, *, query: str, limit: int = 10, semantic_overlay: dict | None = None) -> dict:
+def search_agent_web_federated_index(
+    index: dict,
+    *,
+    query: str,
+    limit: int = 10,
+    semantic_overlay: dict | None = None,
+    wordnet_bridge: dict | None = None,
+) -> dict:
     overlay = semantic_overlay or _empty_semantic_overlay()
-    expansion = expand_query_with_agent_web_semantic_overlay(overlay, query=query)
-    search = search_agent_web_index(index, query=query, limit=limit, expanded_terms=list(expansion.get("expanded_terms", [])))
+    active_wordnet_bridge = wordnet_bridge or load_agent_web_wordnet_bridge()
+    expansion = expand_query_with_agent_web_semantic_overlay(overlay, query=query, wordnet_bridge=active_wordnet_bridge)
+    search = search_agent_web_index(
+        index,
+        query=query,
+        limit=limit,
+        expanded_terms=list(expansion.get("expanded_terms", [])),
+        expanded_term_weights={str(item.get("term", "")): float(item.get("weight", 0.0)) for item in expansion.get("weighted_expanded_terms", [])},
+    )
     semantic_extensions = {
         **dict(index.get("semantic_extensions", {})),
         "overlay_bridge_count": int(dict(overlay.get("stats", {})).get("bridge_count", 0)),
         "overlay_enabled_bridge_count": int(dict(overlay.get("stats", {})).get("enabled_bridge_count", 0)),
+        "wordnet_bridge_available": bool(active_wordnet_bridge.get("available", False)),
+        "wordnet_bridge_source": str(active_wordnet_bridge.get("source", "unavailable")),
     }
     return {
         "kind": "agent_web_federated_search_results",
@@ -89,9 +106,11 @@ def search_agent_web_federated_index(index: dict, *, query: str, limit: int = 10
             "raw_query": str(query),
             "input_terms": list(expansion.get("input_terms", [])),
             "expanded_terms": list(expansion.get("expanded_terms", [])),
+            "weighted_expanded_terms": list(expansion.get("weighted_expanded_terms", [])),
             "semantic_bridges_applied": [str(item.get("bridge_id", "")) for item in expansion.get("matched_bridges", [])],
         },
         "matched_semantic_bridges": list(expansion.get("matched_bridges", [])),
+        "wordnet_bridge": dict(expansion.get("wordnet_bridge", {})),
         "semantic_extensions": semantic_extensions,
         "stats": {
             "result_count": int(search.get("stats", {}).get("result_count", 0)),
@@ -108,9 +127,16 @@ def search_agent_web_federated_index_from_path(
     query: str,
     limit: int = 10,
     semantic_overlay_path: Path | str | None = None,
+    wordnet_bridge_path: Path | str | None = None,
 ) -> dict:
     overlay = _empty_semantic_overlay() if semantic_overlay_path is None else load_agent_web_semantic_overlay(semantic_overlay_path)
-    return search_agent_web_federated_index(load_agent_web_federated_index(path), query=query, limit=limit, semantic_overlay=overlay)
+    return search_agent_web_federated_index(
+        load_agent_web_federated_index(path),
+        query=query,
+        limit=limit,
+        semantic_overlay=overlay,
+        wordnet_bridge=load_agent_web_wordnet_bridge(wordnet_bridge_path),
+    )
 
 
 def _default_federated_index() -> dict:

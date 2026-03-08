@@ -32,6 +32,7 @@ from .agent_web_semantic_overlay import (
     remove_agent_web_semantic_bridge,
     upsert_agent_web_semantic_bridge,
 )
+from .agent_web_wordnet_bridge import load_agent_web_wordnet_bridge
 from .agent_city_peer import AgentCityPeer
 from .assistant_surface import assistant_surface_snapshot_from_repo_root
 from .git_federation import GitWikiFederationSync, detect_git_remote_metadata, ensure_git_checkout
@@ -219,6 +220,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     agent_web_federated_search.add_argument("--index-path", default=DEFAULT_AGENT_WEB_FEDERATED_INDEX_PATH)
     agent_web_federated_search.add_argument("--overlay-path", default=DEFAULT_AGENT_WEB_SEMANTIC_OVERLAY_PATH)
+    agent_web_federated_search.add_argument("--wordnet-path")
     agent_web_federated_search.add_argument("--query", required=True)
     agent_web_federated_search.add_argument("--limit", type=int, default=10)
 
@@ -243,6 +245,7 @@ def build_parser() -> argparse.ArgumentParser:
     agent_web_semantic_bridge_add.add_argument("--bridge-id")
     agent_web_semantic_bridge_add.add_argument("--term", dest="terms", action="append", required=True)
     agent_web_semantic_bridge_add.add_argument("--expansion", dest="expansions", action="append", required=True)
+    agent_web_semantic_bridge_add.add_argument("--weight", type=float)
     agent_web_semantic_bridge_add.add_argument("--notes", default="")
     agent_web_semantic_bridge_add.add_argument("--disabled", action="store_true")
 
@@ -258,6 +261,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Expand a query through the local semantic overlay",
     )
     agent_web_semantic_expand.add_argument("--overlay-path", default=DEFAULT_AGENT_WEB_SEMANTIC_OVERLAY_PATH)
+    agent_web_semantic_expand.add_argument("--wordnet-path")
     agent_web_semantic_expand.add_argument("--query", required=True)
 
     agent_web_read = subparsers.add_parser(
@@ -878,6 +882,7 @@ def cmd_agent_web_federated_search(args: argparse.Namespace) -> int:
         query=args.query,
         limit=args.limit,
         semantic_overlay=load_agent_web_semantic_overlay(args.overlay_path),
+        wordnet_bridge=load_agent_web_wordnet_bridge(args.wordnet_path),
     )
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
@@ -902,6 +907,7 @@ def cmd_agent_web_semantic_bridge_add(args: argparse.Namespace) -> int:
         bridge_id=args.bridge_id,
         terms=list(args.terms),
         expansions=list(args.expansions),
+        weight=args.weight,
         notes=args.notes,
         enabled=not bool(args.disabled),
     )
@@ -916,7 +922,11 @@ def cmd_agent_web_semantic_bridge_remove(args: argparse.Namespace) -> int:
 
 
 def cmd_agent_web_semantic_expand(args: argparse.Namespace) -> int:
-    payload = expand_query_with_agent_web_semantic_overlay(load_agent_web_semantic_overlay(args.overlay_path), query=args.query)
+    payload = expand_query_with_agent_web_semantic_overlay(
+        load_agent_web_semantic_overlay(args.overlay_path),
+        query=args.query,
+        wordnet_bridge=load_agent_web_wordnet_bridge(args.wordnet_path),
+    )
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 

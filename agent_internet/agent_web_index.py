@@ -169,21 +169,33 @@ def build_agent_web_search_index_for_plane(
     return build_agent_web_search_index(manifest, graph)
 
 
-def search_agent_web_index(index: dict, *, query: str, limit: int = 10, expanded_terms: list[str] | tuple[str, ...] = ()) -> dict:
+def search_agent_web_index(
+    index: dict,
+    *,
+    query: str,
+    limit: int = 10,
+    expanded_terms: list[str] | tuple[str, ...] = (),
+    expanded_term_weights: dict[str, float] | None = None,
+) -> dict:
     query_value = str(query).strip()
     query_terms = set(_terms(query_value))
+    query_term_weights = {term: 1.0 for term in query_terms}
     normalized_expanded_terms = [str(item).strip() for item in expanded_terms if str(item).strip()]
+    expanded_term_weights = dict(expanded_term_weights or {})
     for term in normalized_expanded_terms:
-        query_terms.update(_terms(term))
-    scored: list[tuple[int, dict[str, object], list[str]]] = []
+        term_weight = max(0.0, float(expanded_term_weights.get(term, 1.0)))
+        for token in _terms(term):
+            query_terms.add(token)
+            query_term_weights[token] = max(float(query_term_weights.get(token, 0.0)), term_weight)
+    scored: list[tuple[float, dict[str, object], list[str]]] = []
     for record in index.get("records", []):
-        score, matched_terms = _score_record(record, query_value, query_terms)
+        score, matched_terms = _score_record(record, query_value, query_terms, query_term_weights)
         if score <= 0:
             continue
         scored.append((score, record, matched_terms))
     scored.sort(key=lambda item: (-item[0], str(item[1].get("kind", "")), str(item[1].get("title", ""))))
     results = [
-        {**record, "score": score, "matched_terms": matched_terms}
+        {**record, "score": round(score, 6), "matched_terms": matched_terms}
         for score, record, matched_terms in scored[: max(1, int(limit))]
     ]
     return {
@@ -214,32 +226,33 @@ def _terms(value: str) -> set[str]:
     return {term for term in re.findall(r"[a-z0-9_./:-]+", value.lower()) if term}
 
 
-def _score_record(record: dict, query_value: str, query_terms: set[str]) -> tuple[int, list[str]]:
+def _score_record(record: dict, query_value: str, query_terms: set[str], query_term_weights: dict[str, float]) -> tuple[float, list[str]]:
     title = str(record.get("title", "")).lower()
     summary = str(record.get("summary", "")).lower()
     tags = {str(item).lower() for item in record.get("tags", [])}
     terms = {str(item).lower() for item in record.get("terms", [])}
-    score = 0
+    score = 0.0
     matched_terms: list[str] = []
     if query_value and query_value.lower() in title:
         score += 30
     if query_value and query_value.lower() in summary:
         score += 12
-    for term in query_terms:
+    for term in sorted(query_terms):
+        weight = max(0.0, float(query_term_weights.get(term, 1.0)))
         matched = False
         if term in tags:
-            score += 15
+            score += 15 * weight
             matched = True
         elif term in terms:
-            score += 6
+            score += 6 * weight
             matched = True
         elif any(term in candidate for candidate in tags | terms):
-            score += 3
+            score += 3 * weight
             matched = True
         if matched:
             matched_terms.append(term)
-    if query_terms and len(matched_terms) == len(query_terms):
-        score += 5
+    if query_terms and matched_terms:
+        score += 5 * (len(set(matched_terms)) / len(query_terms))
     return score, matched_terms
 
 
