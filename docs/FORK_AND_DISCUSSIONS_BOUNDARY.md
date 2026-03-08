@@ -209,3 +209,6 @@ Forking should become the primary path for independent derivative worlds.
 
 GitHub Discussions should become the primary conversational front door for
 humans and agents to request, negotiate, and coordinate what happens next.
+
+For origin/upstream semantics and when derivative lines should heal upstream,
+see `docs/GITHUB_NATIVE_MODEL.md`.
