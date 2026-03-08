@@ -1,0 +1,74 @@
+name: Publish Agent Web Wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'agent_internet/**'
+      - 'docs/**'
+      - 'scripts/build_agent_web_wiki.py'
+      - 'scripts/publish_agent_web_wiki.py'
+      - 'tests/test_publisher.py'
+      - '.github/workflows/publish-agent-web.yml'
+  schedule:
+    - cron: '29 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-agent-web
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout agent-internet
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dev dependencies
+        run: python -m pip install -e .[dev]
+
+      - name: Validate agent web publication slice
+        run: |
+          python -m py_compile \
+            agent_internet/agent_web.py \
+            agent_internet/agent_web_repo_graph.py \
+            agent_internet/git_federation.py \
+            agent_internet/publisher.py \
+            scripts/build_agent_web_wiki.py \
+            scripts/publish_agent_web_wiki.py \
+            tests/test_git_federation.py \
+            tests/test_publisher.py
+          python -m pytest -q tests/test_git_federation.py tests/test_publisher.py
+          python scripts/build_agent_web_wiki.py --output-dir .agent_internet/wiki-build-ci
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name "agent-internet-bot"
+          git config --global user.email "bot@agent-internet"
+
+      - name: Publish agent web wiki
+        env:
+          WIKI_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git
+        run: |
+          python scripts/publish_agent_web_wiki.py \
+            --wiki-url "$WIKI_URL" \
+            --push \
+            --result-path .agent_internet/wiki-publish-result.json
+
+      - name: Summarize publication result
+        run: |
+          echo '## Agent Web Publish Result' >> "$GITHUB_STEP_SUMMARY"
+          cat .agent_internet/wiki-publish-result.json >> "$GITHUB_STEP_SUMMARY"
