@@ -130,6 +130,9 @@ def test_git_wiki_sync_projects_pages_and_pushes(tmp_path):
     assert "## Active Campaigns" in (clone_path / "Assistant-Surface.md").read_text()
     assert "North Star: Continuously adapt to relevant new protocols and standards." in (clone_path / "Assistant-Surface.md").read_text()
     assert "Gaps: keep execution bounded" in (clone_path / "Assistant-Surface.md").read_text()
+    assert "# Agent Web" in (clone_path / "Agent-Web.md").read_text()
+    assert "`agent_web` → `Agent-Web.md`" in (clone_path / "Agent-Web.md").read_text()
+    assert '"kind": "agent_web_manifest"' in (clone_path / "Agent-Web.md").read_text()
     assert "# Lineage" in (clone_path / "Lineage.md").read_text()
     assert "Sync Policy: `advisory`" in (clone_path / "Lineage.md").read_text()
 

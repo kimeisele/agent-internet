@@ -226,6 +226,75 @@ def test_lotus_api_returns_assistant_snapshot(tmp_path):
     assert response["assistant_snapshot"]["active_campaigns"][0]["id"] == "internet-adaptation"
 
 
+def test_lotus_api_returns_agent_web_manifest(tmp_path):
+    repo_root = tmp_path / "city"
+    reports_dir = repo_root / "data" / "federation" / "reports"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "report_4.json").write_text(
+        json.dumps(
+            {
+                "heartbeat": 4,
+                "timestamp": 40.0,
+                "population": 2,
+                "alive": 2,
+                "dead": 0,
+                "chain_valid": True,
+                "active_campaigns": [
+                    {
+                        "id": "internet-adaptation",
+                        "title": "Internet adaptation",
+                        "north_star": "Continuously adapt to relevant new protocols and standards.",
+                        "status": "active",
+                        "last_gap_summary": ["keep execution bounded"],
+                    }
+                ],
+            },
+        ),
+    )
+    (repo_root / "data" / "assistant_state.json").write_text(json.dumps({"followed": ["alice"], "ops": {"posts": 2}}))
+    peer_dir = repo_root / "data" / "federation"
+    peer_dir.mkdir(parents=True, exist_ok=True)
+    (peer_dir / "peer.json").write_text(
+        json.dumps({"identity": {"city_id": "city-http", "slug": "http", "repo": "org/city-http"}, "capabilities": ["moltbook"]}),
+    )
+
+    plane = AgentInternetControlPlane()
+    plane.publish_assistant_surface(
+        AssistantSurfaceSnapshot(
+            assistant_id="moltbook_assistant",
+            assistant_kind="moltbook_assistant",
+            city_id="city-http",
+            city_slug="http",
+            repo="org/city-http",
+            heartbeat_source="steward-protocol/mahamantra",
+            heartbeat=4,
+            state_present=True,
+            total_posts=2,
+            active_campaigns=(
+                {
+                    "id": "internet-adaptation",
+                    "title": "Internet adaptation",
+                    "north_star": "Continuously adapt to relevant new protocols and standards.",
+                    "status": "active",
+                    "last_gap_summary": ["keep execution bounded"],
+                },
+            ),
+        ),
+    )
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(subject="operator", scopes=(LotusApiScope.READ.value,), token_secret="secret")
+
+    response = api.call(
+        bearer_token=issued.secret,
+        action="agent_web_manifest",
+        params={"root": str(repo_root)},
+    )
+
+    assert response["agent_web_manifest"]["identity"]["city_id"] == "city-http"
+    assert response["agent_web_manifest"]["campaigns"][0]["title"] == "Internet adaptation"
+    assert any(link["rel"] == "assistant_surface" for link in response["agent_web_manifest"]["links"])
+
+
 def test_lotus_api_lists_spaces_and_slots():
     plane = AgentInternetControlPlane()
     plane.publish_assistant_surface(

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+from .agent_web import build_agent_web_manifest
 from .file_locking import write_locked_json_value
 
 HOME_SUMMARY_START = "<!-- AGENT_INTERNET_SUMMARY_START -->"
@@ -180,12 +181,18 @@ def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict, assis
         for item in routes
     )
     manifest_md = "# Git Federation\n\n" + json.dumps(git_manifest, indent=2, sort_keys=True)
+    agent_web = build_agent_web_manifest(
+        peer_descriptor=peer_descriptor,
+        state_snapshot=state_snapshot,
+        assistant_snapshot=assistant_snapshot,
+    )
     pages = {
         "Home.md": home,
         "Cities.md": cities_md.rstrip() + "\n",
         "Services.md": services_md.rstrip() + "\n",
         "Routes.md": routes_md.rstrip() + "\n",
         "Git-Federation.md": manifest_md.rstrip() + "\n",
+        "Agent-Web.md": _render_agent_web_page(agent_web),
         "Lineage.md": _render_lineage_page(current_lineage=current_lineage, lineage_records=lineage_records),
     }
     if assistant_snapshot:
@@ -226,6 +233,31 @@ def _render_assistant_surface_page(assistant_snapshot: dict) -> str:
             if gaps:
                 lines.append(f"  - Gaps: {', '.join(str(item) for item in gaps[:3])}")
     lines.extend(["", "## Raw Snapshot", "", json.dumps(assistant_snapshot, indent=2, sort_keys=True)])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_agent_web_page(manifest: dict) -> str:
+    identity = dict(manifest.get("identity", {}))
+    assistant = dict(manifest.get("assistant", {}))
+    stats = dict(manifest.get("stats", {}))
+    lines = [
+        "# Agent Web",
+        "",
+        f"- City: `{identity.get('city_id', '')}`",
+        f"- Repo: `{identity.get('repo', '')}`",
+        f"- Assistant: `{assistant.get('assistant_id', '')}` ({assistant.get('assistant_kind', '')})",
+        f"- Health: `{assistant.get('city_health', '')}`",
+        f"- Campaigns: `{stats.get('campaign_count', 0)}`",
+        f"- Spaces: `{stats.get('space_count', 0)}`",
+        f"- Services: `{stats.get('service_count', 0)}`",
+        f"- Routes: `{stats.get('route_count', 0)}`",
+        "",
+        "## Links",
+        "",
+    ]
+    for link in manifest.get("links", []):
+        lines.append(f"- `{link.get('rel', '')}` → `{link.get('href', '')}`")
+    lines.extend(["", "## Raw Manifest", "", json.dumps(manifest, indent=2, sort_keys=True)])
     return "\n".join(lines).rstrip() + "\n"
 
 
