@@ -510,6 +510,8 @@ def _maybe_publish_assistant_surface(plane: AgentInternetControlPlane, root: Pat
         "space_id": space.space_id,
         "slot_id": slot.slot_id,
         "status": slot.status,
+        "campaign_count": len(snapshot.active_campaigns),
+        "campaign_focus": snapshot.active_campaigns[0].get("title", "") if snapshot.active_campaigns else "",
     }
 
 
@@ -518,6 +520,7 @@ def _assistant_surface_has_signal(snapshot) -> bool:
         snapshot.state_present
         or "moltbook" in snapshot.capabilities
         or "moltbook_assistant" in snapshot.capabilities
+        or snapshot.active_campaigns
         or snapshot.total_follows
         or snapshot.total_invites
         or snapshot.total_posts

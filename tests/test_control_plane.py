@@ -165,6 +165,15 @@ def test_control_plane_publishes_and_restores_assistant_space_and_slot():
         state_present=True,
         total_posts=2,
         following=3,
+        active_campaigns=(
+            {
+                "id": "internet-adaptation",
+                "title": "Internet adaptation",
+                "north_star": "Continuously adapt to relevant new protocols and standards.",
+                "status": "active",
+                "last_gap_summary": ["keep execution bounded"],
+            },
+        ),
     )
 
     space, slot = plane.publish_assistant_surface(snapshot)
@@ -173,6 +182,8 @@ def test_control_plane_publishes_and_restores_assistant_space_and_slot():
 
     assert space.kind == SpaceKind.ASSISTANT
     assert slot.status == SlotStatus.ACTIVE
+    assert space.labels["campaign_count"] == "1"
+    assert slot.labels["campaign_focus"] == "Internet adaptation"
     assert restored.registry.get_space(space.space_id) == space
     assert restored.registry.get_slot(slot.slot_id) == slot
 

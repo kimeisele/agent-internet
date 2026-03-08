@@ -34,15 +34,19 @@ def assistant_surface_snapshot_from_repo_root(
     state = read_locked_json_value(contract.assistant_state_path, default={})
     if not isinstance(state, dict):
         state = {}
-    presence = AgentCityBridge(
+    bridge = AgentCityBridge(
         city_id=resolved_city_id,
         transport=FilesystemFederationTransport(contract=contract),
         capabilities=tuple(str(item) for item in capabilities_raw),
-    ).latest_presence()
+    )
+    latest_report = bridge.latest_report() or {}
+    presence = bridge.latest_presence()
     ops = state.get("ops", state.get("metrics", {}))
     if not isinstance(ops, dict):
         ops = {}
     last_post_time = float(state.get("last_post_time", 0.0) or 0.0)
+    raw_campaigns = latest_report.get("active_campaigns", []) if isinstance(latest_report, dict) else []
+    active_campaigns = tuple(_normalize_campaign_summary(item) for item in raw_campaigns if isinstance(item, dict))
 
     return AssistantSurfaceSnapshot(
         assistant_id=assistant_id,
@@ -65,6 +69,7 @@ def assistant_surface_snapshot_from_repo_root(
         total_posts=int(ops.get("posts", ops.get("total_posts", 0)) or 0),
         last_post_age_s=round(time.time() - last_post_time) if last_post_time > 0 else None,
         series_cursor=int(state.get("series_cursor", state.get("last_series_idx", -1)) or -1),
+        active_campaigns=active_campaigns,
     )
 
 
@@ -77,6 +82,7 @@ def _count_entries(value: object) -> int:
 
 
 def assistant_space_from_snapshot(snapshot: AssistantSurfaceSnapshot) -> SpaceDescriptor:
+    primary_campaign = snapshot.active_campaigns[0] if snapshot.active_campaigns else {}
     return SpaceDescriptor(
         space_id=_assistant_space_id(snapshot),
         kind=SpaceKind.ASSISTANT,
@@ -90,11 +96,14 @@ def assistant_space_from_snapshot(snapshot: AssistantSurfaceSnapshot) -> SpaceDe
             "assistant_id": snapshot.assistant_id,
             "assistant_kind": snapshot.assistant_kind,
             "city_slug": snapshot.city_slug,
+            "campaign_count": str(len(snapshot.active_campaigns)),
+            "campaign_focus": str(primary_campaign.get("title") or primary_campaign.get("id") or ""),
         },
     )
 
 
 def assistant_social_slot_from_snapshot(snapshot: AssistantSurfaceSnapshot) -> SlotDescriptor:
+    primary_campaign = snapshot.active_campaigns[0] if snapshot.active_campaigns else {}
     return SlotDescriptor(
         slot_id=f"slot:{snapshot.city_id}:assistant-social",
         space_id=_assistant_space_id(snapshot),
@@ -109,9 +118,22 @@ def assistant_social_slot_from_snapshot(snapshot: AssistantSurfaceSnapshot) -> S
             "invited": str(snapshot.invited),
             "spotlighted": str(snapshot.spotlighted),
             "total_posts": str(snapshot.total_posts),
+            "campaign_count": str(len(snapshot.active_campaigns)),
+            "campaign_focus": str(primary_campaign.get("title") or primary_campaign.get("id") or ""),
         },
     )
 
 
 def _assistant_space_id(snapshot: AssistantSurfaceSnapshot) -> str:
     return f"space:{snapshot.city_id}:{snapshot.assistant_id}"
+
+
+def _normalize_campaign_summary(campaign: dict) -> dict[str, object]:
+    return {
+        "id": str(campaign.get("id", "")),
+        "title": str(campaign.get("title") or campaign.get("id") or ""),
+        "north_star": str(campaign.get("north_star", "")),
+        "status": str(campaign.get("status", "unknown")),
+        "last_gap_summary": [str(item) for item in campaign.get("last_gap_summary", [])[:3]],
+        "last_evaluated_heartbeat": campaign.get("last_evaluated_heartbeat"),
+    }

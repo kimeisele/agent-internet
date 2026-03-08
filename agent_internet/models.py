@@ -222,6 +222,7 @@ class AssistantSurfaceSnapshot:
     total_posts: int = 0
     last_post_age_s: int | None = None
     series_cursor: int = -1
+    active_campaigns: tuple[dict[str, object], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

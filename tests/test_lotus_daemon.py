@@ -168,7 +168,25 @@ def test_lotus_daemon_serves_assistant_snapshot_http_api(tmp_path):
     reports_dir = repo_root / "data" / "federation" / "reports"
     reports_dir.mkdir(parents=True)
     (reports_dir / "report_7.json").write_text(
-        json.dumps({"heartbeat": 7, "timestamp": 70.0, "population": 1, "alive": 1, "dead": 0, "chain_valid": True}),
+        json.dumps(
+            {
+                "heartbeat": 7,
+                "timestamp": 70.0,
+                "population": 1,
+                "alive": 1,
+                "dead": 0,
+                "chain_valid": True,
+                "active_campaigns": [
+                    {
+                        "id": "internet-adaptation",
+                        "title": "Internet adaptation",
+                        "north_star": "Continuously adapt to relevant new protocols and standards.",
+                        "status": "active",
+                        "last_gap_summary": ["keep execution bounded"],
+                    }
+                ],
+            },
+        ),
     )
     (repo_root / "data" / "assistant_state.json").write_text(
         json.dumps({"followed": ["alice", "bob"], "ops": {"invites": 3}}),
@@ -200,6 +218,7 @@ def test_lotus_daemon_serves_assistant_snapshot_http_api(tmp_path):
         assert payload["assistant_snapshot"]["heartbeat"] == 7
         assert payload["assistant_snapshot"]["following"] == 2
         assert payload["assistant_snapshot"]["total_invites"] == 3
+        assert payload["assistant_snapshot"]["active_campaigns"][0]["title"] == "Internet adaptation"
     finally:
         daemon.shutdown()
 

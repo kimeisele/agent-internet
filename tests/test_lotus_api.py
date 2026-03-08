@@ -173,7 +173,25 @@ def test_lotus_api_returns_assistant_snapshot(tmp_path):
     reports_dir = repo_root / "data" / "federation" / "reports"
     reports_dir.mkdir(parents=True)
     (reports_dir / "report_4.json").write_text(
-        json.dumps({"heartbeat": 4, "timestamp": 40.0, "population": 2, "alive": 2, "dead": 0, "chain_valid": True}),
+        json.dumps(
+            {
+                "heartbeat": 4,
+                "timestamp": 40.0,
+                "population": 2,
+                "alive": 2,
+                "dead": 0,
+                "chain_valid": True,
+                "active_campaigns": [
+                    {
+                        "id": "internet-adaptation",
+                        "title": "Internet adaptation",
+                        "north_star": "Continuously adapt to relevant new protocols and standards.",
+                        "status": "active",
+                        "last_gap_summary": ["keep execution bounded"],
+                    }
+                ],
+            },
+        ),
     )
     (repo_root / "data" / "assistant_state.json").write_text(
         json.dumps({"followed": ["alice"], "ops": {"posts": 2}}),
@@ -205,6 +223,7 @@ def test_lotus_api_returns_assistant_snapshot(tmp_path):
     assert response["assistant_snapshot"]["heartbeat"] == 4
     assert response["assistant_snapshot"]["following"] == 1
     assert response["assistant_snapshot"]["total_posts"] == 2
+    assert response["assistant_snapshot"]["active_campaigns"][0]["id"] == "internet-adaptation"
 
 
 def test_lotus_api_lists_spaces_and_slots():
