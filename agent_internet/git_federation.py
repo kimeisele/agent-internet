@@ -143,6 +143,7 @@ def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict, assis
         f"- Routes: `{len(routes)}`",
     ]
     if assistant_snapshot:
+        campaigns = list(assistant_snapshot.get("active_campaigns", []))
         summary_lines.extend(
             [
                 f"- Assistant: `{assistant_snapshot.get('assistant_id', '')}` ({assistant_snapshot.get('assistant_kind', '')})",
@@ -150,6 +151,14 @@ def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict, assis
                 f"- Assistant Activity: follows `{assistant_snapshot.get('total_follows', 0)}`, invites `{assistant_snapshot.get('total_invites', 0)}`, posts `{assistant_snapshot.get('total_posts', 0)}`",
             ],
         )
+        if campaigns:
+            primary = campaigns[0]
+            summary_lines.extend(
+                [
+                    f"- Active Campaigns: `{len(campaigns)}`",
+                    f"- Campaign Focus: `{primary.get('title') or primary.get('id', '')}` ({primary.get('status', 'unknown')})",
+                ],
+            )
     if current_lineage:
         summary_lines.extend(
             [
@@ -185,6 +194,7 @@ def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict, assis
 
 
 def _render_assistant_surface_page(assistant_snapshot: dict) -> str:
+    campaigns = list(assistant_snapshot.get("active_campaigns", []))
     lines = [
         "# Assistant Surface",
         "",
@@ -203,11 +213,19 @@ def _render_assistant_surface_page(assistant_snapshot: dict) -> str:
         f"- Total Posts: `{assistant_snapshot.get('total_posts', 0)}`",
         f"- Last Post Age (s): `{assistant_snapshot.get('last_post_age_s')}`",
         f"- Series Cursor: `{assistant_snapshot.get('series_cursor', -1)}`",
-        "",
-        "## Raw Snapshot",
-        "",
-        json.dumps(assistant_snapshot, indent=2, sort_keys=True),
     ]
+    if campaigns:
+        lines.extend(["", "## Active Campaigns", ""])
+        for campaign in campaigns:
+            title = campaign.get("title") or campaign.get("id", "")
+            lines.append(f"- `{title}` (`{campaign.get('status', 'unknown')}`)")
+            north_star = str(campaign.get("north_star", "")).strip()
+            if north_star:
+                lines.append(f"  - North Star: {north_star}")
+            gaps = campaign.get("last_gap_summary", [])
+            if gaps:
+                lines.append(f"  - Gaps: {', '.join(str(item) for item in gaps[:3])}")
+    lines.extend(["", "## Raw Snapshot", "", json.dumps(assistant_snapshot, indent=2, sort_keys=True)])
     return "\n".join(lines).rstrip() + "\n"
 
 

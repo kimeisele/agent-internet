@@ -104,6 +104,15 @@ def test_git_wiki_sync_projects_pages_and_pushes(tmp_path):
             "total_posts": 1,
             "last_post_age_s": None,
             "series_cursor": -1,
+            "active_campaigns": [
+                {
+                    "id": "internet-adaptation",
+                    "title": "Internet adaptation",
+                    "north_star": "Continuously adapt to relevant new protocols and standards.",
+                    "status": "active",
+                    "last_gap_summary": ["keep execution bounded"],
+                }
+            ],
         },
     )
 
@@ -112,10 +121,15 @@ def test_git_wiki_sync_projects_pages_and_pushes(tmp_path):
     _git(tmp_path, "clone", str(wiki_remote), str(clone_path))
     assert "Connected City: city-a" in (clone_path / "Home.md").read_text()
     assert "Assistant: `moltbook_assistant`" in (clone_path / "Home.md").read_text()
+    assert "Active Campaigns: `1`" in (clone_path / "Home.md").read_text()
+    assert "Campaign Focus: `Internet adaptation` (active)" in (clone_path / "Home.md").read_text()
     assert "Upstream Repo: `org/agent-city-root`" in (clone_path / "Home.md").read_text()
     assert "api.forum.city-a.lotus" in (clone_path / "Services.md").read_text()
     assert "service:city-z/forum" in (clone_path / "Routes.md").read_text()
     assert "Total Posts: `1`" in (clone_path / "Assistant-Surface.md").read_text()
+    assert "## Active Campaigns" in (clone_path / "Assistant-Surface.md").read_text()
+    assert "North Star: Continuously adapt to relevant new protocols and standards." in (clone_path / "Assistant-Surface.md").read_text()
+    assert "Gaps: keep execution bounded" in (clone_path / "Assistant-Surface.md").read_text()
     assert "# Lineage" in (clone_path / "Lineage.md").read_text()
     assert "Sync Policy: `advisory`" in (clone_path / "Lineage.md").read_text()
 
