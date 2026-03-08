@@ -71,6 +71,10 @@ def test_read_agent_web_document_from_repo_root(tmp_path):
     assert graph_payload["document"]["document_id"] == "public_graph"
     assert "# Public Graph" in graph_payload["document"]["content"]
 
+    search_payload = read_agent_web_document_from_repo_root(repo_root, state_snapshot=state_snapshot, document_id="search_index")
+    assert search_payload["document"]["document_id"] == "search_index"
+    assert "# Search Index" in search_payload["document"]["content"]
+
 
 def test_read_agent_web_document_rejects_non_markdown_links(tmp_path):
     repo_root = tmp_path / "city"

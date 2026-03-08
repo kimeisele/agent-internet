@@ -294,6 +294,7 @@ def test_lotus_api_returns_agent_web_manifest(tmp_path):
     assert response["agent_web_manifest"]["campaigns"][0]["title"] == "Internet adaptation"
     assert response["agent_web_manifest"]["entrypoints"]["default"]["document_id"] == "agent_web"
     assert response["agent_web_manifest"]["entrypoints"]["public_graph"]["document_id"] == "public_graph"
+    assert any(document["document_id"] == "search_index" for document in response["agent_web_manifest"]["documents"])
     assert response["agent_web_manifest"]["documents"][1]["document_id"] == "assistant_surface"
     assert any(link["rel"] == "assistant_surface" for link in response["agent_web_manifest"]["links"])
 
@@ -347,6 +348,63 @@ def test_lotus_api_returns_agent_web_graph(tmp_path):
     assert response["agent_web_graph"]["kind"] == "agent_web_public_graph"
     assert any(node["node_id"] == "document:public_graph" for node in response["agent_web_graph"]["nodes"])
     assert any(edge["kind"] == "focuses_on" for edge in response["agent_web_graph"]["edges"])
+
+
+def test_lotus_api_returns_agent_web_index_and_search(tmp_path):
+    repo_root = tmp_path / "city"
+    reports_dir = repo_root / "data" / "federation" / "reports"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "report_4.json").write_text(
+        json.dumps(
+            {
+                "heartbeat": 4,
+                "timestamp": 40.0,
+                "population": 2,
+                "alive": 2,
+                "dead": 0,
+                "chain_valid": True,
+                "active_campaigns": [{"id": "internet-adaptation", "title": "Internet adaptation", "north_star": "Continuously adapt to relevant new protocols and standards.", "status": "active", "last_gap_summary": ["keep execution bounded"]}],
+            },
+        ),
+    )
+    (repo_root / "data" / "assistant_state.json").write_text(json.dumps({"followed": ["alice"], "ops": {"posts": 2}}))
+    (repo_root / "data" / "federation" / "peer.json").write_text(
+        json.dumps({"identity": {"city_id": "city-http", "slug": "http", "repo": "org/city-http"}, "capabilities": ["moltbook"]}),
+    )
+
+    plane = AgentInternetControlPlane()
+    plane.publish_assistant_surface(
+        AssistantSurfaceSnapshot(
+            assistant_id="moltbook_assistant",
+            assistant_kind="moltbook_assistant",
+            city_id="city-http",
+            city_slug="http",
+            repo="org/city-http",
+            heartbeat_source="steward-protocol/mahamantra",
+            heartbeat=4,
+            state_present=True,
+            total_posts=2,
+            active_campaigns=({"id": "internet-adaptation", "title": "Internet adaptation", "north_star": "Continuously adapt to relevant new protocols and standards.", "status": "active", "last_gap_summary": ["keep execution bounded"]},),
+        ),
+    )
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(subject="operator", scopes=(LotusApiScope.READ.value,), token_secret="secret")
+
+    index_response = api.call(
+        bearer_token=issued.secret,
+        action="agent_web_index",
+        params={"root": str(repo_root)},
+    )
+    assert index_response["agent_web_index"]["kind"] == "agent_web_search_index"
+    assert any(record["record_id"] == "document:search_index" for record in index_response["agent_web_index"]["records"])
+
+    search_response = api.call(
+        bearer_token=issued.secret,
+        action="agent_web_search",
+        params={"root": str(repo_root), "query": "internet adaptation", "limit": 3},
+    )
+    assert search_response["agent_web_search"]["kind"] == "agent_web_search_results"
+    assert search_response["agent_web_search"]["results"][0]["kind"] == "campaign"
 
 
 def test_lotus_api_returns_agent_web_document(tmp_path):

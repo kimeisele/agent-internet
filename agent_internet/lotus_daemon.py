@@ -157,6 +157,30 @@ class LotusApiDaemon:
                         "heartbeat_source": _query_param(query, "heartbeat_source") or "steward-protocol/mahamantra",
                     },
                 )
+            if method == "GET" and path == "/v1/lotus/agent-web-index":
+                return 200, self._call(
+                    token,
+                    "agent_web_index",
+                    {
+                        "root": _require_query_param(query, "root"),
+                        "city_id": _query_param(query, "city_id"),
+                        "assistant_id": _query_param(query, "assistant_id") or "moltbook_assistant",
+                        "heartbeat_source": _query_param(query, "heartbeat_source") or "steward-protocol/mahamantra",
+                    },
+                )
+            if method == "GET" and path == "/v1/lotus/agent-web-search":
+                return 200, self._call(
+                    token,
+                    "agent_web_search",
+                    {
+                        "root": _require_query_param(query, "root"),
+                        "city_id": _query_param(query, "city_id"),
+                        "assistant_id": _query_param(query, "assistant_id") or "moltbook_assistant",
+                        "heartbeat_source": _query_param(query, "heartbeat_source") or "steward-protocol/mahamantra",
+                        "query": _require_query_param(query, "q"),
+                        "limit": int(_query_param(query, "limit") or "10"),
+                    },
+                )
             if method == "GET" and path == "/v1/lotus/agent-web-document":
                 return 200, self._call(
                     token,

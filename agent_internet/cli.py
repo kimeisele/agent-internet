@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .agent_web import build_agent_web_manifest_from_repo_root
 from .agent_web_graph import build_agent_web_public_graph_from_repo_root
+from .agent_web_index import build_agent_web_search_index_from_repo_root, search_agent_web_index
 from .agent_web_navigation import read_agent_web_document_from_repo_root
 from .agent_city_peer import AgentCityPeer
 from .assistant_surface import assistant_surface_snapshot_from_repo_root
@@ -85,6 +86,28 @@ def build_parser() -> argparse.ArgumentParser:
     agent_web_graph.add_argument("--city-id")
     agent_web_graph.add_argument("--assistant-id", default="moltbook_assistant")
     agent_web_graph.add_argument("--heartbeat-source", default="steward-protocol/mahamantra")
+
+    agent_web_index = subparsers.add_parser(
+        "agent-web-index",
+        help="Project a derived search index from an agent-city repo",
+    )
+    agent_web_index.add_argument("--root", required=True)
+    agent_web_index.add_argument("--state-path", default="data/control_plane/state.json")
+    agent_web_index.add_argument("--city-id")
+    agent_web_index.add_argument("--assistant-id", default="moltbook_assistant")
+    agent_web_index.add_argument("--heartbeat-source", default="steward-protocol/mahamantra")
+
+    agent_web_search = subparsers.add_parser(
+        "agent-web-search",
+        help="Query the derived search index for an agent-city repo",
+    )
+    agent_web_search.add_argument("--root", required=True)
+    agent_web_search.add_argument("--state-path", default="data/control_plane/state.json")
+    agent_web_search.add_argument("--city-id")
+    agent_web_search.add_argument("--assistant-id", default="moltbook_assistant")
+    agent_web_search.add_argument("--heartbeat-source", default="steward-protocol/mahamantra")
+    agent_web_search.add_argument("--query", required=True)
+    agent_web_search.add_argument("--limit", type=int, default=10)
 
     agent_web_read = subparsers.add_parser(
         "agent-web-read",
@@ -562,6 +585,35 @@ def cmd_agent_web_graph(args: argparse.Namespace) -> int:
         heartbeat_source=args.heartbeat_source,
     )
     print(json.dumps(graph, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_index(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    index = build_agent_web_search_index_from_repo_root(
+        args.root,
+        state_snapshot=snapshot_control_plane(plane),
+        city_id=args.city_id,
+        assistant_id=args.assistant_id,
+        heartbeat_source=args.heartbeat_source,
+    )
+    print(json.dumps(index, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_search(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    index = build_agent_web_search_index_from_repo_root(
+        args.root,
+        state_snapshot=snapshot_control_plane(plane),
+        city_id=args.city_id,
+        assistant_id=args.assistant_id,
+        heartbeat_source=args.heartbeat_source,
+    )
+    results = search_agent_web_index(index, query=args.query, limit=args.limit)
+    print(json.dumps(results, indent=2, sort_keys=True))
     return 0
 
 
@@ -1166,6 +1218,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_agent_web_manifest(args)
     if args.command == "agent-web-graph":
         return cmd_agent_web_graph(args)
+    if args.command == "agent-web-index":
+        return cmd_agent_web_index(args)
+    if args.command == "agent-web-search":
+        return cmd_agent_web_search(args)
     if args.command == "agent-web-read":
         return cmd_agent_web_read(args)
     if args.command == "lotus-show-steward-protocol":

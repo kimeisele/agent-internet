@@ -137,6 +137,8 @@ def test_git_wiki_sync_projects_pages_and_pushes(tmp_path):
     assert '"kind": "agent_web_manifest"' in (clone_path / "Agent-Web.md").read_text()
     assert "# Public Graph" in (clone_path / "Public-Graph.md").read_text()
     assert '"kind": "agent_web_public_graph"' in (clone_path / "Public-Graph.md").read_text()
+    assert "# Search Index" in (clone_path / "Search-Index.md").read_text()
+    assert '"kind": "agent_web_search_index"' in (clone_path / "Search-Index.md").read_text()
     assert "# Lineage" in (clone_path / "Lineage.md").read_text()
     assert "Sync Policy: `advisory`" in (clone_path / "Lineage.md").read_text()
 
