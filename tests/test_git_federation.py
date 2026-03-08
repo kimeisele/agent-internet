@@ -4,6 +4,7 @@ import subprocess
 from agent_internet.agent_city_peer import AgentCityPeer
 from agent_internet.control_plane import AgentInternetControlPlane
 from agent_internet.git_federation import GitWikiFederationSync, detect_git_remote_metadata, ensure_git_checkout
+from agent_internet.models import ForkLineageRecord, ForkMode, UpstreamSyncPolicy
 from agent_internet.snapshot import snapshot_control_plane
 
 
@@ -66,6 +67,18 @@ def test_git_wiki_sync_projects_pages_and_pushes(tmp_path):
         target_city_id="city-z",
         next_hop_city_id="city-a",
     )
+    plane.upsert_fork_lineage(
+        ForkLineageRecord(
+            lineage_id="lineage:city-a",
+            repo="org/agent-city",
+            upstream_repo="org/agent-city-root",
+            line_root_repo="org/agent-city-root",
+            fork_mode=ForkMode.EXPERIMENT,
+            sync_policy=UpstreamSyncPolicy.ADVISORY,
+            space_id="space:city-a:moltbook_assistant",
+            upstream_space_id="space:city-root:moltbook_assistant",
+        ),
+    )
 
     result = GitWikiFederationSync(
         repo_root=work_root,
@@ -99,9 +112,12 @@ def test_git_wiki_sync_projects_pages_and_pushes(tmp_path):
     _git(tmp_path, "clone", str(wiki_remote), str(clone_path))
     assert "Connected City: city-a" in (clone_path / "Home.md").read_text()
     assert "Assistant: `moltbook_assistant`" in (clone_path / "Home.md").read_text()
+    assert "Upstream Repo: `org/agent-city-root`" in (clone_path / "Home.md").read_text()
     assert "api.forum.city-a.lotus" in (clone_path / "Services.md").read_text()
     assert "service:city-z/forum" in (clone_path / "Routes.md").read_text()
     assert "Total Posts: `1`" in (clone_path / "Assistant-Surface.md").read_text()
+    assert "# Lineage" in (clone_path / "Lineage.md").read_text()
+    assert "Sync Policy: `advisory`" in (clone_path / "Lineage.md").read_text()
 
 
 def test_ensure_git_checkout_clones_and_pulls_repo(tmp_path):

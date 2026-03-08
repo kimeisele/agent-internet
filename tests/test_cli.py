@@ -2,6 +2,8 @@ import json
 import subprocess
 
 from agent_internet.cli import main
+from agent_internet.models import ForkLineageRecord, ForkMode, UpstreamSyncPolicy
+from agent_internet.snapshot import ControlPlaneStateStore
 
 
 def _git(cwd, *args):
@@ -143,6 +145,21 @@ def test_cli_git_federation_describe_and_sync_wiki(tmp_path, capsys):
         ],
     ) == 0
     _ = capsys.readouterr().out
+    store = ControlPlaneStateStore(path=state_path)
+    store.update(
+        lambda plane: plane.upsert_fork_lineage(
+            ForkLineageRecord(
+                lineage_id="lineage:city-cli",
+                repo="org/agent-city-cli",
+                upstream_repo="org/agent-city-root",
+                line_root_repo="org/agent-city-root",
+                fork_mode=ForkMode.SOVEREIGN,
+                sync_policy=UpstreamSyncPolicy.TRACKED,
+                space_id="space:city-cli:moltbook_assistant",
+                upstream_space_id="space:city-root:moltbook_assistant",
+            ),
+        ),
+    )
 
     assert main(
         [
@@ -173,10 +190,13 @@ def test_cli_git_federation_describe_and_sync_wiki(tmp_path, capsys):
     assert payload["committed"] is True
     assert "Home.md" in payload["pages"]
     assert "Assistant-Surface.md" in payload["pages"]
+    assert "Lineage.md" in payload["pages"]
     clone_path = tmp_path / "wiki-clone"
     _git(tmp_path, "clone", str(wiki_remote), str(clone_path))
     assert "Assistant: `moltbook_assistant`" in (clone_path / "Home.md").read_text()
     assert "# Assistant Surface" in (clone_path / "Assistant-Surface.md").read_text()
+    assert "Fork Mode: `sovereign` / Sync: `tracked`" in (clone_path / "Home.md").read_text()
+    assert "Current Repo Lineage" in (clone_path / "Lineage.md").read_text()
 
 
 def test_cli_git_federation_onboard_repo(tmp_path, capsys):

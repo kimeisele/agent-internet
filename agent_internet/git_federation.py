@@ -131,6 +131,8 @@ def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict, assis
     cities = list(state_snapshot.get("identities", []))
     services = list(state_snapshot.get("service_addresses", []))
     routes = list(state_snapshot.get("routes", []))
+    lineage_records = list(state_snapshot.get("fork_lineage", []))
+    current_lineage = _resolve_current_lineage(identity=identity, git_manifest=git_manifest, lineage_records=lineage_records)
     summary_lines = [
         f"## Connected City: {identity.get('city_id', 'unknown')}",
         f"- Repo: `{identity.get('repo', '')}`",
@@ -148,6 +150,16 @@ def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict, assis
                 f"- Assistant Activity: follows `{assistant_snapshot.get('total_follows', 0)}`, invites `{assistant_snapshot.get('total_invites', 0)}`, posts `{assistant_snapshot.get('total_posts', 0)}`",
             ],
         )
+    if current_lineage:
+        summary_lines.extend(
+            [
+                f"- Upstream Repo: `{current_lineage.get('upstream_repo', '')}`",
+                f"- Line Root: `{current_lineage.get('line_root_repo', '')}`",
+                f"- Fork Mode: `{current_lineage.get('fork_mode', '')}` / Sync: `{current_lineage.get('sync_policy', '')}`",
+            ],
+        )
+    elif lineage_records:
+        summary_lines.append(f"- Known Lineage Records: `{len(lineage_records)}`")
     summary = "\n".join(summary_lines)
     home = _replace_block("# Agent Internet Federation\n\n", HOME_SUMMARY_START, HOME_SUMMARY_END, summary)
     cities_md = "# Cities\n\n" + "\n".join(f"- `{item['city_id']}` → `{item['repo']}`" for item in cities)
@@ -165,6 +177,7 @@ def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict, assis
         "Services.md": services_md.rstrip() + "\n",
         "Routes.md": routes_md.rstrip() + "\n",
         "Git-Federation.md": manifest_md.rstrip() + "\n",
+        "Lineage.md": _render_lineage_page(current_lineage=current_lineage, lineage_records=lineage_records),
     }
     if assistant_snapshot:
         pages["Assistant-Surface.md"] = _render_assistant_surface_page(assistant_snapshot)
@@ -195,6 +208,49 @@ def _render_assistant_surface_page(assistant_snapshot: dict) -> str:
         "",
         json.dumps(assistant_snapshot, indent=2, sort_keys=True),
     ]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _resolve_current_lineage(*, identity: dict, git_manifest: dict, lineage_records: list[dict]) -> dict | None:
+    repo_candidates = {
+        str(identity.get("repo", "")),
+        str(git_manifest.get("repo_ref", "")),
+        str(git_manifest.get("origin_url", "")),
+    }
+    repo_candidates.discard("")
+    for lineage in lineage_records:
+        if str(lineage.get("repo", "")) in repo_candidates:
+            return lineage
+    return None
+
+
+def _render_lineage_page(*, current_lineage: dict | None, lineage_records: list[dict]) -> str:
+    lines = ["# Lineage", ""]
+    if current_lineage:
+        lines.extend(
+            [
+                "## Current Repo Lineage",
+                "",
+                f"- Repo: `{current_lineage.get('repo', '')}`",
+                f"- Upstream Repo: `{current_lineage.get('upstream_repo', '')}`",
+                f"- Line Root: `{current_lineage.get('line_root_repo', '')}`",
+                f"- Fork Mode: `{current_lineage.get('fork_mode', '')}`",
+                f"- Sync Policy: `{current_lineage.get('sync_policy', '')}`",
+                f"- Space: `{current_lineage.get('space_id', '')}`",
+                f"- Upstream Space: `{current_lineage.get('upstream_space_id', '')}`",
+                "",
+            ],
+        )
+    else:
+        lines.extend(["No current lineage record is known for this repo.", ""])
+    lines.extend(["## Known Lineage Records", ""])
+    if lineage_records:
+        lines.extend(
+            f"- `{item.get('repo', '')}` ← `{item.get('upstream_repo', '')}` ({item.get('fork_mode', '')}/{item.get('sync_policy', '')})"
+            for item in lineage_records
+        )
+    else:
+        lines.append("- none")
     return "\n".join(lines).rstrip() + "\n"
 
 
