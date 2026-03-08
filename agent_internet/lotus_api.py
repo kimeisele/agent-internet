@@ -132,13 +132,19 @@ class LotusControlPlaneAPI:
         if action == "create_intent":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.INTENT_WRITE.value,))
             created_at = float(time.time() if payload.get("now") is None else payload["now"])
+            requested_by_subject_id = token.subject
+            delegated_subject = str(payload.get("requested_by_subject_id", "")).strip()
+            if delegated_subject:
+                if LotusApiScope.INTENT_SUBJECT_DELEGATE.value not in set(token.scopes):
+                    raise PermissionError(f"missing_scopes:{LotusApiScope.INTENT_SUBJECT_DELEGATE.value}")
+                requested_by_subject_id = delegated_subject
             intent = IntentRecord(
                 intent_id=str(payload.get("intent_id") or f"intent_{created_at:.6f}".replace(".", "_")),
                 intent_type=IntentType(str(payload["intent_type"])),
                 status=IntentStatus.PENDING,
                 title=str(payload.get("title", "")),
                 description=str(payload.get("description", "")),
-                requested_by_subject_id=token.subject,
+                requested_by_subject_id=requested_by_subject_id,
                 repo=str(payload.get("repo", "")),
                 city_id=str(payload.get("city_id", "")),
                 space_id=str(payload.get("space_id", "")),

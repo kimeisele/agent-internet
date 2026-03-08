@@ -30,6 +30,7 @@ class LotusApiScope(StrEnum):
     ENDPOINT_WRITE = "lotus.write.endpoint"
     SERVICE_WRITE = "lotus.write.service"
     INTENT_WRITE = "lotus.write.intent"
+    INTENT_SUBJECT_DELEGATE = "lotus.write.intent.subject"
     INTENT_REVIEW = "lotus.write.intent.review"
     TOKEN_WRITE = "lotus.write.token"
 

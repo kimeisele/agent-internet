@@ -306,6 +306,60 @@ def test_lotus_api_creates_and_lists_intents():
     assert listed["intents"][0]["lineage_id"] == "lineage:city-b"
 
 
+def test_lotus_api_allows_delegated_intent_subject_with_explicit_scope():
+    plane = AgentInternetControlPlane()
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="verified-bridge",
+        scopes=(
+            LotusApiScope.INTENT_WRITE.value,
+            LotusApiScope.INTENT_SUBJECT_DELEGATE.value,
+        ),
+        token_secret="intent-delegate-token",
+        token_id="tok-intent-delegate",
+        now=10.0,
+    )
+
+    created = api.call(
+        bearer_token=issued.secret,
+        action="create_intent",
+        params={
+            "intent_id": "intent:verified-city-b",
+            "intent_type": IntentType.REQUEST_PR_DRAFT.value,
+            "title": "Verified draft PR",
+            "requested_by_subject_id": "verified_agent:agent_ss",
+            "now": 123.0,
+        },
+    )
+
+    assert created["intent"]["requested_by_subject_id"] == "verified_agent:agent_ss"
+
+
+def test_lotus_api_rejects_delegated_intent_subject_without_scope():
+    plane = AgentInternetControlPlane()
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="verified-bridge",
+        scopes=(LotusApiScope.INTENT_WRITE.value,),
+        token_secret="intent-no-delegate-token",
+        token_id="tok-intent-no-delegate",
+        now=10.0,
+    )
+
+    with pytest.raises(PermissionError, match=f"missing_scopes:{LotusApiScope.INTENT_SUBJECT_DELEGATE.value}"):
+        api.call(
+            bearer_token=issued.secret,
+            action="create_intent",
+            params={
+                "intent_id": "intent:verified-city-b",
+                "intent_type": IntentType.REQUEST_PR_DRAFT.value,
+                "title": "Verified draft PR",
+                "requested_by_subject_id": "verified_agent:agent_ss",
+                "now": 123.0,
+            },
+        )
+
+
 def test_lotus_api_gets_single_intent():
     plane = AgentInternetControlPlane()
     api = LotusControlPlaneAPI(plane)
