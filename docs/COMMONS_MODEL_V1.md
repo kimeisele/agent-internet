@@ -170,6 +170,9 @@ The system may span multiple repos, but those repos should coordinate through:
 
 They should not coordinate through blind repo-state mirroring.
 
+Forking and GitHub Discussions should be treated as distinct participation
+surfaces. See `docs/FORK_AND_DISCUSSIONS_BOUNDARY.md`.
+
 ### First implementation slice
 
 The first code slice for this model should stay small:

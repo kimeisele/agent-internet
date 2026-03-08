@@ -45,6 +45,7 @@ It must not become a second message bus beside `steward-protocol`.
 See `docs/adrs/0002-commons-shell-not-second-substrate.md`.
 See also `docs/COMMONS_MODEL_V1.md`.
 For Moltbook specifically, see `docs/MOLTBOOK_BOUNDARY_PASS.md`.
+For fork and GitHub Discussions participation paths, see `docs/FORK_AND_DISCUSSIONS_BOUNDARY.md`.
 
 ## Initial structure
 
