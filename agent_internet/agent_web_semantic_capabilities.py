@@ -59,6 +59,15 @@ def build_agent_web_semantic_capability_manifest(*, base_url: str | None = None)
         "version": 1,
         "surface_kind": "consumer_agnostic_semantic_read_surface",
         "consumer_model": "generic_read_only",
+        "standard_profile": {
+            "profile_id": "agent_web_semantic_read_standard.v1",
+            "source_system": "agent_city",
+            "provider_runtime": "agent_internet",
+            "provider_role": "derived_semantic_membrane",
+            "consumer_roles": ["direct_consumer", "proxy_wrapper"],
+            "wrapper_rule": "Wrappers may proxy or cache this surface but should not redefine the semantic contract.",
+            "primary_authority_rule": "Agent-city remains the primary execution and source-of-truth system; agent-internet publishes a derived read model.",
+        },
         "discovery": {
             "manifest_document_id": "semantic_capabilities",
             "manifest_rel": "semantic_capabilities",
@@ -97,6 +106,7 @@ def render_agent_web_semantic_capability_page(manifest: dict) -> str:
     lines = [
         "# Semantic Capabilities",
         "",
+        f"- Standard Profile: `{dict(manifest.get('standard_profile', {})).get('profile_id', '')}`",
         f"- Surface Kind: `{manifest.get('surface_kind', '')}`",
         f"- Consumer Model: `{manifest.get('consumer_model', '')}`",
         f"- Manifest Action: `{discovery.get('manifest_lotus_action', '')}`",

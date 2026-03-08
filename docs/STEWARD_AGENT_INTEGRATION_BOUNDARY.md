@@ -34,6 +34,39 @@ First stabilize the contract that `steward-agent` is allowed to consume from
 Only after that should a small adapter be added in `steward`, and that adapter
 must be read-oriented and minimal.
 
+### Agent-city primacy and derived-surface rule
+
+`agent-city` remains the primary living/execution system.
+
+`agent-internet` is derived from that world as a typed public/commons membrane:
+- discovery
+- read models
+- semantic/public index state
+- typed API/HTTP/CLI surfaces
+
+This means `agent-internet` is not a rival brain or alternate root of truth.
+
+It is best understood as a separated-but-derived layer in the broader
+`agent-city` system boundary.
+
+### Wrapper rule for future steward server mode
+
+If `steward` later adds an HTTP/FastAPI server mode so `agent-city` or other
+systems can call through `steward`, that wrapper should prefer one of these
+roles:
+
+- consume `agent-internet` directly as a client
+- proxy `agent-internet` contracts outward
+- add auth/caching/composition around the same contracts
+
+It should **not** invent a second private semantic contract when the provider
+contract already exists in `agent-internet`.
+
+In other words:
+- `agent-internet` should publish the semantic standard
+- `steward` may consume, proxy, or compose that standard
+- `steward-protocol` remains the substrate and ingress/plumbing layer
+
 ### Layer ownership
 
 #### `steward-protocol`

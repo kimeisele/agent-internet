@@ -17,6 +17,14 @@ def build_agent_web_semantic_contract_manifest(*, base_url: str | None = None) -
         "kind": "agent_web_semantic_contract_manifest",
         "version": 1,
         "surface_kind": "semantic_contract_descriptor_collection",
+        "standard_profile": {
+            "profile_id": "agent_web_semantic_read_standard.v1",
+            "source_system": "agent_city",
+            "provider_runtime": "agent_internet",
+            "provider_role": "derived_semantic_membrane",
+            "consumer_roles": ["direct_consumer", "proxy_wrapper"],
+            "wrapper_rule": "Proxy servers and wrappers should expose or forward these descriptors rather than inventing parallel semantic contracts.",
+        },
         "discovery": {
             "document_id": "semantic_contracts",
             "rel": "semantic_contracts",
@@ -56,6 +64,7 @@ def read_agent_web_semantic_contract_descriptor(
         "latest_version": _latest_contract_version(key),
         "supported_versions": _supported_contract_versions(key),
         "latest_for_capability": int(selection["version"]) == _latest_contract_version(key),
+        "standard_profile_id": "agent_web_semantic_read_standard.v1",
         "summary": str(spec["summary"]),
         "stability": "stable_subset_v1",
         "mode": "read_only",
@@ -139,6 +148,7 @@ def render_agent_web_semantic_contract_page(manifest: dict) -> str:
     lines = [
         "# Semantic Contracts",
         "",
+        f"- Standard Profile: `{dict(manifest.get('standard_profile', {})).get('profile_id', '')}`",
         f"- Surface Kind: `{manifest.get('surface_kind', '')}`",
         f"- Collection Action: `{discovery.get('collection_lotus_action', '')}`",
         f"- Detail Query Parameters: `{', '.join(str(item) for item in discovery.get('detail_query_parameters', []))}`",
