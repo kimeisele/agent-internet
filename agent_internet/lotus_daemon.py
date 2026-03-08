@@ -119,6 +119,11 @@ class LotusApiDaemon:
                 return 200, self._call(token, "list_fork_lineage", {})
             if method == "GET" and path == "/v1/lotus/intents":
                 return 200, self._call(token, "list_intents", {})
+            if method == "GET" and path.startswith("/v1/lotus/intents/"):
+                suffix = path.removeprefix("/v1/lotus/intents/")
+                if not suffix or "/" in suffix:
+                    raise ValueError("invalid_intent_path")
+                return 200, self._call(token, "get_intent", {"intent_id": unquote(suffix)})
             if method == "GET" and path == "/v1/lotus/assistant-snapshot":
                 return 200, self._call(
                     token,
@@ -190,7 +195,8 @@ class LotusApiDaemon:
             message = str(exc)
             return (401 if message == "invalid_token" else 403), {"error": message}
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            return 400, {"error": str(exc)}
+            message = str(exc)
+            return (404 if message.startswith("unknown_intent:") else 400), {"error": message}
 
     def _call(self, bearer_token: str, action: str, params: dict) -> dict:
         store = ControlPlaneStateStore(path=self.state_path)

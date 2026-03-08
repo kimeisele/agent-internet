@@ -306,6 +306,37 @@ def test_lotus_api_creates_and_lists_intents():
     assert listed["intents"][0]["lineage_id"] == "lineage:city-b"
 
 
+def test_lotus_api_gets_single_intent():
+    plane = AgentInternetControlPlane()
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="human:ss",
+        scopes=(LotusApiScope.READ.value, LotusApiScope.INTENT_WRITE.value),
+        token_secret="intent-token-single",
+        token_id="tok-intent-single",
+        now=10.0,
+    )
+    api.call(
+        bearer_token=issued.secret,
+        action="create_intent",
+        params={
+            "intent_id": "intent:single-city-b",
+            "intent_type": IntentType.REQUEST_SLOT.value,
+            "title": "Single slot",
+            "now": 123.0,
+        },
+    )
+
+    fetched = api.call(
+        bearer_token=issued.secret,
+        action="get_intent",
+        params={"intent_id": "intent:single-city-b"},
+    )
+
+    assert fetched["intent"]["intent_id"] == "intent:single-city-b"
+    assert fetched["intent"]["status"] == "pending"
+
+
 def test_lotus_api_transitions_intents():
     plane = AgentInternetControlPlane()
     api = LotusControlPlaneAPI(plane)

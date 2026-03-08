@@ -113,6 +113,13 @@ class LotusControlPlaneAPI:
         if action == "list_intents":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "intents": [asdict(intent) for intent in self.plane.registry.list_intents()]}
+        if action == "get_intent":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            intent_id = str(payload["intent_id"])
+            intent = self.plane.registry.get_intent(intent_id)
+            if intent is None:
+                raise ValueError(f"unknown_intent:{intent_id}")
+            return {"token_id": token.token_id, "intent": asdict(intent)}
         if action == "assistant_snapshot":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             snapshot = assistant_surface_snapshot_from_repo_root(

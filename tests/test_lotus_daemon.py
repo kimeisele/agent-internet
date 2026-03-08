@@ -319,6 +319,10 @@ def test_lotus_daemon_creates_and_lists_intents_http_api(tmp_path):
         assert status == 200
         assert listed["intents"][0]["intent_type"] == "request_slot"
         assert listed["intents"][0]["status"] == "pending"
+
+        status, fetched = _request_json(daemon.base_url, "/v1/lotus/intents/intent%3Aslot-city-http", token=root_secret)
+        assert status == 200
+        assert fetched["intent"]["intent_id"] == "intent:slot-city-http"
     finally:
         daemon.shutdown()
 
