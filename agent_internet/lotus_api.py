@@ -89,6 +89,12 @@ class LotusControlPlaneAPI:
         if action == "list_slots":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "slots": [asdict(slot) for slot in self.plane.registry.list_slots()]}
+        if action == "list_fork_lineage":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            return {
+                "token_id": token.token_id,
+                "fork_lineage": [asdict(lineage) for lineage in self.plane.registry.list_fork_lineage()],
+            }
         if action == "assistant_snapshot":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             snapshot = assistant_surface_snapshot_from_repo_root(

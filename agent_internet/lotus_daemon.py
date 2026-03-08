@@ -115,6 +115,8 @@ class LotusApiDaemon:
                 return 200, self._call(token, "list_spaces", {})
             if method == "GET" and path == "/v1/lotus/slots":
                 return 200, self._call(token, "list_slots", {})
+            if method == "GET" and path == "/v1/lotus/lineage":
+                return 200, self._call(token, "list_fork_lineage", {})
             if method == "GET" and path == "/v1/lotus/assistant-snapshot":
                 return 200, self._call(
                     token,

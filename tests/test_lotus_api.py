@@ -4,7 +4,17 @@ import pytest
 
 from agent_internet.control_plane import AgentInternetControlPlane
 from agent_internet.lotus_api import LotusControlPlaneAPI
-from agent_internet.models import AssistantSurfaceSnapshot, CityEndpoint, CityIdentity, LotusApiScope, TrustLevel, TrustRecord
+from agent_internet.models import (
+    AssistantSurfaceSnapshot,
+    CityEndpoint,
+    CityIdentity,
+    ForkLineageRecord,
+    ForkMode,
+    LotusApiScope,
+    TrustLevel,
+    TrustRecord,
+    UpstreamSyncPolicy,
+)
 
 
 def test_lotus_api_issues_token_and_allows_scoped_calls():
@@ -226,3 +236,35 @@ def test_lotus_api_lists_spaces_and_slots():
     assert spaces["spaces"][0]["kind"] == "assistant"
     assert slots["slots"][0]["slot_id"] == "slot:city-space:assistant-social"
     assert slots["slots"][0]["slot_kind"] == "assistant_social"
+
+
+def test_lotus_api_lists_fork_lineage():
+    plane = AgentInternetControlPlane()
+    plane.upsert_fork_lineage(
+        ForkLineageRecord(
+            lineage_id="lineage:city-b",
+            repo="org/city-b",
+            upstream_repo="org/city-a",
+            line_root_repo="org/city-a",
+            fork_mode=ForkMode.SOVEREIGN,
+            sync_policy=UpstreamSyncPolicy.TRACKED,
+            space_id="space:city-b:moltbook_assistant",
+            upstream_space_id="space:city-a:moltbook_assistant",
+            forked_by_subject_id="human:ss",
+            created_at=123.0,
+        ),
+    )
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="observer",
+        scopes=(LotusApiScope.READ.value,),
+        token_secret="lineage-token",
+        token_id="tok-lineage",
+        now=10.0,
+    )
+
+    response = api.call(bearer_token=issued.secret, action="list_fork_lineage", params={})
+
+    assert response["fork_lineage"][0]["lineage_id"] == "lineage:city-b"
+    assert response["fork_lineage"][0]["fork_mode"] == "sovereign"
+    assert response["fork_lineage"][0]["sync_policy"] == "tracked"

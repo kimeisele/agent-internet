@@ -6,7 +6,19 @@ import pytest
 
 from agent_internet.lotus_api import LotusControlPlaneAPI
 from agent_internet.lotus_daemon import LotusApiDaemon
-from agent_internet.models import AssistantSurfaceSnapshot, CityEndpoint, CityIdentity, CityPresence, HealthStatus, LotusApiScope, TrustLevel, TrustRecord
+from agent_internet.models import (
+    AssistantSurfaceSnapshot,
+    CityEndpoint,
+    CityIdentity,
+    CityPresence,
+    ForkLineageRecord,
+    ForkMode,
+    HealthStatus,
+    LotusApiScope,
+    TrustLevel,
+    TrustRecord,
+    UpstreamSyncPolicy,
+)
 from agent_internet.snapshot import ControlPlaneStateStore
 
 
@@ -225,5 +237,44 @@ def test_lotus_daemon_serves_spaces_and_slots_http_api(tmp_path):
         status, slots = _request_json(daemon.base_url, "/v1/lotus/slots", token=root_secret)
         assert status == 200
         assert slots["slots"][0]["slot_id"] == "slot:city-http-space:assistant-social"
+    finally:
+        daemon.shutdown()
+
+
+def test_lotus_daemon_serves_lineage_http_api(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    root_secret = store.update(
+        lambda plane: (
+            plane.upsert_fork_lineage(
+                ForkLineageRecord(
+                    lineage_id="lineage:city-fork",
+                    repo="org/city-fork",
+                    upstream_repo="org/city-root",
+                    line_root_repo="org/city-root",
+                    fork_mode=ForkMode.EXPERIMENT,
+                    sync_policy=UpstreamSyncPolicy.ADVISORY,
+                    space_id="space:city-fork:moltbook_assistant",
+                    upstream_space_id="space:city-root:moltbook_assistant",
+                    forked_by_subject_id="human:ss",
+                    created_at=456.0,
+                ),
+            ),
+            LotusControlPlaneAPI(plane).issue_token(
+                subject="root",
+                scopes=(LotusApiScope.READ.value,),
+                token_secret="lineage-root",
+                token_id="tok-lineage-root",
+            ).secret,
+        )[1],
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        status, payload = _request_json(daemon.base_url, "/v1/lotus/lineage", token=root_secret)
+        assert status == 200
+        assert payload["fork_lineage"][0]["lineage_id"] == "lineage:city-fork"
+        assert payload["fork_lineage"][0]["fork_mode"] == "experiment"
+        assert payload["fork_lineage"][0]["sync_policy"] == "advisory"
     finally:
         daemon.shutdown()
