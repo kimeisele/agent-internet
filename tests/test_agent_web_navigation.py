@@ -2,19 +2,31 @@ import json
 
 import pytest
 
-from agent_internet.agent_web_navigation import read_agent_web_document_from_repo_root, resolve_agent_web_link
+from agent_internet.agent_web_navigation import (
+    read_agent_web_document_from_repo_root,
+    resolve_agent_web_document,
+    resolve_agent_web_link,
+)
 
 
 def test_resolve_agent_web_link_by_rel_and_href():
     manifest = {
+        "documents": [
+            {"document_id": "home", "rel": "wiki_home", "href": "Home.md", "media_type": "text/markdown"},
+            {"document_id": "agent_web", "rel": "agent_web", "href": "Agent-Web.md", "media_type": "text/markdown"},
+        ],
         "links": [
-            {"rel": "wiki_home", "href": "Home.md", "media_type": "text/markdown"},
-            {"rel": "agent_web", "href": "Agent-Web.md", "media_type": "text/markdown"},
+            {"rel": "wiki_home", "href": "Home.md", "media_type": "text/markdown", "document_id": "home"},
+            {"rel": "agent_web", "href": "Agent-Web.md", "media_type": "text/markdown", "document_id": "agent_web"},
         ]
     }
 
     assert resolve_agent_web_link(manifest, rel="agent_web")["href"] == "Agent-Web.md"
     assert resolve_agent_web_link(manifest, href="Home.md")["rel"] == "wiki_home"
+    assert resolve_agent_web_link(manifest, document_id="agent_web")["rel"] == "agent_web"
+    document, link = resolve_agent_web_document(manifest, document_id="home")
+    assert document["href"] == "Home.md"
+    assert link["rel"] == "wiki_home"
 
 
 def test_read_agent_web_document_from_repo_root(tmp_path):
@@ -49,6 +61,8 @@ def test_read_agent_web_document_from_repo_root(tmp_path):
     payload = read_agent_web_document_from_repo_root(repo_root, state_snapshot=state_snapshot, rel="assistant_surface")
 
     assert payload["link"]["rel"] == "assistant_surface"
+    assert payload["document"]["document_id"] == "assistant_surface"
+    assert payload["document"]["kind"] == "assistant_surface"
     assert payload["document"]["path"] == "Assistant-Surface.md"
     assert "## Active Campaigns" in payload["document"]["content"]
     assert "Internet adaptation" in payload["document"]["content"]

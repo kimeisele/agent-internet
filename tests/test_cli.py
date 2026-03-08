@@ -349,7 +349,7 @@ def test_cli_agent_web_manifest(tmp_path, capsys):
                 "link_addresses": [],
                 "network_addresses": [],
                 "hosted_endpoints": [],
-                "service_addresses": [],
+                "service_addresses": [{"service_id": "city-web:forum", "owner_city_id": "city-web", "service_name": "forum", "public_handle": "forum.city-web.lotus", "transport": "https", "location": "https://forum.city-web.lotus", "network_address": "fd00::1", "visibility": "public", "auth_required": False, "required_scopes": [], "lease_started_at": None, "lease_expires_at": None, "labels": {}}],
                 "routes": [],
                 "api_tokens": [],
                 "spaces": [{"space_id": "space:city-web:moltbook_assistant", "kind": "assistant", "owner_subject_id": "city-web", "display_name": "moltbook_assistant", "city_id": "city-web", "repo": "org/city-web", "heartbeat_source": "steward-protocol/mahamantra", "heartbeat": 2, "labels": {}}],
@@ -369,6 +369,9 @@ def test_cli_agent_web_manifest(tmp_path, capsys):
     assert payload["identity"]["city_id"] == "city-web"
     assert payload["campaigns"][0]["id"] == "internet-adaptation"
     assert payload["stats"]["space_count"] == 1
+    assert payload["entrypoints"]["default"]["document_id"] == "agent_web"
+    assert payload["documents"][0]["document_id"] == "home"
+    assert payload["service_affordances"][0]["service_id"] == "city-web:forum"
     assert any(link["rel"] == "agent_web" for link in payload["links"])
 
 
@@ -417,9 +420,10 @@ def test_cli_agent_web_read(tmp_path, capsys):
         ),
     )
 
-    assert main(["agent-web-read", "--root", str(repo_root), "--state-path", str(state_path), "--rel", "assistant_surface"]) == 0
+    assert main(["agent-web-read", "--root", str(repo_root), "--state-path", str(state_path), "--document-id", "assistant_surface"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["link"]["rel"] == "assistant_surface"
+    assert payload["document"]["document_id"] == "assistant_surface"
     assert payload["document"]["path"] == "Assistant-Surface.md"
     assert "Internet adaptation" in payload["document"]["content"]
 

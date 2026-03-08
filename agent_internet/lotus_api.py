@@ -146,8 +146,9 @@ class LotusControlPlaneAPI:
             document = read_agent_web_document_for_plane(
                 payload["root"],
                 plane=self.plane,
-                rel=None if payload.get("href") else str(payload.get("rel", "agent_web")),
+                rel=None if (payload.get("href") or payload.get("document_id")) else str(payload.get("rel", "agent_web")),
                 href=payload.get("href"),
+                document_id=payload.get("document_id"),
                 city_id=payload.get("city_id"),
                 assistant_id=str(payload.get("assistant_id", "moltbook_assistant")),
                 heartbeat_source=str(payload.get("heartbeat_source", "steward-protocol/mahamantra")),

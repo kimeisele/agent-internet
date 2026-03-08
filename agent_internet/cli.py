@@ -86,6 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
     agent_web_read.add_argument("--heartbeat-source", default="steward-protocol/mahamantra")
     agent_web_read.add_argument("--rel", default="agent_web")
     agent_web_read.add_argument("--href")
+    agent_web_read.add_argument("--document-id")
 
     git_describe = subparsers.add_parser(
         "git-federation-describe",
@@ -545,8 +546,9 @@ def cmd_agent_web_read(args: argparse.Namespace) -> int:
     payload = read_agent_web_document_from_repo_root(
         args.root,
         state_snapshot=snapshot_control_plane(plane),
-        rel=None if args.href else args.rel,
+        rel=None if (args.href or args.document_id) else args.rel,
         href=args.href,
+        document_id=args.document_id,
         city_id=args.city_id,
         assistant_id=args.assistant_id,
         heartbeat_source=args.heartbeat_source,

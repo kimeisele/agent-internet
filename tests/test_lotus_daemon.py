@@ -354,10 +354,11 @@ def test_lotus_daemon_serves_agent_web_document_http_api(tmp_path):
     try:
         status, payload = _request_json(
             daemon.base_url,
-            f"/v1/lotus/agent-web-document?root={repo_root}&rel=assistant_surface",
+            f"/v1/lotus/agent-web-document?root={repo_root}&document_id=assistant_surface",
             token=root_secret,
         )
         assert status == 200
+        assert payload["agent_web_document"]["document"]["document_id"] == "assistant_surface"
         assert payload["agent_web_document"]["document"]["path"] == "Assistant-Surface.md"
         assert "Internet adaptation" in payload["agent_web_document"]["document"]["content"]
     finally:

@@ -240,6 +240,7 @@ def _render_agent_web_page(manifest: dict) -> str:
     identity = dict(manifest.get("identity", {}))
     assistant = dict(manifest.get("assistant", {}))
     stats = dict(manifest.get("stats", {}))
+    entrypoints = dict(manifest.get("entrypoints", {}))
     lines = [
         "# Agent Web",
         "",
@@ -252,11 +253,36 @@ def _render_agent_web_page(manifest: dict) -> str:
         f"- Services: `{stats.get('service_count', 0)}`",
         f"- Routes: `{stats.get('route_count', 0)}`",
         "",
-        "## Links",
+        "## Documents",
         "",
     ]
+    for document in manifest.get("documents", []):
+        lines.append(
+            f"- `{document.get('document_id', '')}` → `{document.get('href', '')}` ({document.get('kind', '')}, entrypoint={document.get('entrypoint', False)})"
+        )
+    lines.extend([
+        "",
+        "## Entrypoints",
+        "",
+    ])
+    for name, entrypoint in entrypoints.items():
+        lines.append(f"- `{name}` → `{entrypoint.get('document_id', '')}` / `{entrypoint.get('rel', '')}`")
+    lines.extend([
+        "",
+        "## Service Affordances",
+        "",
+    ])
+    for affordance in manifest.get("service_affordances", []):
+        lines.append(
+            f"- `{affordance.get('service_id', '')}` @ `{affordance.get('href', '')}` ({affordance.get('transport', '')}, auth={affordance.get('auth_required', False)})"
+        )
+    lines.extend([
+        "",
+        "## Links",
+        "",
+    ])
     for link in manifest.get("links", []):
-        lines.append(f"- `{link.get('rel', '')}` → `{link.get('href', '')}`")
+        lines.append(f"- `{link.get('rel', '')}` → `{link.get('href', '')}` [{link.get('kind', '')}]")
     lines.extend(["", "## Raw Manifest", "", json.dumps(manifest, indent=2, sort_keys=True)])
     return "\n".join(lines).rstrip() + "\n"
 

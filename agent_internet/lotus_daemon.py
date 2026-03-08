@@ -157,6 +157,7 @@ class LotusApiDaemon:
                         "heartbeat_source": _query_param(query, "heartbeat_source") or "steward-protocol/mahamantra",
                         "rel": _query_param(query, "rel") or "agent_web",
                         "href": _query_param(query, "href"),
+                        "document_id": _query_param(query, "document_id"),
                     },
                 )
             if method == "GET" and path.startswith("/v1/lotus/handles/"):

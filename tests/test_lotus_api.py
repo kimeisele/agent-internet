@@ -292,6 +292,8 @@ def test_lotus_api_returns_agent_web_manifest(tmp_path):
 
     assert response["agent_web_manifest"]["identity"]["city_id"] == "city-http"
     assert response["agent_web_manifest"]["campaigns"][0]["title"] == "Internet adaptation"
+    assert response["agent_web_manifest"]["entrypoints"]["default"]["document_id"] == "agent_web"
+    assert response["agent_web_manifest"]["documents"][1]["document_id"] == "assistant_surface"
     assert any(link["rel"] == "assistant_surface" for link in response["agent_web_manifest"]["links"])
 
 
@@ -338,10 +340,11 @@ def test_lotus_api_returns_agent_web_document(tmp_path):
     response = api.call(
         bearer_token=issued.secret,
         action="agent_web_document",
-        params={"root": str(repo_root), "rel": "assistant_surface"},
+        params={"root": str(repo_root), "document_id": "assistant_surface"},
     )
 
     assert response["agent_web_document"]["link"]["rel"] == "assistant_surface"
+    assert response["agent_web_document"]["document"]["document_id"] == "assistant_surface"
     assert response["agent_web_document"]["document"]["path"] == "Assistant-Surface.md"
     assert "Internet adaptation" in response["agent_web_document"]["document"]["content"]
 
