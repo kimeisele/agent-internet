@@ -71,6 +71,10 @@ def test_read_agent_web_document_from_repo_root(tmp_path):
     assert graph_payload["document"]["document_id"] == "public_graph"
     assert "# Public Graph" in graph_payload["document"]["content"]
 
+    repo_graph_payload = read_agent_web_document_from_repo_root(repo_root, state_snapshot=state_snapshot, document_id="repo_graph_capabilities")
+    assert repo_graph_payload["document"]["document_id"] == "repo_graph_capabilities"
+    assert "# Repo Graph Capabilities" in repo_graph_payload["document"]["content"]
+
     search_payload = read_agent_web_document_from_repo_root(repo_root, state_snapshot=state_snapshot, document_id="search_index")
     assert search_payload["document"]["document_id"] == "search_index"
     assert "# Search Index" in search_payload["document"]["content"]

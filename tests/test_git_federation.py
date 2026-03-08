@@ -135,6 +135,8 @@ def test_git_wiki_sync_projects_pages_and_pushes(tmp_path):
     assert "`agent_web` → `Agent-Web.md` (manifest, entrypoint=True)" in (clone_path / "Agent-Web.md").read_text()
     assert "## Entrypoints" in (clone_path / "Agent-Web.md").read_text()
     assert '"kind": "agent_web_manifest"' in (clone_path / "Agent-Web.md").read_text()
+    assert "# Repo Graph Capabilities" in (clone_path / "Repo-Graph-Capabilities.md").read_text()
+    assert "# Repo Graph Contracts" in (clone_path / "Repo-Graph-Contracts.md").read_text()
     assert "# Public Graph" in (clone_path / "Public-Graph.md").read_text()
     assert '"kind": "agent_web_public_graph"' in (clone_path / "Public-Graph.md").read_text()
     assert "# Search Index" in (clone_path / "Search-Index.md").read_text()

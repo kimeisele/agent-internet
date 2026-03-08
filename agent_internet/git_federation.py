@@ -9,6 +9,8 @@ from urllib.parse import urlsplit, urlunsplit
 from .agent_web import build_agent_web_manifest
 from .agent_web_graph import build_agent_web_public_graph
 from .agent_web_index import build_agent_web_search_index
+from .agent_web_repo_graph_capabilities import render_agent_web_repo_graph_capability_page
+from .agent_web_repo_graph_contracts import render_agent_web_repo_graph_contract_page
 from .agent_web_semantic_capabilities import render_agent_web_semantic_capability_page
 from .agent_web_semantic_contracts import render_agent_web_semantic_contract_page
 from .file_locking import write_locked_json_value
@@ -201,6 +203,8 @@ def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict, assis
         "Agent-Web.md": _render_agent_web_page(agent_web),
         "Semantic-Capabilities.md": render_agent_web_semantic_capability_page(dict(agent_web.get("semantic_capabilities", {}))),
         "Semantic-Contracts.md": render_agent_web_semantic_contract_page(dict(agent_web.get("semantic_contracts", {}))),
+        "Repo-Graph-Capabilities.md": render_agent_web_repo_graph_capability_page(dict(agent_web.get("repo_graph_capabilities", {}))),
+        "Repo-Graph-Contracts.md": render_agent_web_repo_graph_contract_page(dict(agent_web.get("repo_graph_contracts", {}))),
         "Public-Graph.md": _render_public_graph_page(public_graph),
         "Search-Index.md": _render_search_index_page(search_index),
         "Lineage.md": _render_lineage_page(current_lineage=current_lineage, lineage_records=lineage_records),

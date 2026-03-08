@@ -332,6 +332,77 @@ def test_lotus_daemon_serves_agent_web_manifest_http_api(tmp_path):
         )
         assert status == 200
         assert payload["agent_web_semantic_contracts"]["version"] == 1
+
+        status, payload = _request_json(
+            daemon.base_url,
+            "/v1/lotus/agent-web-repo-graph-capabilities",
+            token=root_secret,
+        )
+        assert status == 200
+        assert payload["agent_web_repo_graph_capabilities"]["capabilities"][0]["capability_id"] == "repo_graph_snapshot"
+
+        status, payload = _request_json(
+            daemon.base_url,
+            "/v1/lotus/agent-web-repo-graph-contracts?contract_id=repo_graph_context.v1",
+            token=root_secret,
+        )
+        assert status == 200
+        assert payload["agent_web_repo_graph_contracts"]["capability_id"] == "repo_graph_context"
+    finally:
+        daemon.shutdown()
+
+
+def test_lotus_daemon_serves_repo_graph_http_api(tmp_path, monkeypatch):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    root_secret = store.update(
+        lambda plane: LotusControlPlaneAPI(plane).issue_token(
+            subject="root",
+            scopes=(LotusApiScope.READ.value, LotusApiScope.SERVICE_WRITE.value, LotusApiScope.TOKEN_WRITE.value),
+            token_secret="root-secret",
+            token_id="tok-root",
+        ).secret,
+    )
+    monkeypatch.setattr(
+        "agent_internet.lotus_api.build_agent_web_repo_graph_snapshot",
+        lambda repo_root, **kwargs: {"kind": "agent_web_repo_graph_snapshot", "source": {"root": str(repo_root)}, "nodes": [{"node_id": "module.city"}]},
+    )
+    monkeypatch.setattr(
+        "agent_internet.lotus_api.read_agent_web_repo_graph_neighbors",
+        lambda repo_root, **kwargs: {"kind": "agent_web_repo_graph_neighbors", "record": {"node_id": kwargs["node_id"]}, "neighbors": []},
+    )
+    monkeypatch.setattr(
+        "agent_internet.lotus_api.read_agent_web_repo_graph_context",
+        lambda repo_root, **kwargs: {"kind": "agent_web_repo_graph_context", "concept": kwargs["concept"], "context": "ctx"},
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+    root = tmp_path / "steward-protocol"
+    root.mkdir()
+
+    try:
+        status, payload = _request_json(
+            daemon.base_url,
+            f"/v1/lotus/agent-web-repo-graph?root={root}",
+            token=root_secret,
+        )
+        assert status == 200
+        assert payload["agent_web_repo_graph"]["kind"] == "agent_web_repo_graph_snapshot"
+
+        status, payload = _request_json(
+            daemon.base_url,
+            f"/v1/lotus/agent-web-repo-graph-neighbors?root={root}&node_id=module.city",
+            token=root_secret,
+        )
+        assert status == 200
+        assert payload["agent_web_repo_graph_neighbors"]["record"]["node_id"] == "module.city"
+
+        status, payload = _request_json(
+            daemon.base_url,
+            f"/v1/lotus/agent-web-repo-graph-context?root={root}&concept=heartbeat",
+            token=root_secret,
+        )
+        assert status == 200
+        assert payload["agent_web_repo_graph_context"]["concept"] == "heartbeat"
     finally:
         daemon.shutdown()
 

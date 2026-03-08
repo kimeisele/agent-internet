@@ -298,7 +298,10 @@ def test_lotus_api_returns_agent_web_manifest(tmp_path):
     assert response["agent_web_manifest"]["entrypoints"]["public_graph"]["document_id"] == "public_graph"
     assert response["agent_web_manifest"]["entrypoints"]["semantic_capabilities"]["document_id"] == "semantic_capabilities"
     assert response["agent_web_manifest"]["entrypoints"]["semantic_contracts"]["document_id"] == "semantic_contracts"
+    assert response["agent_web_manifest"]["entrypoints"]["repo_graph_capabilities"]["document_id"] == "repo_graph_capabilities"
+    assert response["agent_web_manifest"]["entrypoints"]["repo_graph_contracts"]["document_id"] == "repo_graph_contracts"
     assert any(document["document_id"] == "search_index" for document in response["agent_web_manifest"]["documents"])
+    assert any(document["document_id"] == "repo_graph_capabilities" for document in response["agent_web_manifest"]["documents"])
     assert response["agent_web_manifest"]["documents"][1]["document_id"] == "assistant_surface"
     assert any(link["rel"] == "assistant_surface" for link in response["agent_web_manifest"]["links"])
 
@@ -329,6 +332,42 @@ def test_lotus_api_returns_agent_web_manifest(tmp_path):
         params={"base_url": "https://agent.example", "capability_id": "semantic_federated_search", "version": 1},
     )
     assert contracts["agent_web_semantic_contracts"]["version"] == 1
+
+
+def test_lotus_api_returns_repo_graph_surfaces(monkeypatch, tmp_path):
+    plane = AgentInternetControlPlane()
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(subject="operator", scopes=(LotusApiScope.READ.value,), token_secret="secret")
+    root = tmp_path / "steward-protocol"
+    root.mkdir()
+
+    monkeypatch.setattr(
+        "agent_internet.lotus_api.build_agent_web_repo_graph_snapshot",
+        lambda repo_root, **kwargs: {"kind": "agent_web_repo_graph_snapshot", "source": {"root": str(repo_root)}, "nodes": [{"node_id": "module.city"}]},
+    )
+    monkeypatch.setattr(
+        "agent_internet.lotus_api.read_agent_web_repo_graph_neighbors",
+        lambda repo_root, **kwargs: {"kind": "agent_web_repo_graph_neighbors", "record": {"node_id": kwargs["node_id"]}, "neighbors": []},
+    )
+    monkeypatch.setattr(
+        "agent_internet.lotus_api.read_agent_web_repo_graph_context",
+        lambda repo_root, **kwargs: {"kind": "agent_web_repo_graph_context", "concept": kwargs["concept"], "context": "ctx"},
+    )
+
+    response = api.call(bearer_token=issued.secret, action="agent_web_repo_graph_capabilities", params={"base_url": "https://agent.example"})
+    assert response["agent_web_repo_graph_capabilities"]["capabilities"][0]["capability_id"] == "repo_graph_snapshot"
+
+    response = api.call(bearer_token=issued.secret, action="agent_web_repo_graph_contracts", params={"contract_id": "repo_graph_neighbors.v1"})
+    assert response["agent_web_repo_graph_contracts"]["capability_id"] == "repo_graph_neighbors"
+
+    response = api.call(bearer_token=issued.secret, action="agent_web_repo_graph_snapshot", params={"root": str(root), "node_type": "module"})
+    assert response["agent_web_repo_graph"]["kind"] == "agent_web_repo_graph_snapshot"
+
+    response = api.call(bearer_token=issued.secret, action="agent_web_repo_graph_neighbors", params={"root": str(root), "node_id": "module.city"})
+    assert response["agent_web_repo_graph_neighbors"]["record"]["node_id"] == "module.city"
+
+    response = api.call(bearer_token=issued.secret, action="agent_web_repo_graph_context", params={"root": str(root), "concept": "heartbeat"})
+    assert response["agent_web_repo_graph_context"]["concept"] == "heartbeat"
 
 
 def test_lotus_api_returns_agent_web_graph(tmp_path):

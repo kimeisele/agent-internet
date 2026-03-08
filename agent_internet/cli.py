@@ -17,6 +17,9 @@ from .agent_web_semantic_graph import read_agent_web_semantic_neighbors
 from .agent_web_graph import build_agent_web_public_graph_from_repo_root
 from .agent_web_index import build_agent_web_search_index_from_repo_root, search_agent_web_index
 from .agent_web_navigation import read_agent_web_document_from_repo_root
+from .agent_web_repo_graph import build_agent_web_repo_graph_snapshot, read_agent_web_repo_graph_context, read_agent_web_repo_graph_neighbors
+from .agent_web_repo_graph_capabilities import build_agent_web_repo_graph_capability_manifest
+from .agent_web_repo_graph_contracts import build_agent_web_repo_graph_contract_manifest, read_agent_web_repo_graph_contract_descriptor
 from .agent_web_semantic_capabilities import build_agent_web_semantic_capability_manifest
 from .agent_web_semantic_consumer import bootstrap_agent_web_semantic_consumer, invoke_agent_web_semantic_consumer
 from .agent_web_semantic_contracts import build_agent_web_semantic_contract_manifest, read_agent_web_semantic_contract_descriptor
@@ -129,6 +132,48 @@ def build_parser() -> argparse.ArgumentParser:
     agent_web_semantic_contracts.add_argument("--capability-id")
     agent_web_semantic_contracts.add_argument("--contract-id")
     agent_web_semantic_contracts.add_argument("--version", type=int)
+
+    agent_web_repo_graph_capabilities = subparsers.add_parser(
+        "agent-web-repo-graph-capabilities",
+        help="Print the consumer-agnostic repository graph capability manifest",
+    )
+    agent_web_repo_graph_capabilities.add_argument("--base-url")
+
+    agent_web_repo_graph_contracts = subparsers.add_parser(
+        "agent-web-repo-graph-contracts",
+        help="Print repository graph contract descriptors or a single contract descriptor",
+    )
+    agent_web_repo_graph_contracts.add_argument("--base-url")
+    agent_web_repo_graph_contracts.add_argument("--capability-id")
+    agent_web_repo_graph_contracts.add_argument("--contract-id")
+    agent_web_repo_graph_contracts.add_argument("--version", type=int)
+
+    agent_web_repo_graph = subparsers.add_parser(
+        "agent-web-repo-graph",
+        help="Read a filtered snapshot of a repository knowledge graph",
+    )
+    agent_web_repo_graph.add_argument("--root", required=True)
+    agent_web_repo_graph.add_argument("--node-type")
+    agent_web_repo_graph.add_argument("--domain")
+    agent_web_repo_graph.add_argument("--query")
+    agent_web_repo_graph.add_argument("--limit", type=int, default=25)
+
+    agent_web_repo_graph_neighbors = subparsers.add_parser(
+        "agent-web-repo-graph-neighbors",
+        help="Traverse neighbors from a repository graph node",
+    )
+    agent_web_repo_graph_neighbors.add_argument("--root", required=True)
+    agent_web_repo_graph_neighbors.add_argument("--node-id", required=True)
+    agent_web_repo_graph_neighbors.add_argument("--relation")
+    agent_web_repo_graph_neighbors.add_argument("--depth", type=int, default=1)
+    agent_web_repo_graph_neighbors.add_argument("--limit", type=int, default=25)
+
+    agent_web_repo_graph_context = subparsers.add_parser(
+        "agent-web-repo-graph-context",
+        help="Compile prompt-ready context from a repository knowledge graph",
+    )
+    agent_web_repo_graph_context.add_argument("--root", required=True)
+    agent_web_repo_graph_context.add_argument("--concept", required=True)
 
     agent_web_semantic_bootstrap = subparsers.add_parser(
         "agent-web-semantic-bootstrap",
@@ -813,6 +858,57 @@ def cmd_agent_web_semantic_contracts(args: argparse.Namespace) -> int:
         if any(value not in (None, "") for value in (args.capability_id, args.contract_id, args.version))
         else build_agent_web_semantic_contract_manifest(base_url=args.base_url)
     )
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_repo_graph_capabilities(args: argparse.Namespace) -> int:
+    payload = build_agent_web_repo_graph_capability_manifest(base_url=args.base_url)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_repo_graph_contracts(args: argparse.Namespace) -> int:
+    payload = (
+        read_agent_web_repo_graph_contract_descriptor(
+            capability_id=args.capability_id,
+            contract_id=args.contract_id,
+            version=args.version,
+            base_url=args.base_url,
+        )
+        if any(value not in (None, "") for value in (args.capability_id, args.contract_id, args.version))
+        else build_agent_web_repo_graph_contract_manifest(base_url=args.base_url)
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_repo_graph(args: argparse.Namespace) -> int:
+    payload = build_agent_web_repo_graph_snapshot(
+        args.root,
+        node_type=args.node_type,
+        domain=args.domain,
+        query=args.query,
+        limit=args.limit,
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_repo_graph_neighbors(args: argparse.Namespace) -> int:
+    payload = read_agent_web_repo_graph_neighbors(
+        args.root,
+        node_id=args.node_id,
+        relation=args.relation,
+        depth=args.depth,
+        limit=args.limit,
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_repo_graph_context(args: argparse.Namespace) -> int:
+    payload = read_agent_web_repo_graph_context(args.root, concept=args.concept)
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 
@@ -1646,6 +1742,16 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_agent_web_manifest(args)
     if args.command == "agent-web-graph":
         return cmd_agent_web_graph(args)
+    if args.command == "agent-web-repo-graph-capabilities":
+        return cmd_agent_web_repo_graph_capabilities(args)
+    if args.command == "agent-web-repo-graph-contracts":
+        return cmd_agent_web_repo_graph_contracts(args)
+    if args.command == "agent-web-repo-graph":
+        return cmd_agent_web_repo_graph(args)
+    if args.command == "agent-web-repo-graph-neighbors":
+        return cmd_agent_web_repo_graph_neighbors(args)
+    if args.command == "agent-web-repo-graph-context":
+        return cmd_agent_web_repo_graph_context(args)
     if args.command == "agent-web-semantic-capabilities":
         return cmd_agent_web_semantic_capabilities(args)
     if args.command == "agent-web-semantic-contracts":

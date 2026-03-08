@@ -375,9 +375,13 @@ def test_cli_agent_web_manifest(tmp_path, capsys):
     assert payload["entrypoints"]["public_graph"]["document_id"] == "public_graph"
     assert payload["entrypoints"]["semantic_capabilities"]["document_id"] == "semantic_capabilities"
     assert payload["entrypoints"]["semantic_contracts"]["document_id"] == "semantic_contracts"
+    assert payload["entrypoints"]["repo_graph_capabilities"]["document_id"] == "repo_graph_capabilities"
+    assert payload["entrypoints"]["repo_graph_contracts"]["document_id"] == "repo_graph_contracts"
     assert payload["documents"][0]["document_id"] == "home"
     assert any(document["document_id"] == "semantic_capabilities" for document in payload["documents"])
     assert any(document["document_id"] == "semantic_contracts" for document in payload["documents"])
+    assert any(document["document_id"] == "repo_graph_capabilities" for document in payload["documents"])
+    assert any(document["document_id"] == "repo_graph_contracts" for document in payload["documents"])
     assert any(document["document_id"] == "public_graph" for document in payload["documents"])
     assert any(document["document_id"] == "search_index" for document in payload["documents"])
     assert payload["service_affordances"][0]["service_id"] == "city-web:forum"
@@ -409,6 +413,44 @@ def test_cli_agent_web_manifest(tmp_path, capsys):
     assert main(["agent-web-semantic-contracts", "--base-url", "https://agent.example", "--capability-id", "semantic_federated_search", "--version", "1"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["version"] == 1
+
+    assert main(["agent-web-repo-graph-capabilities", "--base-url", "https://agent.example"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "agent_web_repo_graph_capability_manifest"
+    assert payload["capabilities"][0]["capability_id"] == "repo_graph_snapshot"
+
+    assert main(["agent-web-repo-graph-contracts", "--base-url", "https://agent.example", "--contract-id", "repo_graph_context.v1"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["capability_id"] == "repo_graph_context"
+
+
+def test_cli_agent_web_repo_graph_commands(tmp_path, capsys, monkeypatch):
+    root = tmp_path / "steward-protocol"
+    root.mkdir()
+    monkeypatch.setattr(
+        "agent_internet.cli.build_agent_web_repo_graph_snapshot",
+        lambda repo_root, **kwargs: {"kind": "agent_web_repo_graph_snapshot", "source": {"root": str(repo_root)}, "nodes": [{"node_id": "module.city"}]},
+    )
+    monkeypatch.setattr(
+        "agent_internet.cli.read_agent_web_repo_graph_neighbors",
+        lambda repo_root, **kwargs: {"kind": "agent_web_repo_graph_neighbors", "record": {"node_id": kwargs["node_id"]}, "neighbors": []},
+    )
+    monkeypatch.setattr(
+        "agent_internet.cli.read_agent_web_repo_graph_context",
+        lambda repo_root, **kwargs: {"kind": "agent_web_repo_graph_context", "concept": kwargs["concept"], "context": "ctx"},
+    )
+
+    assert main(["agent-web-repo-graph", "--root", str(root), "--node-type", "module"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "agent_web_repo_graph_snapshot"
+
+    assert main(["agent-web-repo-graph-neighbors", "--root", str(root), "--node-id", "module.city"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["record"]["node_id"] == "module.city"
+
+    assert main(["agent-web-repo-graph-context", "--root", str(root), "--concept", "heartbeat"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["concept"] == "heartbeat"
 
 
 def test_cli_agent_web_graph(tmp_path, capsys):
@@ -754,6 +796,13 @@ def test_cli_agent_web_read(tmp_path, capsys):
     assert payload["document"]["document_id"] == "semantic_contracts"
     assert payload["document"]["path"] == "Semantic-Contracts.md"
     assert "# Semantic Contracts" in payload["document"]["content"]
+
+    assert main(["agent-web-read", "--root", str(repo_root), "--state-path", str(state_path), "--document-id", "repo_graph_capabilities"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["link"]["rel"] == "repo_graph_capabilities"
+    assert payload["document"]["document_id"] == "repo_graph_capabilities"
+    assert payload["document"]["path"] == "Repo-Graph-Capabilities.md"
+    assert "# Repo Graph Capabilities" in payload["document"]["content"]
 
 
 def test_cli_init_dual_city_lab_and_send(tmp_path, capsys):
