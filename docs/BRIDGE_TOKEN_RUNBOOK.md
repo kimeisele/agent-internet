@@ -75,6 +75,10 @@ Suggested mapping:
 
 ### Quick validation
 
+For a single end-to-end check through the edge, run:
+
+- `cd ../steward-protocol && .venv/bin/python scripts/testing/smoke_intent_membrane.py --base-url "$STEWARD_PROTOCOL_BASE_URL" --api-key "$VIBE_API_KEY"`
+
 #### Public path
 
 - `POST /v1/public-intents`
