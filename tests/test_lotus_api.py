@@ -297,6 +297,7 @@ def test_lotus_api_returns_agent_web_manifest(tmp_path):
     assert response["agent_web_manifest"]["entrypoints"]["default"]["document_id"] == "agent_web"
     assert response["agent_web_manifest"]["entrypoints"]["public_graph"]["document_id"] == "public_graph"
     assert response["agent_web_manifest"]["entrypoints"]["semantic_capabilities"]["document_id"] == "semantic_capabilities"
+    assert response["agent_web_manifest"]["entrypoints"]["semantic_contracts"]["document_id"] == "semantic_contracts"
     assert any(document["document_id"] == "search_index" for document in response["agent_web_manifest"]["documents"])
     assert response["agent_web_manifest"]["documents"][1]["document_id"] == "assistant_surface"
     assert any(link["rel"] == "assistant_surface" for link in response["agent_web_manifest"]["links"])
@@ -307,6 +308,27 @@ def test_lotus_api_returns_agent_web_manifest(tmp_path):
         params={"base_url": "https://agent.example"},
     )
     assert semantic["agent_web_semantic_capabilities"]["capabilities"][0]["http"]["href"].startswith("https://agent.example/")
+
+    contracts = api.call(
+        bearer_token=issued.secret,
+        action="agent_web_semantic_contracts",
+        params={"base_url": "https://agent.example", "capability_id": "semantic_expand"},
+    )
+    assert contracts["agent_web_semantic_contracts"]["contract_id"] == "semantic_expand.v1"
+
+    contracts = api.call(
+        bearer_token=issued.secret,
+        action="agent_web_semantic_contracts",
+        params={"base_url": "https://agent.example", "contract_id": "semantic_neighbors.v1"},
+    )
+    assert contracts["agent_web_semantic_contracts"]["capability_id"] == "semantic_neighbors"
+
+    contracts = api.call(
+        bearer_token=issued.secret,
+        action="agent_web_semantic_contracts",
+        params={"base_url": "https://agent.example", "capability_id": "semantic_federated_search", "version": 1},
+    )
+    assert contracts["agent_web_semantic_contracts"]["version"] == 1
 
 
 def test_lotus_api_returns_agent_web_graph(tmp_path):
@@ -634,6 +656,17 @@ def test_lotus_api_returns_agent_web_document(tmp_path):
     assert response["agent_web_document"]["document"]["document_id"] == "semantic_capabilities"
     assert response["agent_web_document"]["document"]["path"] == "Semantic-Capabilities.md"
     assert "# Semantic Capabilities" in response["agent_web_document"]["document"]["content"]
+
+    response = api.call(
+        bearer_token=issued.secret,
+        action="agent_web_document",
+        params={"root": str(repo_root), "document_id": "semantic_contracts"},
+    )
+
+    assert response["agent_web_document"]["link"]["rel"] == "semantic_contracts"
+    assert response["agent_web_document"]["document"]["document_id"] == "semantic_contracts"
+    assert response["agent_web_document"]["document"]["path"] == "Semantic-Contracts.md"
+    assert "# Semantic Contracts" in response["agent_web_document"]["document"]["content"]
 
 
 def test_lotus_api_lists_spaces_and_slots():

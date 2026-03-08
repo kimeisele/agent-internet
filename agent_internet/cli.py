@@ -18,6 +18,7 @@ from .agent_web_graph import build_agent_web_public_graph_from_repo_root
 from .agent_web_index import build_agent_web_search_index_from_repo_root, search_agent_web_index
 from .agent_web_navigation import read_agent_web_document_from_repo_root
 from .agent_web_semantic_capabilities import build_agent_web_semantic_capability_manifest
+from .agent_web_semantic_contracts import build_agent_web_semantic_contract_manifest, read_agent_web_semantic_contract_descriptor
 from .agent_web_source_registry import (
     DEFAULT_AGENT_WEB_SOURCE_REGISTRY_PATH,
     build_agent_web_crawl_bootstrap_from_registry,
@@ -118,6 +119,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the consumer-agnostic semantic capability manifest",
     )
     agent_web_semantic_capabilities.add_argument("--base-url")
+
+    agent_web_semantic_contracts = subparsers.add_parser(
+        "agent-web-semantic-contracts",
+        help="Print semantic contract descriptors or a single contract descriptor",
+    )
+    agent_web_semantic_contracts.add_argument("--base-url")
+    agent_web_semantic_contracts.add_argument("--capability-id")
+    agent_web_semantic_contracts.add_argument("--contract-id")
+    agent_web_semantic_contracts.add_argument("--version", type=int)
 
     agent_web_index = subparsers.add_parser(
         "agent-web-index",
@@ -763,6 +773,21 @@ def cmd_agent_web_graph(args: argparse.Namespace) -> int:
 
 def cmd_agent_web_semantic_capabilities(args: argparse.Namespace) -> int:
     payload = build_agent_web_semantic_capability_manifest(base_url=args.base_url)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_semantic_contracts(args: argparse.Namespace) -> int:
+    payload = (
+        read_agent_web_semantic_contract_descriptor(
+            capability_id=args.capability_id,
+            contract_id=args.contract_id,
+            version=args.version,
+            base_url=args.base_url,
+        )
+        if any(value not in (None, "") for value in (args.capability_id, args.contract_id, args.version))
+        else build_agent_web_semantic_contract_manifest(base_url=args.base_url)
+    )
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 
@@ -1570,6 +1595,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_agent_web_graph(args)
     if args.command == "agent-web-semantic-capabilities":
         return cmd_agent_web_semantic_capabilities(args)
+    if args.command == "agent-web-semantic-contracts":
+        return cmd_agent_web_semantic_contracts(args)
     if args.command == "agent-web-index":
         return cmd_agent_web_index(args)
     if args.command == "agent-web-search":

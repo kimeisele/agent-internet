@@ -308,6 +308,30 @@ def test_lotus_daemon_serves_agent_web_manifest_http_api(tmp_path):
         )
         assert status == 200
         assert payload["agent_web_semantic_capabilities"]["capabilities"][0]["http"]["href"].startswith(daemon.base_url)
+
+        status, payload = _request_json(
+            daemon.base_url,
+            "/v1/lotus/agent-web-semantic-contracts?capability_id=semantic_neighbors",
+            token=root_secret,
+        )
+        assert status == 200
+        assert payload["agent_web_semantic_contracts"]["contract_id"] == "semantic_neighbors.v1"
+
+        status, payload = _request_json(
+            daemon.base_url,
+            "/v1/lotus/agent-web-semantic-contracts?contract_id=semantic_expand.v1",
+            token=root_secret,
+        )
+        assert status == 200
+        assert payload["agent_web_semantic_contracts"]["capability_id"] == "semantic_expand"
+
+        status, payload = _request_json(
+            daemon.base_url,
+            "/v1/lotus/agent-web-semantic-contracts?capability_id=semantic_federated_search&version=1",
+            token=root_secret,
+        )
+        assert status == 200
+        assert payload["agent_web_semantic_contracts"]["version"] == 1
     finally:
         daemon.shutdown()
 
@@ -721,6 +745,16 @@ def test_lotus_daemon_serves_agent_web_document_http_api(tmp_path):
         assert payload["agent_web_document"]["document"]["document_id"] == "semantic_capabilities"
         assert payload["agent_web_document"]["document"]["path"] == "Semantic-Capabilities.md"
         assert "# Semantic Capabilities" in payload["agent_web_document"]["document"]["content"]
+
+        status, payload = _request_json(
+            daemon.base_url,
+            f"/v1/lotus/agent-web-document?root={repo_root}&document_id=semantic_contracts",
+            token=root_secret,
+        )
+        assert status == 200
+        assert payload["agent_web_document"]["document"]["document_id"] == "semantic_contracts"
+        assert payload["agent_web_document"]["document"]["path"] == "Semantic-Contracts.md"
+        assert "# Semantic Contracts" in payload["agent_web_document"]["document"]["content"]
     finally:
         daemon.shutdown()
 

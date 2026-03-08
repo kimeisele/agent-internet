@@ -17,6 +17,7 @@ from .agent_web_graph import build_agent_web_public_graph_for_plane
 from .agent_web_index import build_agent_web_search_index_for_plane, search_agent_web_index
 from .agent_web_navigation import read_agent_web_document_for_plane
 from .agent_web_semantic_capabilities import build_agent_web_semantic_capability_manifest
+from .agent_web_semantic_contracts import build_agent_web_semantic_contract_manifest, read_agent_web_semantic_contract_descriptor
 from .agent_web_source_registry import (
     build_agent_web_crawl_bootstrap_from_registry_for_plane,
     load_agent_web_source_registry,
@@ -170,6 +171,19 @@ class LotusControlPlaneAPI:
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             manifest = build_agent_web_semantic_capability_manifest(base_url=payload.get("base_url"))
             return {"token_id": token.token_id, "agent_web_semantic_capabilities": manifest}
+        if action == "agent_web_semantic_contracts":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            manifest = (
+                read_agent_web_semantic_contract_descriptor(
+                    capability_id=payload.get("capability_id"),
+                    contract_id=payload.get("contract_id"),
+                    version=payload.get("version"),
+                    base_url=payload.get("base_url"),
+                )
+                if any(payload.get(key) not in (None, "") for key in ("capability_id", "contract_id", "version"))
+                else build_agent_web_semantic_contract_manifest(base_url=payload.get("base_url"))
+            )
+            return {"token_id": token.token_id, "agent_web_semantic_contracts": manifest}
         if action == "agent_web_graph":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             graph = build_agent_web_public_graph_for_plane(

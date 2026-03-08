@@ -152,6 +152,22 @@ class LotusApiDaemon:
                     "agent_web_semantic_capabilities",
                     {"base_url": self.base_url},
                 )
+            if method == "GET" and path == "/v1/lotus/agent-web-semantic-contracts":
+                payload = {"base_url": self.base_url}
+                capability_id = _query_param(query, "capability_id")
+                if capability_id not in (None, ""):
+                    payload["capability_id"] = capability_id
+                contract_id = _query_param(query, "contract_id")
+                if contract_id not in (None, ""):
+                    payload["contract_id"] = contract_id
+                version = _query_param(query, "version")
+                if version not in (None, ""):
+                    payload["version"] = version
+                return 200, self._call(
+                    token,
+                    "agent_web_semantic_contracts",
+                    payload,
+                )
             if method == "GET" and path == "/v1/lotus/agent-web-graph":
                 return 200, self._call(
                     token,

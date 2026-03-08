@@ -191,6 +191,7 @@ def test_cli_git_federation_describe_and_sync_wiki(tmp_path, capsys):
     assert "Home.md" in payload["pages"]
     assert "Assistant-Surface.md" in payload["pages"]
     assert "Semantic-Capabilities.md" in payload["pages"]
+    assert "Semantic-Contracts.md" in payload["pages"]
     assert "Lineage.md" in payload["pages"]
     clone_path = tmp_path / "wiki-clone"
     _git(tmp_path, "clone", str(wiki_remote), str(clone_path))
@@ -373,19 +374,41 @@ def test_cli_agent_web_manifest(tmp_path, capsys):
     assert payload["entrypoints"]["default"]["document_id"] == "agent_web"
     assert payload["entrypoints"]["public_graph"]["document_id"] == "public_graph"
     assert payload["entrypoints"]["semantic_capabilities"]["document_id"] == "semantic_capabilities"
+    assert payload["entrypoints"]["semantic_contracts"]["document_id"] == "semantic_contracts"
     assert payload["documents"][0]["document_id"] == "home"
     assert any(document["document_id"] == "semantic_capabilities" for document in payload["documents"])
+    assert any(document["document_id"] == "semantic_contracts" for document in payload["documents"])
     assert any(document["document_id"] == "public_graph" for document in payload["documents"])
     assert any(document["document_id"] == "search_index" for document in payload["documents"])
     assert payload["service_affordances"][0]["service_id"] == "city-web:forum"
     assert any(link["rel"] == "agent_web" for link in payload["links"])
     assert payload["semantic_capabilities"]["capabilities"][0]["capability_id"] == "semantic_federated_search"
+    assert payload["semantic_contracts"]["descriptors"][0]["contract_id"] == "semantic_federated_search.v1"
 
     assert main(["agent-web-semantic-capabilities", "--base-url", "https://agent.example"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["kind"] == "agent_web_semantic_capability_manifest"
     assert payload["capabilities"][1]["capability_id"] == "semantic_neighbors"
     assert payload["capabilities"][0]["http"]["href"].startswith("https://agent.example/")
+
+    assert main(["agent-web-semantic-contracts", "--base-url", "https://agent.example"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "agent_web_semantic_contract_manifest"
+    assert payload["descriptors"][1]["capability_id"] == "semantic_neighbors"
+    assert payload["descriptors"][1]["supported_versions"] == [1]
+
+    assert main(["agent-web-semantic-contracts", "--base-url", "https://agent.example", "--capability-id", "semantic_expand"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "agent_web_semantic_contract_descriptor"
+    assert payload["contract_id"] == "semantic_expand.v1"
+
+    assert main(["agent-web-semantic-contracts", "--base-url", "https://agent.example", "--contract-id", "semantic_neighbors.v1"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["capability_id"] == "semantic_neighbors"
+
+    assert main(["agent-web-semantic-contracts", "--base-url", "https://agent.example", "--capability-id", "semantic_federated_search", "--version", "1"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["version"] == 1
 
 
 def test_cli_agent_web_graph(tmp_path, capsys):
@@ -724,6 +747,13 @@ def test_cli_agent_web_read(tmp_path, capsys):
     assert payload["document"]["document_id"] == "semantic_capabilities"
     assert payload["document"]["path"] == "Semantic-Capabilities.md"
     assert "# Semantic Capabilities" in payload["document"]["content"]
+
+    assert main(["agent-web-read", "--root", str(repo_root), "--state-path", str(state_path), "--document-id", "semantic_contracts"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["link"]["rel"] == "semantic_contracts"
+    assert payload["document"]["document_id"] == "semantic_contracts"
+    assert payload["document"]["path"] == "Semantic-Contracts.md"
+    assert "# Semantic Contracts" in payload["document"]["content"]
 
 
 def test_cli_init_dual_city_lab_and_send(tmp_path, capsys):

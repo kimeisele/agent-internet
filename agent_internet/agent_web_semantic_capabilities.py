@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+from .agent_web_semantic_contracts import build_agent_web_semantic_contract_reference
+
 
 def build_agent_web_semantic_capability_manifest(*, base_url: str | None = None) -> dict:
     root = str(base_url or "").rstrip("/")
@@ -63,6 +65,13 @@ def build_agent_web_semantic_capability_manifest(*, base_url: str | None = None)
             "manifest_http_path": _href(root, "/v1/lotus/agent-web-semantic-capabilities"),
             "manifest_lotus_action": "agent_web_semantic_capabilities",
         },
+        "contracts_discovery": {
+            "document_id": "semantic_contracts",
+            "rel": "semantic_contracts",
+            "collection_http_path": _href(root, "/v1/lotus/agent-web-semantic-contracts"),
+            "collection_lotus_action": "agent_web_semantic_contracts",
+            "detail_query_parameters": ["capability_id?", "contract_id?", "version?"],
+        },
         "auth": {
             "kind": "lotus_bearer_token",
             "required_scopes": ["lotus.read"],
@@ -101,6 +110,7 @@ def render_agent_web_semantic_capability_page(manifest: dict) -> str:
         payload = dict(capability)
         http = dict(payload.get("http", {}))
         lotus = dict(payload.get("lotus", {}))
+        contract = dict(payload.get("contract_descriptor", {}))
         lines.extend(
             [
                 f"### `{payload.get('capability_id', '')}`",
@@ -109,6 +119,7 @@ def render_agent_web_semantic_capability_page(manifest: dict) -> str:
                 f"- HTTP: `{http.get('method', '')} {http.get('path', '')}`",
                 f"- Lotus Action: `{lotus.get('action', '')}`",
                 f"- CLI: `{dict(payload.get('cli', {})).get('command', '')}`",
+                f"- Contract Descriptor: `{dict(contract.get('http', {})).get('href', '')}`",
                 f"- Stable Fields: `{', '.join(str(item) for item in dict(payload.get('stable_response_subset', {})).get('top_level_fields', []))}`",
                 "",
             ],
@@ -136,6 +147,7 @@ def _capability(
         "http": {"method": "GET", "path": path, "href": _href(base_url, path), "query_params": list(http_query_params)},
         "lotus": {"action": action, "params": list(lotus_params)},
         "cli": {"command": cli_command},
+        "contract_descriptor": build_agent_web_semantic_contract_reference(capability_id, base_url=base_url),
         "stable_response_subset": dict(stable_response_subset),
     }
 

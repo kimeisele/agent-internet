@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .agent_city_contract import AgentCityFilesystemContract
 from .agent_web_semantic_capabilities import build_agent_web_semantic_capability_manifest
+from .agent_web_semantic_contracts import build_agent_web_semantic_contract_manifest
 from .file_locking import read_locked_json_value
 
 
@@ -13,6 +14,7 @@ DOCUMENT_SPECS = (
     ("assistant_surface", "assistant_surface", "assistant_surface", "Assistant Surface", "Assistant-Surface.md", True),
     ("agent_web", "agent_web", "manifest", "Agent Web", "Agent-Web.md", True),
     ("semantic_capabilities", "semantic_capabilities", "semantic_capability_manifest", "Semantic Capabilities", "Semantic-Capabilities.md", True),
+    ("semantic_contracts", "semantic_contracts", "semantic_contract_manifest", "Semantic Contracts", "Semantic-Contracts.md", True),
     ("public_graph", "public_graph", "public_graph", "Public Graph", "Public-Graph.md", True),
     ("search_index", "search_index", "search_index", "Search Index", "Search-Index.md", False),
     ("services", "services", "service_index", "Services", "Services.md", True),
@@ -89,6 +91,7 @@ def build_agent_web_manifest(*, peer_descriptor: dict, state_snapshot: dict, ass
     wiki_repo_url = str(git_manifest.get("wiki_repo_url", ""))
     links = _build_links(documents, wiki_repo_url=wiki_repo_url)
     semantic_capabilities = build_agent_web_semantic_capability_manifest()
+    semantic_contracts = build_agent_web_semantic_contract_manifest()
 
     return {
         "kind": "agent_web_manifest",
@@ -112,6 +115,7 @@ def build_agent_web_manifest(*, peer_descriptor: dict, state_snapshot: dict, ass
         "documents": documents,
         "entrypoints": _build_entrypoints(),
         "semantic_capabilities": semantic_capabilities,
+        "semantic_contracts": semantic_contracts,
         "campaigns": campaigns,
         "spaces": spaces,
         "slots": slots,
@@ -169,6 +173,7 @@ def _build_entrypoints() -> dict[str, dict[str, str]]:
         "home": {"document_id": "home", "rel": "wiki_home"},
         "assistant_surface": {"document_id": "assistant_surface", "rel": "assistant_surface"},
         "semantic_capabilities": {"document_id": "semantic_capabilities", "rel": "semantic_capabilities"},
+        "semantic_contracts": {"document_id": "semantic_contracts", "rel": "semantic_contracts"},
         "public_graph": {"document_id": "public_graph", "rel": "public_graph"},
         "search_index": {"document_id": "search_index", "rel": "search_index"},
         "services": {"document_id": "services", "rel": "services"},
