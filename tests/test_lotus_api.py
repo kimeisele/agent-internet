@@ -17,6 +17,7 @@ from agent_internet.models import (
     TrustRecord,
     UpstreamSyncPolicy,
 )
+from agent_internet.agent_web_source_registry import upsert_agent_web_source_registry_entry
 
 
 def test_lotus_api_issues_token_and_allows_scoped_calls():
@@ -485,6 +486,40 @@ def test_lotus_api_returns_agent_web_crawl_and_search(tmp_path):
     )
     assert search_response["agent_web_crawl_search"]["kind"] == "agent_web_crawl_search_results"
     assert search_response["agent_web_crawl_search"]["results"][0]["source_city_id"] == "city-b"
+
+
+def test_lotus_api_returns_source_registry_and_registry_crawl(tmp_path):
+    registry_path = tmp_path / "registry.json"
+    repo_a = tmp_path / "city-a"
+    repo_b = tmp_path / "city-b"
+    for repo_root, city_id, repo_name, campaign_title in (
+        (repo_a, "city-a", "org/city-a", "Internet adaptation"),
+        (repo_b, "city-b", "org/city-b", "Marketplace integration"),
+    ):
+        reports_dir = repo_root / "data" / "federation" / "reports"
+        reports_dir.mkdir(parents=True)
+        (repo_root / "data" / "assistant_state.json").write_text(json.dumps({"followed": ["alice"], "ops": {"posts": 1}}))
+        (repo_root / "data" / "federation" / "peer.json").write_text(json.dumps({"identity": {"city_id": city_id, "slug": city_id, "repo": repo_name}, "capabilities": ["moltbook"]}))
+        (reports_dir / "report_6.json").write_text(json.dumps({"heartbeat": 6, "timestamp": 60.0, "population": 1, "alive": 1, "dead": 0, "chain_valid": True, "active_campaigns": [{"id": campaign_title.lower().replace(' ', '-'), "title": campaign_title, "north_star": campaign_title, "status": "active", "last_gap_summary": ["keep execution bounded"]}]}))
+    upsert_agent_web_source_registry_entry(registry_path, root=repo_a)
+    upsert_agent_web_source_registry_entry(registry_path, root=repo_b, source_id="city-b-source")
+
+    plane = AgentInternetControlPlane()
+    for city_id, repo_name in (("city-a", "org/city-a"), ("city-b", "org/city-b")):
+        plane.publish_assistant_surface(AssistantSurfaceSnapshot(assistant_id="moltbook_assistant", assistant_kind="moltbook_assistant", city_id=city_id, city_slug=city_id, repo=repo_name, heartbeat_source="steward-protocol/mahamantra", heartbeat=6, state_present=True, total_posts=1, active_campaigns=()))
+    plane.publish_service_address(owner_city_id="city-a", service_name="forum", public_handle="forum.city-a.lotus", transport="https", location="https://forum.city-a.lotus", auth_required=False)
+    plane.publish_service_address(owner_city_id="city-b", service_name="market", public_handle="market.city-b.lotus", transport="https", location="https://market.city-b.lotus", auth_required=False)
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(subject="operator", scopes=(LotusApiScope.READ.value,), token_secret="secret")
+
+    registry_response = api.call(bearer_token=issued.secret, action="agent_web_source_registry", params={"registry_path": str(registry_path)})
+    assert registry_response["agent_web_source_registry"]["stats"]["source_count"] == 2
+
+    crawl_response = api.call(bearer_token=issued.secret, action="agent_web_crawl_registry", params={"registry_path": str(registry_path)})
+    assert crawl_response["agent_web_crawl_registry"]["registry"]["enabled_source_count"] == 2
+
+    search_response = api.call(bearer_token=issued.secret, action="agent_web_crawl_registry_search", params={"registry_path": str(registry_path), "query": "marketplace", "limit": 3})
+    assert search_response["agent_web_crawl_registry_search"]["results"][0]["source_city_id"] == "city-b"
 
 
 def test_lotus_api_returns_agent_web_document(tmp_path):

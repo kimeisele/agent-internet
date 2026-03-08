@@ -557,6 +557,49 @@ def test_cli_agent_web_crawl_and_search(tmp_path, capsys):
     assert search_payload["results"][0]["source_city_id"] == "city-b"
 
 
+def test_cli_agent_web_source_registry_and_registry_crawl(tmp_path, capsys):
+    registry_path = tmp_path / "registry.json"
+    state_path = tmp_path / "state.json"
+    repo_a = tmp_path / "city-a"
+    repo_b = tmp_path / "city-b"
+    for repo_root, city_id, repo_name, campaign_title in (
+        (repo_a, "city-a", "org/city-a", "Internet adaptation"),
+        (repo_b, "city-b", "org/city-b", "Marketplace integration"),
+    ):
+        reports_dir = repo_root / "data" / "federation" / "reports"
+        reports_dir.mkdir(parents=True)
+        (repo_root / "data" / "assistant_state.json").write_text(json.dumps({"followed": ["alice"], "ops": {"posts": 1}}))
+        (repo_root / "data" / "federation" / "peer.json").write_text(json.dumps({"identity": {"city_id": city_id, "slug": city_id, "repo": repo_name}, "capabilities": ["moltbook"]}))
+        (reports_dir / "report_3.json").write_text(json.dumps({"heartbeat": 3, "timestamp": 30.0, "population": 1, "alive": 1, "dead": 0, "chain_valid": True, "active_campaigns": [{"id": campaign_title.lower().replace(' ', '-'), "title": campaign_title, "north_star": campaign_title, "status": "active", "last_gap_summary": ["keep execution bounded"]}]}))
+    state_path.write_text(json.dumps({"minimum_trust": "observed", "identities": [], "endpoints": [], "link_addresses": [], "network_addresses": [], "hosted_endpoints": [], "service_addresses": [{"service_id": "city-a:forum", "owner_city_id": "city-a", "service_name": "forum", "public_handle": "forum.city-a.lotus", "transport": "https", "location": "https://forum.city-a.lotus", "network_address": "fd00::1", "visibility": "public", "auth_required": False, "required_scopes": [], "lease_started_at": None, "lease_expires_at": None, "labels": {}}, {"service_id": "city-b:market", "owner_city_id": "city-b", "service_name": "market", "public_handle": "market.city-b.lotus", "transport": "https", "location": "https://market.city-b.lotus", "network_address": "fd00::2", "visibility": "public", "auth_required": False, "required_scopes": [], "lease_started_at": None, "lease_expires_at": None, "labels": {}}], "routes": [], "api_tokens": [], "spaces": [{"space_id": "space:city-a:moltbook_assistant", "kind": "assistant", "owner_subject_id": "city-a", "display_name": "moltbook_assistant", "city_id": "city-a", "repo": "org/city-a", "heartbeat_source": "steward-protocol/mahamantra", "heartbeat": 3, "labels": {}}, {"space_id": "space:city-b:moltbook_assistant", "kind": "assistant", "owner_subject_id": "city-b", "display_name": "moltbook_assistant", "city_id": "city-b", "repo": "org/city-b", "heartbeat_source": "steward-protocol/mahamantra", "heartbeat": 3, "labels": {}}], "slots": [{"slot_id": "slot:city-a:assistant-social", "space_id": "space:city-a:moltbook_assistant", "slot_kind": "assistant_social", "holder_subject_id": "moltbook_assistant", "status": "active", "capacity": 1, "heartbeat_source": "steward-protocol/mahamantra", "heartbeat": 3, "labels": {}}, {"slot_id": "slot:city-b:assistant-social", "space_id": "space:city-b:moltbook_assistant", "slot_kind": "assistant_social", "holder_subject_id": "moltbook_assistant", "status": "active", "capacity": 1, "heartbeat_source": "steward-protocol/mahamantra", "heartbeat": 3, "labels": {}}], "fork_lineage": [], "intents": [], "presence": [], "trust": [], "allocator": {"next_link_id": 1, "next_network_id": 1}}))
+
+    assert main(["agent-web-source-add", "--registry-path", str(registry_path), "--root", str(repo_a), "--label", "manual"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["stats"]["source_count"] == 1
+
+    assert main(["agent-web-source-add", "--registry-path", str(registry_path), "--root", str(repo_b), "--source-id", "city-b-source"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["stats"]["source_count"] == 2
+
+    assert main(["agent-web-source-registry", "--registry-path", str(registry_path)]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert any(source["source_id"] == "city-b-source" for source in payload["sources"])
+
+    assert main(["agent-web-crawl-registry", "--registry-path", str(registry_path), "--state-path", str(state_path)]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["registry"]["enabled_source_count"] == 2
+    assert payload["stats"]["source_count"] == 2
+
+    assert main(["agent-web-crawl-registry-search", "--registry-path", str(registry_path), "--state-path", str(state_path), "--query", "marketplace", "--limit", "3"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "agent_web_crawl_search_results"
+    assert payload["results"][0]["source_city_id"] == "city-b"
+
+    assert main(["agent-web-source-remove", "--registry-path", str(registry_path), "--source-id", "city-b-source"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["stats"]["source_count"] == 1
+
+
 def test_cli_agent_web_read(tmp_path, capsys):
     repo_root = tmp_path / "city"
     reports_dir = repo_root / "data" / "federation" / "reports"

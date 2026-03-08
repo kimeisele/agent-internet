@@ -10,6 +10,14 @@ from .agent_web_crawl import build_agent_web_crawl_bootstrap, search_agent_web_c
 from .agent_web_graph import build_agent_web_public_graph_from_repo_root
 from .agent_web_index import build_agent_web_search_index_from_repo_root, search_agent_web_index
 from .agent_web_navigation import read_agent_web_document_from_repo_root
+from .agent_web_source_registry import (
+    DEFAULT_AGENT_WEB_SOURCE_REGISTRY_PATH,
+    build_agent_web_crawl_bootstrap_from_registry,
+    load_agent_web_source_registry,
+    remove_agent_web_source_registry_entry,
+    search_agent_web_crawl_bootstrap_from_registry,
+    upsert_agent_web_source_registry_entry,
+)
 from .agent_city_peer import AgentCityPeer
 from .assistant_surface import assistant_surface_snapshot_from_repo_root
 from .git_federation import GitWikiFederationSync, detect_git_remote_metadata, ensure_git_checkout
@@ -129,6 +137,51 @@ def build_parser() -> argparse.ArgumentParser:
     agent_web_crawl_search.add_argument("--heartbeat-source", default="steward-protocol/mahamantra")
     agent_web_crawl_search.add_argument("--query", required=True)
     agent_web_crawl_search.add_argument("--limit", type=int, default=10)
+
+    agent_web_source_registry = subparsers.add_parser(
+        "agent-web-source-registry",
+        help="Show the local source registry for crawl bootstrap seeds",
+    )
+    agent_web_source_registry.add_argument("--registry-path", default=DEFAULT_AGENT_WEB_SOURCE_REGISTRY_PATH)
+
+    agent_web_source_add = subparsers.add_parser(
+        "agent-web-source-add",
+        help="Add or update a crawl source in the local source registry",
+    )
+    agent_web_source_add.add_argument("--registry-path", default=DEFAULT_AGENT_WEB_SOURCE_REGISTRY_PATH)
+    agent_web_source_add.add_argument("--root", required=True)
+    agent_web_source_add.add_argument("--source-id")
+    agent_web_source_add.add_argument("--label", dest="labels", action="append", default=[])
+    agent_web_source_add.add_argument("--notes", default="")
+    agent_web_source_add.add_argument("--disabled", action="store_true")
+
+    agent_web_source_remove = subparsers.add_parser(
+        "agent-web-source-remove",
+        help="Remove a crawl source from the local source registry",
+    )
+    agent_web_source_remove.add_argument("--registry-path", default=DEFAULT_AGENT_WEB_SOURCE_REGISTRY_PATH)
+    agent_web_source_remove.add_argument("--root")
+    agent_web_source_remove.add_argument("--source-id")
+
+    agent_web_crawl_registry = subparsers.add_parser(
+        "agent-web-crawl-registry",
+        help="Bootstrap crawl view from the local source registry",
+    )
+    agent_web_crawl_registry.add_argument("--registry-path", default=DEFAULT_AGENT_WEB_SOURCE_REGISTRY_PATH)
+    agent_web_crawl_registry.add_argument("--state-path", default="data/control_plane/state.json")
+    agent_web_crawl_registry.add_argument("--assistant-id", default="moltbook_assistant")
+    agent_web_crawl_registry.add_argument("--heartbeat-source", default="steward-protocol/mahamantra")
+
+    agent_web_crawl_registry_search = subparsers.add_parser(
+        "agent-web-crawl-registry-search",
+        help="Search across crawl sources loaded from the local source registry",
+    )
+    agent_web_crawl_registry_search.add_argument("--registry-path", default=DEFAULT_AGENT_WEB_SOURCE_REGISTRY_PATH)
+    agent_web_crawl_registry_search.add_argument("--state-path", default="data/control_plane/state.json")
+    agent_web_crawl_registry_search.add_argument("--assistant-id", default="moltbook_assistant")
+    agent_web_crawl_registry_search.add_argument("--heartbeat-source", default="steward-protocol/mahamantra")
+    agent_web_crawl_registry_search.add_argument("--query", required=True)
+    agent_web_crawl_registry_search.add_argument("--limit", type=int, default=10)
 
     agent_web_read = subparsers.add_parser(
         "agent-web-read",
@@ -662,6 +715,63 @@ def cmd_agent_web_crawl_search(args: argparse.Namespace) -> int:
     )
     results = search_agent_web_crawl_bootstrap(crawl, query=args.query, limit=args.limit)
     print(json.dumps(results, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_source_registry(args: argparse.Namespace) -> int:
+    payload = load_agent_web_source_registry(args.registry_path)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_source_add(args: argparse.Namespace) -> int:
+    payload = upsert_agent_web_source_registry_entry(
+        args.registry_path,
+        root=args.root,
+        source_id=args.source_id,
+        labels=list(args.labels),
+        notes=args.notes,
+        enabled=not bool(args.disabled),
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_source_remove(args: argparse.Namespace) -> int:
+    payload = remove_agent_web_source_registry_entry(
+        args.registry_path,
+        root=args.root,
+        source_id=args.source_id,
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_crawl_registry(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    payload = build_agent_web_crawl_bootstrap_from_registry(
+        args.registry_path,
+        state_snapshot=snapshot_control_plane(plane),
+        assistant_id=args.assistant_id,
+        heartbeat_source=args.heartbeat_source,
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_crawl_registry_search(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    payload = search_agent_web_crawl_bootstrap_from_registry(
+        args.registry_path,
+        state_snapshot=snapshot_control_plane(plane),
+        assistant_id=args.assistant_id,
+        heartbeat_source=args.heartbeat_source,
+        query=args.query,
+        limit=args.limit,
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 
 
@@ -1274,6 +1384,16 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_agent_web_crawl(args)
     if args.command == "agent-web-crawl-search":
         return cmd_agent_web_crawl_search(args)
+    if args.command == "agent-web-source-registry":
+        return cmd_agent_web_source_registry(args)
+    if args.command == "agent-web-source-add":
+        return cmd_agent_web_source_add(args)
+    if args.command == "agent-web-source-remove":
+        return cmd_agent_web_source_remove(args)
+    if args.command == "agent-web-crawl-registry":
+        return cmd_agent_web_crawl_registry(args)
+    if args.command == "agent-web-crawl-registry-search":
+        return cmd_agent_web_crawl_registry_search(args)
     if args.command == "agent-web-read":
         return cmd_agent_web_read(args)
     if args.command == "lotus-show-steward-protocol":

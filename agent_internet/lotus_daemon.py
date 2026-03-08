@@ -203,6 +203,36 @@ class LotusApiDaemon:
                         "limit": int(_query_param(query, "limit") or "10"),
                     },
                 )
+            if method == "GET" and path == "/v1/lotus/agent-web-source-registry":
+                return 200, self._call(
+                    token,
+                    "agent_web_source_registry",
+                    {
+                        "registry_path": _query_param(query, "registry_path") or "data/control_plane/agent_web_source_registry.json",
+                    },
+                )
+            if method == "GET" and path == "/v1/lotus/agent-web-crawl-registry":
+                return 200, self._call(
+                    token,
+                    "agent_web_crawl_registry",
+                    {
+                        "registry_path": _query_param(query, "registry_path") or "data/control_plane/agent_web_source_registry.json",
+                        "assistant_id": _query_param(query, "assistant_id") or "moltbook_assistant",
+                        "heartbeat_source": _query_param(query, "heartbeat_source") or "steward-protocol/mahamantra",
+                    },
+                )
+            if method == "GET" and path == "/v1/lotus/agent-web-crawl-registry-search":
+                return 200, self._call(
+                    token,
+                    "agent_web_crawl_registry_search",
+                    {
+                        "registry_path": _query_param(query, "registry_path") or "data/control_plane/agent_web_source_registry.json",
+                        "assistant_id": _query_param(query, "assistant_id") or "moltbook_assistant",
+                        "heartbeat_source": _query_param(query, "heartbeat_source") or "steward-protocol/mahamantra",
+                        "query": _require_query_param(query, "q"),
+                        "limit": int(_query_param(query, "limit") or "10"),
+                    },
+                )
             if method == "GET" and path == "/v1/lotus/agent-web-document":
                 return 200, self._call(
                     token,

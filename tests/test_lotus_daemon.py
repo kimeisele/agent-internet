@@ -21,6 +21,7 @@ from agent_internet.models import (
     TrustRecord,
     UpstreamSyncPolicy,
 )
+from agent_internet.agent_web_source_registry import upsert_agent_web_source_registry_entry
 from agent_internet.snapshot import ControlPlaneStateStore
 
 
@@ -539,6 +540,50 @@ def test_lotus_daemon_serves_agent_web_crawl_and_search_http_api(tmp_path):
         assert status == 200
         assert payload["agent_web_crawl_search"]["kind"] == "agent_web_crawl_search_results"
         assert payload["agent_web_crawl_search"]["results"][0]["source_city_id"] == "city-b"
+    finally:
+        daemon.shutdown()
+
+
+def test_lotus_daemon_serves_source_registry_and_registry_crawl_http_api(tmp_path):
+    registry_path = tmp_path / "registry.json"
+    repo_a = tmp_path / "city-a"
+    repo_b = tmp_path / "city-b"
+    for repo_root, city_id, repo_name, campaign_title in (
+        (repo_a, "city-a", "org/city-a", "Internet adaptation"),
+        (repo_b, "city-b", "org/city-b", "Marketplace integration"),
+    ):
+        reports_dir = repo_root / "data" / "federation" / "reports"
+        reports_dir.mkdir(parents=True)
+        (repo_root / "data" / "assistant_state.json").write_text(json.dumps({"followed": ["alice"], "ops": {"posts": 1}}))
+        (repo_root / "data" / "federation" / "peer.json").write_text(json.dumps({"identity": {"city_id": city_id, "slug": city_id, "repo": repo_name}, "capabilities": ["moltbook"]}))
+        (reports_dir / "report_8.json").write_text(json.dumps({"heartbeat": 8, "timestamp": 80.0, "population": 1, "alive": 1, "dead": 0, "chain_valid": True, "active_campaigns": [{"id": campaign_title.lower().replace(' ', '-'), "title": campaign_title, "north_star": campaign_title, "status": "active", "last_gap_summary": ["keep execution bounded"]}]}))
+    upsert_agent_web_source_registry_entry(registry_path, root=repo_a)
+    upsert_agent_web_source_registry_entry(registry_path, root=repo_b, source_id="city-b-source")
+
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    root_secret = store.update(lambda plane: LotusControlPlaneAPI(plane).issue_token(subject="root", scopes=(LotusApiScope.READ.value, LotusApiScope.TOKEN_WRITE.value), token_secret="root-secret", token_id="tok-root").secret)
+    store.update(
+        lambda plane: (
+            plane.publish_assistant_surface(AssistantSurfaceSnapshot(assistant_id="moltbook_assistant", assistant_kind="moltbook_assistant", city_id="city-a", city_slug="city-a", repo="org/city-a", heartbeat_source="steward-protocol/mahamantra", heartbeat=8, state_present=True, total_posts=1, active_campaigns=())),
+            plane.publish_assistant_surface(AssistantSurfaceSnapshot(assistant_id="moltbook_assistant", assistant_kind="moltbook_assistant", city_id="city-b", city_slug="city-b", repo="org/city-b", heartbeat_source="steward-protocol/mahamantra", heartbeat=8, state_present=True, total_posts=1, active_campaigns=())),
+            plane.publish_service_address(owner_city_id="city-a", service_name="forum", public_handle="forum.city-a.lotus", transport="https", location="https://forum.city-a.lotus", auth_required=False),
+            plane.publish_service_address(owner_city_id="city-b", service_name="market", public_handle="market.city-b.lotus", transport="https", location="https://market.city-b.lotus", auth_required=False),
+        ),
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+    try:
+        status, payload = _request_json(daemon.base_url, f"/v1/lotus/agent-web-source-registry?registry_path={registry_path}", token=root_secret)
+        assert status == 200
+        assert payload["agent_web_source_registry"]["stats"]["source_count"] == 2
+
+        status, payload = _request_json(daemon.base_url, f"/v1/lotus/agent-web-crawl-registry?registry_path={registry_path}", token=root_secret)
+        assert status == 200
+        assert payload["agent_web_crawl_registry"]["registry"]["enabled_source_count"] == 2
+
+        status, payload = _request_json(daemon.base_url, f"/v1/lotus/agent-web-crawl-registry-search?registry_path={registry_path}&q=marketplace&limit=3", token=root_secret)
+        assert status == 200
+        assert payload["agent_web_crawl_registry_search"]["results"][0]["source_city_id"] == "city-b"
     finally:
         daemon.shutdown()
 

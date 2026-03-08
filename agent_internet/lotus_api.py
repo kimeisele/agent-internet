@@ -10,6 +10,11 @@ from .agent_web_crawl import build_agent_web_crawl_bootstrap_for_plane, search_a
 from .agent_web_graph import build_agent_web_public_graph_for_plane
 from .agent_web_index import build_agent_web_search_index_for_plane, search_agent_web_index
 from .agent_web_navigation import read_agent_web_document_for_plane
+from .agent_web_source_registry import (
+    build_agent_web_crawl_bootstrap_from_registry_for_plane,
+    load_agent_web_source_registry,
+    search_agent_web_crawl_bootstrap_from_registry,
+)
 from .assistant_surface import assistant_surface_snapshot_from_repo_root
 from .control_plane import AgentInternetControlPlane
 from .models import EndpointVisibility, IntentRecord, IntentStatus, IntentType, LotusApiScope, LotusApiToken
@@ -202,6 +207,30 @@ class LotusControlPlaneAPI:
                 limit=int(payload.get("limit", 10) or 10),
             )
             return {"token_id": token.token_id, "agent_web_crawl_search": results}
+        if action == "agent_web_source_registry":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            registry = load_agent_web_source_registry(str(payload.get("registry_path", "data/control_plane/agent_web_source_registry.json")))
+            return {"token_id": token.token_id, "agent_web_source_registry": registry}
+        if action == "agent_web_crawl_registry":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            crawl = build_agent_web_crawl_bootstrap_from_registry_for_plane(
+                str(payload.get("registry_path", "data/control_plane/agent_web_source_registry.json")),
+                plane=self.plane,
+                assistant_id=str(payload.get("assistant_id", "moltbook_assistant")),
+                heartbeat_source=str(payload.get("heartbeat_source", "steward-protocol/mahamantra")),
+            )
+            return {"token_id": token.token_id, "agent_web_crawl_registry": crawl}
+        if action == "agent_web_crawl_registry_search":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            results = search_agent_web_crawl_bootstrap_from_registry(
+                str(payload.get("registry_path", "data/control_plane/agent_web_source_registry.json")),
+                state_snapshot=snapshot_control_plane(self.plane),
+                assistant_id=str(payload.get("assistant_id", "moltbook_assistant")),
+                heartbeat_source=str(payload.get("heartbeat_source", "steward-protocol/mahamantra")),
+                query=str(payload.get("query", "")),
+                limit=int(payload.get("limit", 10) or 10),
+            )
+            return {"token_id": token.token_id, "agent_web_crawl_registry_search": results}
         if action == "agent_web_document":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             document = read_agent_web_document_for_plane(
