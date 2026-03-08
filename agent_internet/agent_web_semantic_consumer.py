@@ -45,6 +45,39 @@ def bootstrap_agent_web_semantic_consumer(
     }
 
 
+def invoke_agent_web_semantic_consumer(
+    *,
+    base_url: str | None = None,
+    bearer_token: str | None = None,
+    timeout_s: int | None = None,
+    capability_id: str | None = None,
+    contract_id: str | None = None,
+    version: int | None = None,
+    input_payload: dict | None = None,
+) -> dict:
+    config = _resolve_config(base_url=base_url, bearer_token=bearer_token, timeout_s=timeout_s)
+    bootstrap = bootstrap_agent_web_semantic_consumer(
+        base_url=config["base_url"],
+        bearer_token=config["bearer_token"],
+        timeout_s=int(config["timeout_s"]),
+        capability_id=capability_id,
+        contract_id=contract_id,
+        version=version,
+        transport="http",
+    )
+    plan = dict(bootstrap.get("invocation_plan", {}))
+    http = dict(plan.get("http", {}))
+    query = _http_query(plan=plan, input_payload=dict(input_payload or {}))
+    response = _fetch_json(config, f"{http.get('path', '')}?{urlencode(query, doseq=True)}")
+    return {
+        "kind": "agent_web_semantic_consumer_invocation",
+        "version": 1,
+        "bootstrap": bootstrap,
+        "request": {"transport_kind": "http", "path": str(http.get("path", "")), "query": query},
+        "response": response,
+    }
+
+
 def _resolve_config(*, base_url: str | None, bearer_token: str | None, timeout_s: int | None) -> dict:
     resolved_base_url = str(base_url or os.environ.get("AGENT_INTERNET_LOTUS_BASE_URL", "")).rstrip("/")
     resolved_token = str(bearer_token or os.environ.get("AGENT_INTERNET_LOTUS_TOKEN", ""))
@@ -96,3 +129,22 @@ def _build_invocation_plan(*, contract: dict, transport: str) -> dict:
             for name, schema in properties.items()
         ],
     }
+
+
+def _http_query(*, plan: dict, input_payload: dict) -> dict[str, list[str] | str]:
+    query: dict[str, list[str] | str] = {}
+    for binding in plan.get("input_bindings", []):
+        name = str(binding.get("name", ""))
+        if name in input_payload:
+            query[str(binding.get("transport_name", name))] = _stringify_query_value(input_payload[name])
+        elif bool(binding.get("required", False)):
+            raise ValueError(f"missing_input:{name}")
+    return query
+
+
+def _stringify_query_value(value: object) -> list[str] | str:
+    if isinstance(value, list):
+        return [json.dumps(item, sort_keys=True) if isinstance(item, (dict, list)) else str(item) for item in value]
+    if isinstance(value, (dict, tuple)):
+        return json.dumps(value, sort_keys=True)
+    return str(value)

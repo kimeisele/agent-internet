@@ -1,6 +1,6 @@
 import json
 
-from agent_internet.agent_web_semantic_consumer import bootstrap_agent_web_semantic_consumer
+from agent_internet.agent_web_semantic_consumer import bootstrap_agent_web_semantic_consumer, invoke_agent_web_semantic_consumer
 from agent_internet.cli import main
 from agent_internet.lotus_api import LotusControlPlaneAPI
 from agent_internet.lotus_daemon import LotusApiDaemon
@@ -66,5 +66,64 @@ def test_cli_agent_web_semantic_bootstrap(tmp_path, capsys):
         assert payload["capability"]["capability_id"] == "semantic_neighbors"
         assert payload["invocation_plan"]["transport_kind"] == "cli"
         assert payload["invocation_plan"]["cli"]["command"] == "agent-web-semantic-neighbors"
+    finally:
+        daemon.shutdown()
+
+
+def test_invoke_agent_web_semantic_consumer_over_http(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    token = store.update(
+        lambda plane: LotusControlPlaneAPI(plane).issue_token(
+            subject="bootstrap-consumer",
+            scopes=(LotusApiScope.READ.value,),
+            token_secret="bootstrap-secret",
+            token_id="tok-bootstrap",
+        ).secret,
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        payload = invoke_agent_web_semantic_consumer(
+            base_url=daemon.base_url,
+            bearer_token=token,
+            capability_id="semantic_expand",
+            input_payload={"query": "bazaar"},
+        )
+        assert payload["kind"] == "agent_web_semantic_consumer_invocation"
+        assert payload["request"]["query"] == {"q": "bazaar"}
+        assert payload["response"]["agent_web_semantic_expand"]["raw_query"] == "bazaar"
+    finally:
+        daemon.shutdown()
+
+
+def test_cli_agent_web_semantic_call(tmp_path, capsys):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    token = store.update(
+        lambda plane: LotusControlPlaneAPI(plane).issue_token(
+            subject="bootstrap-consumer",
+            scopes=(LotusApiScope.READ.value,),
+            token_secret="bootstrap-secret",
+            token_id="tok-bootstrap",
+        ).secret,
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        assert main([
+            "agent-web-semantic-call",
+            "--base-url",
+            daemon.base_url,
+            "--token",
+            token,
+            "--capability-id",
+            "semantic_expand",
+            "--input-json",
+            '{"query":"bazaar"}',
+        ]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["request"]["query"] == {"q": "bazaar"}
+        assert payload["response"]["agent_web_semantic_expand"]["kind"] == "agent_web_semantic_query_expansion"
     finally:
         daemon.shutdown()

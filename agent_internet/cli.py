@@ -18,7 +18,7 @@ from .agent_web_graph import build_agent_web_public_graph_from_repo_root
 from .agent_web_index import build_agent_web_search_index_from_repo_root, search_agent_web_index
 from .agent_web_navigation import read_agent_web_document_from_repo_root
 from .agent_web_semantic_capabilities import build_agent_web_semantic_capability_manifest
-from .agent_web_semantic_consumer import bootstrap_agent_web_semantic_consumer
+from .agent_web_semantic_consumer import bootstrap_agent_web_semantic_consumer, invoke_agent_web_semantic_consumer
 from .agent_web_semantic_contracts import build_agent_web_semantic_contract_manifest, read_agent_web_semantic_contract_descriptor
 from .agent_web_source_registry import (
     DEFAULT_AGENT_WEB_SOURCE_REGISTRY_PATH,
@@ -141,6 +141,18 @@ def build_parser() -> argparse.ArgumentParser:
     agent_web_semantic_bootstrap.add_argument("--contract-id")
     agent_web_semantic_bootstrap.add_argument("--version", type=int)
     agent_web_semantic_bootstrap.add_argument("--transport", choices=("http", "lotus", "cli"), default="http")
+
+    agent_web_semantic_call = subparsers.add_parser(
+        "agent-web-semantic-call",
+        help="Invoke a semantic capability generically over the published HTTP contract",
+    )
+    agent_web_semantic_call.add_argument("--base-url")
+    agent_web_semantic_call.add_argument("--token")
+    agent_web_semantic_call.add_argument("--timeout-s", type=int)
+    agent_web_semantic_call.add_argument("--capability-id")
+    agent_web_semantic_call.add_argument("--contract-id")
+    agent_web_semantic_call.add_argument("--version", type=int)
+    agent_web_semantic_call.add_argument("--input-json", required=True)
 
     agent_web_index = subparsers.add_parser(
         "agent-web-index",
@@ -814,6 +826,20 @@ def cmd_agent_web_semantic_bootstrap(args: argparse.Namespace) -> int:
         contract_id=args.contract_id,
         version=args.version,
         transport=args.transport,
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_semantic_call(args: argparse.Namespace) -> int:
+    payload = invoke_agent_web_semantic_consumer(
+        base_url=args.base_url,
+        bearer_token=args.token,
+        timeout_s=args.timeout_s,
+        capability_id=args.capability_id,
+        contract_id=args.contract_id,
+        version=args.version,
+        input_payload=json.loads(args.input_json),
     )
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
@@ -1626,6 +1652,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_agent_web_semantic_contracts(args)
     if args.command == "agent-web-semantic-bootstrap":
         return cmd_agent_web_semantic_bootstrap(args)
+    if args.command == "agent-web-semantic-call":
+        return cmd_agent_web_semantic_call(args)
     if args.command == "agent-web-index":
         return cmd_agent_web_index(args)
     if args.command == "agent-web-search":
