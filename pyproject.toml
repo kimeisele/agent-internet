@@ -14,7 +14,7 @@ keywords = ["agents", "federation", "network", "mesh", "control-plane"]
 dependencies = []
 
 [project.optional-dependencies]
-substrate = ["steward-protocol"]
+substrate = ["steward-protocol[web,crypto]"]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6.0",
