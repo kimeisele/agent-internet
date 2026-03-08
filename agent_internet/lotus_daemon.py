@@ -146,6 +146,12 @@ class LotusApiDaemon:
                         "heartbeat_source": _query_param(query, "heartbeat_source") or "steward-protocol/mahamantra",
                     },
                 )
+            if method == "GET" and path == "/v1/lotus/agent-web-semantic-capabilities":
+                return 200, self._call(
+                    token,
+                    "agent_web_semantic_capabilities",
+                    {"base_url": self.base_url},
+                )
             if method == "GET" and path == "/v1/lotus/agent-web-graph":
                 return 200, self._call(
                     token,

@@ -17,6 +17,7 @@ from .agent_web_semantic_graph import read_agent_web_semantic_neighbors
 from .agent_web_graph import build_agent_web_public_graph_from_repo_root
 from .agent_web_index import build_agent_web_search_index_from_repo_root, search_agent_web_index
 from .agent_web_navigation import read_agent_web_document_from_repo_root
+from .agent_web_semantic_capabilities import build_agent_web_semantic_capability_manifest
 from .agent_web_source_registry import (
     DEFAULT_AGENT_WEB_SOURCE_REGISTRY_PATH,
     build_agent_web_crawl_bootstrap_from_registry,
@@ -111,6 +112,12 @@ def build_parser() -> argparse.ArgumentParser:
     agent_web_graph.add_argument("--city-id")
     agent_web_graph.add_argument("--assistant-id", default="moltbook_assistant")
     agent_web_graph.add_argument("--heartbeat-source", default="steward-protocol/mahamantra")
+
+    agent_web_semantic_capabilities = subparsers.add_parser(
+        "agent-web-semantic-capabilities",
+        help="Print the consumer-agnostic semantic capability manifest",
+    )
+    agent_web_semantic_capabilities.add_argument("--base-url")
 
     agent_web_index = subparsers.add_parser(
         "agent-web-index",
@@ -751,6 +758,12 @@ def cmd_agent_web_graph(args: argparse.Namespace) -> int:
         heartbeat_source=args.heartbeat_source,
     )
     print(json.dumps(graph, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_semantic_capabilities(args: argparse.Namespace) -> int:
+    payload = build_agent_web_semantic_capability_manifest(base_url=args.base_url)
+    print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 
 
@@ -1555,6 +1568,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_agent_web_manifest(args)
     if args.command == "agent-web-graph":
         return cmd_agent_web_graph(args)
+    if args.command == "agent-web-semantic-capabilities":
+        return cmd_agent_web_semantic_capabilities(args)
     if args.command == "agent-web-index":
         return cmd_agent_web_index(args)
     if args.command == "agent-web-search":

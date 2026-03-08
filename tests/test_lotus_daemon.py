@@ -300,6 +300,14 @@ def test_lotus_daemon_serves_agent_web_manifest_http_api(tmp_path):
         assert payload["agent_web_manifest"]["identity"]["city_id"] == "city-http"
         assert payload["agent_web_manifest"]["campaigns"][0]["id"] == "internet-adaptation"
         assert any(link["rel"] == "wiki_home" for link in payload["agent_web_manifest"]["links"])
+
+        status, payload = _request_json(
+            daemon.base_url,
+            "/v1/lotus/agent-web-semantic-capabilities",
+            token=root_secret,
+        )
+        assert status == 200
+        assert payload["agent_web_semantic_capabilities"]["capabilities"][0]["http"]["href"].startswith(daemon.base_url)
     finally:
         daemon.shutdown()
 
@@ -706,13 +714,13 @@ def test_lotus_daemon_serves_agent_web_document_http_api(tmp_path):
     try:
         status, payload = _request_json(
             daemon.base_url,
-            f"/v1/lotus/agent-web-document?root={repo_root}&document_id=search_index",
+            f"/v1/lotus/agent-web-document?root={repo_root}&document_id=semantic_capabilities",
             token=root_secret,
         )
         assert status == 200
-        assert payload["agent_web_document"]["document"]["document_id"] == "search_index"
-        assert payload["agent_web_document"]["document"]["path"] == "Search-Index.md"
-        assert "# Search Index" in payload["agent_web_document"]["document"]["content"]
+        assert payload["agent_web_document"]["document"]["document_id"] == "semantic_capabilities"
+        assert payload["agent_web_document"]["document"]["path"] == "Semantic-Capabilities.md"
+        assert "# Semantic Capabilities" in payload["agent_web_document"]["document"]["content"]
     finally:
         daemon.shutdown()
 

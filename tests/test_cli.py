@@ -190,6 +190,7 @@ def test_cli_git_federation_describe_and_sync_wiki(tmp_path, capsys):
     assert payload["committed"] is True
     assert "Home.md" in payload["pages"]
     assert "Assistant-Surface.md" in payload["pages"]
+    assert "Semantic-Capabilities.md" in payload["pages"]
     assert "Lineage.md" in payload["pages"]
     clone_path = tmp_path / "wiki-clone"
     _git(tmp_path, "clone", str(wiki_remote), str(clone_path))
@@ -371,11 +372,20 @@ def test_cli_agent_web_manifest(tmp_path, capsys):
     assert payload["stats"]["space_count"] == 1
     assert payload["entrypoints"]["default"]["document_id"] == "agent_web"
     assert payload["entrypoints"]["public_graph"]["document_id"] == "public_graph"
+    assert payload["entrypoints"]["semantic_capabilities"]["document_id"] == "semantic_capabilities"
     assert payload["documents"][0]["document_id"] == "home"
+    assert any(document["document_id"] == "semantic_capabilities" for document in payload["documents"])
     assert any(document["document_id"] == "public_graph" for document in payload["documents"])
     assert any(document["document_id"] == "search_index" for document in payload["documents"])
     assert payload["service_affordances"][0]["service_id"] == "city-web:forum"
     assert any(link["rel"] == "agent_web" for link in payload["links"])
+    assert payload["semantic_capabilities"]["capabilities"][0]["capability_id"] == "semantic_federated_search"
+
+    assert main(["agent-web-semantic-capabilities", "--base-url", "https://agent.example"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "agent_web_semantic_capability_manifest"
+    assert payload["capabilities"][1]["capability_id"] == "semantic_neighbors"
+    assert payload["capabilities"][0]["http"]["href"].startswith("https://agent.example/")
 
 
 def test_cli_agent_web_graph(tmp_path, capsys):
@@ -707,6 +717,13 @@ def test_cli_agent_web_read(tmp_path, capsys):
     assert payload["document"]["document_id"] == "assistant_surface"
     assert payload["document"]["path"] == "Assistant-Surface.md"
     assert "Internet adaptation" in payload["document"]["content"]
+
+    assert main(["agent-web-read", "--root", str(repo_root), "--state-path", str(state_path), "--document-id", "semantic_capabilities"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["link"]["rel"] == "semantic_capabilities"
+    assert payload["document"]["document_id"] == "semantic_capabilities"
+    assert payload["document"]["path"] == "Semantic-Capabilities.md"
+    assert "# Semantic Capabilities" in payload["document"]["content"]
 
 
 def test_cli_init_dual_city_lab_and_send(tmp_path, capsys):
