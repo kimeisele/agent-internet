@@ -407,6 +407,86 @@ def test_lotus_api_returns_agent_web_index_and_search(tmp_path):
     assert search_response["agent_web_search"]["results"][0]["kind"] == "campaign"
 
 
+def test_lotus_api_returns_agent_web_crawl_and_search(tmp_path):
+    repo_a = tmp_path / "city-a"
+    repo_b = tmp_path / "city-b"
+    for repo_root, city_id, repo_name, campaign_title in (
+        (repo_a, "city-a", "org/city-a", "Internet adaptation"),
+        (repo_b, "city-b", "org/city-b", "Marketplace integration"),
+    ):
+        reports_dir = repo_root / "data" / "federation" / "reports"
+        reports_dir.mkdir(parents=True)
+        (repo_root / "data" / "assistant_state.json").write_text(json.dumps({"followed": ["alice"], "ops": {"posts": 1}}))
+        (repo_root / "data" / "federation" / "peer.json").write_text(
+            json.dumps({"identity": {"city_id": city_id, "slug": city_id, "repo": repo_name}, "capabilities": ["moltbook"]}),
+        )
+        (reports_dir / "report_4.json").write_text(
+            json.dumps(
+                {
+                    "heartbeat": 4,
+                    "timestamp": 40.0,
+                    "population": 1,
+                    "alive": 1,
+                    "dead": 0,
+                    "chain_valid": True,
+                    "active_campaigns": [{"id": campaign_title.lower().replace(' ', '-'), "title": campaign_title, "north_star": campaign_title, "status": "active", "last_gap_summary": ["keep execution bounded"]}],
+                },
+            ),
+        )
+
+    plane = AgentInternetControlPlane()
+    for city_id, repo_name, heartbeat in (("city-a", "org/city-a", 4), ("city-b", "org/city-b", 5)):
+        plane.publish_assistant_surface(
+            AssistantSurfaceSnapshot(
+                assistant_id="moltbook_assistant",
+                assistant_kind="moltbook_assistant",
+                city_id=city_id,
+                city_slug=city_id,
+                repo=repo_name,
+                heartbeat_source="steward-protocol/mahamantra",
+                heartbeat=heartbeat,
+                state_present=True,
+                total_posts=1,
+                active_campaigns=(),
+            ),
+        )
+    plane.publish_service_address(
+        owner_city_id="city-a",
+        service_name="forum",
+        public_handle="forum.city-a.lotus",
+        transport="https",
+        location="https://forum.city-a.lotus",
+        auth_required=False,
+    )
+    plane.publish_service_address(
+        owner_city_id="city-b",
+        service_name="market",
+        public_handle="market.city-b.lotus",
+        transport="https",
+        location="https://market.city-b.lotus",
+        auth_required=False,
+    )
+
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(subject="operator", scopes=(LotusApiScope.READ.value,), token_secret="secret")
+
+    crawl_response = api.call(
+        bearer_token=issued.secret,
+        action="agent_web_crawl",
+        params={"roots": [str(repo_a), str(repo_b)]},
+    )
+    assert crawl_response["agent_web_crawl"]["kind"] == "agent_web_crawl_bootstrap"
+    assert crawl_response["agent_web_crawl"]["stats"]["source_count"] == 2
+
+    search_response = api.call(
+        bearer_token=issued.secret,
+        action="agent_web_crawl_search",
+        params={"roots": [str(repo_a), str(repo_b)], "query": "marketplace", "limit": 3},
+    )
+    assert search_response["agent_web_crawl_search"]["kind"] == "agent_web_crawl_search_results"
+    assert search_response["agent_web_crawl_search"]["results"][0]["source_city_id"] == "city-b"
+
+
 def test_lotus_api_returns_agent_web_document(tmp_path):
     repo_root = tmp_path / "city"
     reports_dir = repo_root / "data" / "federation" / "reports"

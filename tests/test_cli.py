@@ -486,6 +486,77 @@ def test_cli_agent_web_index_and_search(tmp_path, capsys):
     assert search_payload["results"][0]["kind"] == "campaign"
 
 
+def test_cli_agent_web_crawl_and_search(tmp_path, capsys):
+    repo_a = tmp_path / "city-a"
+    repo_b = tmp_path / "city-b"
+    for repo_root, city_id, repo_name, campaign_title in (
+        (repo_a, "city-a", "org/city-a", "Internet adaptation"),
+        (repo_b, "city-b", "org/city-b", "Marketplace integration"),
+    ):
+        reports_dir = repo_root / "data" / "federation" / "reports"
+        reports_dir.mkdir(parents=True)
+        (repo_root / "data" / "assistant_state.json").write_text(json.dumps({"followed": ["alice"], "ops": {"posts": 1}}))
+        (repo_root / "data" / "federation" / "peer.json").write_text(
+            json.dumps({"identity": {"city_id": city_id, "slug": city_id, "repo": repo_name}, "capabilities": ["moltbook"]}),
+        )
+        (reports_dir / "report_2.json").write_text(
+            json.dumps(
+                {
+                    "heartbeat": 2,
+                    "timestamp": 20.0,
+                    "population": 1,
+                    "alive": 1,
+                    "dead": 0,
+                    "chain_valid": True,
+                    "active_campaigns": [{"id": campaign_title.lower().replace(' ', '-'), "title": campaign_title, "north_star": campaign_title, "status": "active", "last_gap_summary": ["keep execution bounded"]}],
+                },
+            ),
+        )
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "minimum_trust": "observed",
+                "identities": [],
+                "endpoints": [],
+                "link_addresses": [],
+                "network_addresses": [],
+                "hosted_endpoints": [],
+                "service_addresses": [
+                    {"service_id": "city-a:forum", "owner_city_id": "city-a", "service_name": "forum", "public_handle": "forum.city-a.lotus", "transport": "https", "location": "https://forum.city-a.lotus", "network_address": "fd00::1", "visibility": "public", "auth_required": False, "required_scopes": [], "lease_started_at": None, "lease_expires_at": None, "labels": {}},
+                    {"service_id": "city-b:market", "owner_city_id": "city-b", "service_name": "market", "public_handle": "market.city-b.lotus", "transport": "https", "location": "https://market.city-b.lotus", "network_address": "fd00::2", "visibility": "public", "auth_required": False, "required_scopes": [], "lease_started_at": None, "lease_expires_at": None, "labels": {}},
+                ],
+                "routes": [],
+                "api_tokens": [],
+                "spaces": [
+                    {"space_id": "space:city-a:moltbook_assistant", "kind": "assistant", "owner_subject_id": "city-a", "display_name": "moltbook_assistant", "city_id": "city-a", "repo": "org/city-a", "heartbeat_source": "steward-protocol/mahamantra", "heartbeat": 2, "labels": {}},
+                    {"space_id": "space:city-b:moltbook_assistant", "kind": "assistant", "owner_subject_id": "city-b", "display_name": "moltbook_assistant", "city_id": "city-b", "repo": "org/city-b", "heartbeat_source": "steward-protocol/mahamantra", "heartbeat": 2, "labels": {}},
+                ],
+                "slots": [
+                    {"slot_id": "slot:city-a:assistant-social", "space_id": "space:city-a:moltbook_assistant", "slot_kind": "assistant_social", "holder_subject_id": "moltbook_assistant", "status": "active", "capacity": 1, "heartbeat_source": "steward-protocol/mahamantra", "heartbeat": 2, "labels": {}},
+                    {"slot_id": "slot:city-b:assistant-social", "space_id": "space:city-b:moltbook_assistant", "slot_kind": "assistant_social", "holder_subject_id": "moltbook_assistant", "status": "active", "capacity": 1, "heartbeat_source": "steward-protocol/mahamantra", "heartbeat": 2, "labels": {}},
+                ],
+                "fork_lineage": [],
+                "intents": [],
+                "presence": [],
+                "trust": [],
+                "allocator": {"next_link_id": 1, "next_network_id": 1},
+            },
+        ),
+    )
+
+    assert main(["agent-web-crawl", "--root", str(repo_a), "--root", str(repo_b), "--state-path", str(state_path)]) == 0
+    crawl_payload = json.loads(capsys.readouterr().out)
+    assert crawl_payload["kind"] == "agent_web_crawl_bootstrap"
+    assert crawl_payload["stats"]["source_count"] == 2
+    assert any(record["source_city_id"] == "city-b" for record in crawl_payload["aggregate_index"]["records"])
+
+    assert main(["agent-web-crawl-search", "--root", str(repo_a), "--root", str(repo_b), "--state-path", str(state_path), "--query", "marketplace", "--limit", "3"]) == 0
+    search_payload = json.loads(capsys.readouterr().out)
+    assert search_payload["kind"] == "agent_web_crawl_search_results"
+    assert search_payload["results"][0]["source_city_id"] == "city-b"
+
+
 def test_cli_agent_web_read(tmp_path, capsys):
     repo_root = tmp_path / "city"
     reports_dir = repo_root / "data" / "federation" / "reports"

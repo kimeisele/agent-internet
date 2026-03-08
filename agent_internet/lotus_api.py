@@ -6,6 +6,7 @@ import time
 from dataclasses import asdict, dataclass
 
 from .agent_web import build_agent_web_manifest_for_plane
+from .agent_web_crawl import build_agent_web_crawl_bootstrap_for_plane, search_agent_web_crawl_bootstrap
 from .agent_web_graph import build_agent_web_public_graph_for_plane
 from .agent_web_index import build_agent_web_search_index_for_plane, search_agent_web_index
 from .agent_web_navigation import read_agent_web_document_for_plane
@@ -178,6 +179,29 @@ class LotusControlPlaneAPI:
                 limit=int(payload.get("limit", 10) or 10),
             )
             return {"token_id": token.token_id, "agent_web_search": results}
+        if action == "agent_web_crawl":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            crawl = build_agent_web_crawl_bootstrap_for_plane(
+                list(payload.get("roots", [])),
+                plane=self.plane,
+                assistant_id=str(payload.get("assistant_id", "moltbook_assistant")),
+                heartbeat_source=str(payload.get("heartbeat_source", "steward-protocol/mahamantra")),
+            )
+            return {"token_id": token.token_id, "agent_web_crawl": crawl}
+        if action == "agent_web_crawl_search":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            crawl = build_agent_web_crawl_bootstrap_for_plane(
+                list(payload.get("roots", [])),
+                plane=self.plane,
+                assistant_id=str(payload.get("assistant_id", "moltbook_assistant")),
+                heartbeat_source=str(payload.get("heartbeat_source", "steward-protocol/mahamantra")),
+            )
+            results = search_agent_web_crawl_bootstrap(
+                crawl,
+                query=str(payload.get("query", "")),
+                limit=int(payload.get("limit", 10) or 10),
+            )
+            return {"token_id": token.token_id, "agent_web_crawl_search": results}
         if action == "agent_web_document":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             document = read_agent_web_document_for_plane(

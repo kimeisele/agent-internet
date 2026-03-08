@@ -6,6 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .agent_web import build_agent_web_manifest_from_repo_root
+from .agent_web_crawl import build_agent_web_crawl_bootstrap, search_agent_web_crawl_bootstrap
 from .agent_web_graph import build_agent_web_public_graph_from_repo_root
 from .agent_web_index import build_agent_web_search_index_from_repo_root, search_agent_web_index
 from .agent_web_navigation import read_agent_web_document_from_repo_root
@@ -108,6 +109,26 @@ def build_parser() -> argparse.ArgumentParser:
     agent_web_search.add_argument("--heartbeat-source", default="steward-protocol/mahamantra")
     agent_web_search.add_argument("--query", required=True)
     agent_web_search.add_argument("--limit", type=int, default=10)
+
+    agent_web_crawl = subparsers.add_parser(
+        "agent-web-crawl",
+        help="Bootstrap a multi-root crawl view across multiple agent-city repos",
+    )
+    agent_web_crawl.add_argument("--root", dest="roots", action="append", required=True)
+    agent_web_crawl.add_argument("--state-path", default="data/control_plane/state.json")
+    agent_web_crawl.add_argument("--assistant-id", default="moltbook_assistant")
+    agent_web_crawl.add_argument("--heartbeat-source", default="steward-protocol/mahamantra")
+
+    agent_web_crawl_search = subparsers.add_parser(
+        "agent-web-crawl-search",
+        help="Search across a multi-root crawl bootstrap view",
+    )
+    agent_web_crawl_search.add_argument("--root", dest="roots", action="append", required=True)
+    agent_web_crawl_search.add_argument("--state-path", default="data/control_plane/state.json")
+    agent_web_crawl_search.add_argument("--assistant-id", default="moltbook_assistant")
+    agent_web_crawl_search.add_argument("--heartbeat-source", default="steward-protocol/mahamantra")
+    agent_web_crawl_search.add_argument("--query", required=True)
+    agent_web_crawl_search.add_argument("--limit", type=int, default=10)
 
     agent_web_read = subparsers.add_parser(
         "agent-web-read",
@@ -613,6 +634,33 @@ def cmd_agent_web_search(args: argparse.Namespace) -> int:
         heartbeat_source=args.heartbeat_source,
     )
     results = search_agent_web_index(index, query=args.query, limit=args.limit)
+    print(json.dumps(results, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_crawl(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    crawl = build_agent_web_crawl_bootstrap(
+        list(args.roots),
+        state_snapshot=snapshot_control_plane(plane),
+        assistant_id=args.assistant_id,
+        heartbeat_source=args.heartbeat_source,
+    )
+    print(json.dumps(crawl, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_crawl_search(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    crawl = build_agent_web_crawl_bootstrap(
+        list(args.roots),
+        state_snapshot=snapshot_control_plane(plane),
+        assistant_id=args.assistant_id,
+        heartbeat_source=args.heartbeat_source,
+    )
+    results = search_agent_web_crawl_bootstrap(crawl, query=args.query, limit=args.limit)
     print(json.dumps(results, indent=2, sort_keys=True))
     return 0
 
@@ -1222,6 +1270,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_agent_web_index(args)
     if args.command == "agent-web-search":
         return cmd_agent_web_search(args)
+    if args.command == "agent-web-crawl":
+        return cmd_agent_web_crawl(args)
+    if args.command == "agent-web-crawl-search":
+        return cmd_agent_web_crawl_search(args)
     if args.command == "agent-web-read":
         return cmd_agent_web_read(args)
     if args.command == "lotus-show-steward-protocol":

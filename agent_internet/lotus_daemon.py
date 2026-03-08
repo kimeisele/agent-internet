@@ -181,6 +181,28 @@ class LotusApiDaemon:
                         "limit": int(_query_param(query, "limit") or "10"),
                     },
                 )
+            if method == "GET" and path == "/v1/lotus/agent-web-crawl":
+                return 200, self._call(
+                    token,
+                    "agent_web_crawl",
+                    {
+                        "roots": _require_query_params(query, "root"),
+                        "assistant_id": _query_param(query, "assistant_id") or "moltbook_assistant",
+                        "heartbeat_source": _query_param(query, "heartbeat_source") or "steward-protocol/mahamantra",
+                    },
+                )
+            if method == "GET" and path == "/v1/lotus/agent-web-crawl-search":
+                return 200, self._call(
+                    token,
+                    "agent_web_crawl_search",
+                    {
+                        "roots": _require_query_params(query, "root"),
+                        "assistant_id": _query_param(query, "assistant_id") or "moltbook_assistant",
+                        "heartbeat_source": _query_param(query, "heartbeat_source") or "steward-protocol/mahamantra",
+                        "query": _require_query_param(query, "q"),
+                        "limit": int(_query_param(query, "limit") or "10"),
+                    },
+                )
             if method == "GET" and path == "/v1/lotus/agent-web-document":
                 return 200, self._call(
                     token,
@@ -303,3 +325,10 @@ def _require_query_param(query: dict[str, list[str]], name: str) -> str:
     if value is None:
         raise ValueError(f"missing_query_param:{name}")
     return value
+
+
+def _require_query_params(query: dict[str, list[str]], name: str) -> list[str]:
+    values = [value for value in query.get(name, []) if value != ""]
+    if not values:
+        raise ValueError(f"missing_query_param:{name}")
+    return values
