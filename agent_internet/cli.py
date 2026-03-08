@@ -6,6 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .agent_web import build_agent_web_manifest_from_repo_root
+from .agent_web_navigation import read_agent_web_document_from_repo_root
 from .agent_city_peer import AgentCityPeer
 from .assistant_surface import assistant_surface_snapshot_from_repo_root
 from .git_federation import GitWikiFederationSync, detect_git_remote_metadata, ensure_git_checkout
@@ -73,6 +74,18 @@ def build_parser() -> argparse.ArgumentParser:
     agent_web_manifest.add_argument("--city-id")
     agent_web_manifest.add_argument("--assistant-id", default="moltbook_assistant")
     agent_web_manifest.add_argument("--heartbeat-source", default="steward-protocol/mahamantra")
+
+    agent_web_read = subparsers.add_parser(
+        "agent-web-read",
+        help="Resolve an agent-web link and read the linked markdown document",
+    )
+    agent_web_read.add_argument("--root", required=True)
+    agent_web_read.add_argument("--state-path", default="data/control_plane/state.json")
+    agent_web_read.add_argument("--city-id")
+    agent_web_read.add_argument("--assistant-id", default="moltbook_assistant")
+    agent_web_read.add_argument("--heartbeat-source", default="steward-protocol/mahamantra")
+    agent_web_read.add_argument("--rel", default="agent_web")
+    agent_web_read.add_argument("--href")
 
     git_describe = subparsers.add_parser(
         "git-federation-describe",
@@ -523,6 +536,22 @@ def cmd_agent_web_manifest(args: argparse.Namespace) -> int:
         heartbeat_source=args.heartbeat_source,
     )
     print(json.dumps(manifest, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_read(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    payload = read_agent_web_document_from_repo_root(
+        args.root,
+        state_snapshot=snapshot_control_plane(plane),
+        rel=None if args.href else args.rel,
+        href=args.href,
+        city_id=args.city_id,
+        assistant_id=args.assistant_id,
+        heartbeat_source=args.heartbeat_source,
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 
 
@@ -1108,6 +1137,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_agent_city_assistant_snapshot(args)
     if args.command == "agent-web-manifest":
         return cmd_agent_web_manifest(args)
+    if args.command == "agent-web-read":
+        return cmd_agent_web_read(args)
     if args.command == "lotus-show-steward-protocol":
         return cmd_lotus_show_steward_protocol(args)
     if args.command == "lotus-assign-addresses":
