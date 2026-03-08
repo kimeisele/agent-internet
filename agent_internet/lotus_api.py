@@ -7,6 +7,12 @@ from dataclasses import asdict, dataclass
 
 from .agent_web import build_agent_web_manifest_for_plane
 from .agent_web_crawl import build_agent_web_crawl_bootstrap_for_plane, search_agent_web_crawl_bootstrap
+from .agent_web_federated_index import (
+    DEFAULT_AGENT_WEB_FEDERATED_INDEX_PATH,
+    load_agent_web_federated_index,
+    refresh_agent_web_federated_index_for_plane,
+    search_agent_web_federated_index,
+)
 from .agent_web_graph import build_agent_web_public_graph_for_plane
 from .agent_web_index import build_agent_web_search_index_for_plane, search_agent_web_index
 from .agent_web_navigation import read_agent_web_document_for_plane
@@ -34,6 +40,7 @@ LOTUS_MUTATING_ACTIONS = frozenset(
         "publish_route",
         "publish_service",
         "reject_intent",
+        "refresh_agent_web_federated_index",
     },
 )
 
@@ -231,6 +238,30 @@ class LotusControlPlaneAPI:
                 limit=int(payload.get("limit", 10) or 10),
             )
             return {"token_id": token.token_id, "agent_web_crawl_registry_search": results}
+        if action == "refresh_agent_web_federated_index":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            refreshed = refresh_agent_web_federated_index_for_plane(
+                str(payload.get("index_path", DEFAULT_AGENT_WEB_FEDERATED_INDEX_PATH)),
+                registry_path=str(payload.get("registry_path", "data/control_plane/agent_web_source_registry.json")),
+                plane=self.plane,
+                assistant_id=str(payload.get("assistant_id", "moltbook_assistant")),
+                heartbeat_source=str(payload.get("heartbeat_source", "steward-protocol/mahamantra")),
+                now=payload.get("now"),
+            )
+            return {"token_id": token.token_id, "agent_web_federated_index": refreshed}
+        if action == "agent_web_federated_index":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            index = load_agent_web_federated_index(str(payload.get("index_path", DEFAULT_AGENT_WEB_FEDERATED_INDEX_PATH)))
+            return {"token_id": token.token_id, "agent_web_federated_index": index}
+        if action == "agent_web_federated_search":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            index = load_agent_web_federated_index(str(payload.get("index_path", DEFAULT_AGENT_WEB_FEDERATED_INDEX_PATH)))
+            results = search_agent_web_federated_index(
+                index,
+                query=str(payload.get("query", "")),
+                limit=int(payload.get("limit", 10) or 10),
+            )
+            return {"token_id": token.token_id, "agent_web_federated_search": results}
         if action == "agent_web_document":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             document = read_agent_web_document_for_plane(

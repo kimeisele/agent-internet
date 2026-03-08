@@ -7,6 +7,12 @@ from pathlib import Path
 
 from .agent_web import build_agent_web_manifest_from_repo_root
 from .agent_web_crawl import build_agent_web_crawl_bootstrap, search_agent_web_crawl_bootstrap
+from .agent_web_federated_index import (
+    DEFAULT_AGENT_WEB_FEDERATED_INDEX_PATH,
+    load_agent_web_federated_index,
+    refresh_agent_web_federated_index,
+    search_agent_web_federated_index,
+)
 from .agent_web_graph import build_agent_web_public_graph_from_repo_root
 from .agent_web_index import build_agent_web_search_index_from_repo_root, search_agent_web_index
 from .agent_web_navigation import read_agent_web_document_from_repo_root
@@ -182,6 +188,30 @@ def build_parser() -> argparse.ArgumentParser:
     agent_web_crawl_registry_search.add_argument("--heartbeat-source", default="steward-protocol/mahamantra")
     agent_web_crawl_registry_search.add_argument("--query", required=True)
     agent_web_crawl_registry_search.add_argument("--limit", type=int, default=10)
+
+    agent_web_federated_index_refresh = subparsers.add_parser(
+        "agent-web-federated-index-refresh",
+        help="Refresh the persisted federated index from the local source registry",
+    )
+    agent_web_federated_index_refresh.add_argument("--index-path", default=DEFAULT_AGENT_WEB_FEDERATED_INDEX_PATH)
+    agent_web_federated_index_refresh.add_argument("--registry-path", default=DEFAULT_AGENT_WEB_SOURCE_REGISTRY_PATH)
+    agent_web_federated_index_refresh.add_argument("--state-path", default="data/control_plane/state.json")
+    agent_web_federated_index_refresh.add_argument("--assistant-id", default="moltbook_assistant")
+    agent_web_federated_index_refresh.add_argument("--heartbeat-source", default="steward-protocol/mahamantra")
+
+    agent_web_federated_index = subparsers.add_parser(
+        "agent-web-federated-index",
+        help="Read the persisted federated index",
+    )
+    agent_web_federated_index.add_argument("--index-path", default=DEFAULT_AGENT_WEB_FEDERATED_INDEX_PATH)
+
+    agent_web_federated_search = subparsers.add_parser(
+        "agent-web-federated-search",
+        help="Search the persisted federated index",
+    )
+    agent_web_federated_search.add_argument("--index-path", default=DEFAULT_AGENT_WEB_FEDERATED_INDEX_PATH)
+    agent_web_federated_search.add_argument("--query", required=True)
+    agent_web_federated_search.add_argument("--limit", type=int, default=10)
 
     agent_web_read = subparsers.add_parser(
         "agent-web-read",
@@ -771,6 +801,32 @@ def cmd_agent_web_crawl_registry_search(args: argparse.Namespace) -> int:
         query=args.query,
         limit=args.limit,
     )
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_federated_index_refresh(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    payload = refresh_agent_web_federated_index(
+        args.index_path,
+        registry_path=args.registry_path,
+        state_snapshot=snapshot_control_plane(plane),
+        assistant_id=args.assistant_id,
+        heartbeat_source=args.heartbeat_source,
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_federated_index(args: argparse.Namespace) -> int:
+    payload = load_agent_web_federated_index(args.index_path)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_federated_search(args: argparse.Namespace) -> int:
+    payload = search_agent_web_federated_index(load_agent_web_federated_index(args.index_path), query=args.query, limit=args.limit)
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 
@@ -1394,6 +1450,12 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_agent_web_crawl_registry(args)
     if args.command == "agent-web-crawl-registry-search":
         return cmd_agent_web_crawl_registry_search(args)
+    if args.command == "agent-web-federated-index-refresh":
+        return cmd_agent_web_federated_index_refresh(args)
+    if args.command == "agent-web-federated-index":
+        return cmd_agent_web_federated_index(args)
+    if args.command == "agent-web-federated-search":
+        return cmd_agent_web_federated_search(args)
     if args.command == "agent-web-read":
         return cmd_agent_web_read(args)
     if args.command == "lotus-show-steward-protocol":

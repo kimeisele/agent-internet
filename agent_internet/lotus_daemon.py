@@ -233,6 +233,24 @@ class LotusApiDaemon:
                         "limit": int(_query_param(query, "limit") or "10"),
                     },
                 )
+            if method == "GET" and path == "/v1/lotus/agent-web-federated-index":
+                return 200, self._call(
+                    token,
+                    "agent_web_federated_index",
+                    {
+                        "index_path": _query_param(query, "index_path") or "data/control_plane/agent_web_federated_index.json",
+                    },
+                )
+            if method == "GET" and path == "/v1/lotus/agent-web-federated-search":
+                return 200, self._call(
+                    token,
+                    "agent_web_federated_search",
+                    {
+                        "index_path": _query_param(query, "index_path") or "data/control_plane/agent_web_federated_index.json",
+                        "query": _require_query_param(query, "q"),
+                        "limit": int(_query_param(query, "limit") or "10"),
+                    },
+                )
             if method == "GET" and path == "/v1/lotus/agent-web-document":
                 return 200, self._call(
                     token,
@@ -302,6 +320,8 @@ class LotusApiDaemon:
                 return 200, self._call(token, "publish_service", _decode_json_object(body))
             if method == "POST" and path == "/v1/lotus/routes":
                 return 200, self._call(token, "publish_route", _decode_json_object(body))
+            if method == "POST" and path == "/v1/lotus/agent-web-federated-index/refresh":
+                return 200, self._call(token, "refresh_agent_web_federated_index", _decode_json_object(body))
             return 404, {"error": "not_found", "path": path}
         except PermissionError as exc:
             message = str(exc)
