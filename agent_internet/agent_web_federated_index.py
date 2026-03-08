@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 from .agent_web_index import search_agent_web_index
+from .agent_web_semantic_overlay import expand_query_with_agent_web_semantic_overlay, load_agent_web_semantic_overlay
 from .agent_web_source_registry import (
     DEFAULT_AGENT_WEB_SOURCE_REGISTRY_PATH,
     build_agent_web_crawl_bootstrap_from_registry,
@@ -70,9 +71,15 @@ def refresh_agent_web_federated_index_for_plane(
     )
 
 
-def search_agent_web_federated_index(index: dict, *, query: str, limit: int = 10) -> dict:
-    search = search_agent_web_index(index, query=query, limit=limit)
-    semantic_extensions = dict(index.get("semantic_extensions", {}))
+def search_agent_web_federated_index(index: dict, *, query: str, limit: int = 10, semantic_overlay: dict | None = None) -> dict:
+    overlay = semantic_overlay or _empty_semantic_overlay()
+    expansion = expand_query_with_agent_web_semantic_overlay(overlay, query=query)
+    search = search_agent_web_index(index, query=query, limit=limit, expanded_terms=list(expansion.get("expanded_terms", [])))
+    semantic_extensions = {
+        **dict(index.get("semantic_extensions", {})),
+        "overlay_bridge_count": int(dict(overlay.get("stats", {})).get("bridge_count", 0)),
+        "overlay_enabled_bridge_count": int(dict(overlay.get("stats", {})).get("enabled_bridge_count", 0)),
+    }
     return {
         "kind": "agent_web_federated_search_results",
         "version": 1,
@@ -80,9 +87,11 @@ def search_agent_web_federated_index(index: dict, *, query: str, limit: int = 10
         "results": list(search.get("results", [])),
         "query_interpretation": {
             "raw_query": str(query),
-            "expanded_terms": [str(query).strip()] if str(query).strip() else [],
-            "semantic_bridges_applied": list(semantic_extensions.get("bridges", [])),
+            "input_terms": list(expansion.get("input_terms", [])),
+            "expanded_terms": list(expansion.get("expanded_terms", [])),
+            "semantic_bridges_applied": [str(item.get("bridge_id", "")) for item in expansion.get("matched_bridges", [])],
         },
+        "matched_semantic_bridges": list(expansion.get("matched_bridges", [])),
         "semantic_extensions": semantic_extensions,
         "stats": {
             "result_count": int(search.get("stats", {}).get("result_count", 0)),
@@ -98,8 +107,10 @@ def search_agent_web_federated_index_from_path(
     *,
     query: str,
     limit: int = 10,
+    semantic_overlay_path: Path | str | None = None,
 ) -> dict:
-    return search_agent_web_federated_index(load_agent_web_federated_index(path), query=query, limit=limit)
+    overlay = _empty_semantic_overlay() if semantic_overlay_path is None else load_agent_web_semantic_overlay(semantic_overlay_path)
+    return search_agent_web_federated_index(load_agent_web_federated_index(path), query=query, limit=limit, semantic_overlay=overlay)
 
 
 def _default_federated_index() -> dict:
@@ -175,3 +186,20 @@ def _count_by_kind(records: list[dict[str, object]]) -> dict[str, int]:
         kind = str(record.get("kind", "unknown"))
         counts[kind] = counts.get(kind, 0) + 1
     return dict(sorted(counts.items()))
+
+
+def _empty_semantic_overlay() -> dict:
+    return {
+        "kind": "agent_web_semantic_overlay",
+        "version": 1,
+        "refreshed_at": 0.0,
+        "bridges": [],
+        "stats": {
+            "bridge_count": 0,
+            "enabled_bridge_count": 0,
+            "disabled_bridge_count": 0,
+            "bridge_kind_counts": {},
+            "term_count": 0,
+            "expansion_count": 0,
+        },
+    }

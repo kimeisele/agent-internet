@@ -5,16 +5,19 @@ from agent_internet.agent_web_federated_index import (
     refresh_agent_web_federated_index,
     search_agent_web_federated_index,
 )
+from agent_internet.agent_web_semantic_overlay import upsert_agent_web_semantic_bridge, load_agent_web_semantic_overlay
 from agent_internet.agent_web_source_registry import upsert_agent_web_source_registry_entry
 
 
 def test_refresh_and_search_agent_web_federated_index(tmp_path):
     registry_path = tmp_path / "registry.json"
     index_path = tmp_path / "federated_index.json"
+    overlay_path = tmp_path / "semantic_overlay.json"
     repo_a = _write_repo(tmp_path / "city-a", city_id="city-a", repo="org/city-a", campaign_title="Internet adaptation")
     repo_b = _write_repo(tmp_path / "city-b", city_id="city-b", repo="org/city-b", campaign_title="Marketplace integration")
     upsert_agent_web_source_registry_entry(registry_path, root=repo_a)
     upsert_agent_web_source_registry_entry(registry_path, root=repo_b)
+    upsert_agent_web_semantic_bridge(overlay_path, bridge_kind="synonym", terms=["bazaar"], expansions=["marketplace"])
 
     index = refresh_agent_web_federated_index(
         index_path,
@@ -46,10 +49,10 @@ def test_refresh_and_search_agent_web_federated_index(tmp_path):
     loaded = load_agent_web_federated_index(index_path)
     assert loaded["stats"]["record_count"] == index["stats"]["record_count"]
 
-    results = search_agent_web_federated_index(loaded, query="marketplace", limit=5)
+    results = search_agent_web_federated_index(loaded, query="bazaar", limit=5, semantic_overlay=load_agent_web_semantic_overlay(overlay_path))
     assert results["kind"] == "agent_web_federated_search_results"
     assert results["results"][0]["source_city_id"] == "city-b"
-    assert results["query_interpretation"]["semantic_bridges_applied"] == []
+    assert results["query_interpretation"]["semantic_bridges_applied"] == ["synonym:bazaar"]
 
 
 def _write_repo(repo_root, *, city_id: str, repo: str, campaign_title: str):

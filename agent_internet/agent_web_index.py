@@ -169,9 +169,12 @@ def build_agent_web_search_index_for_plane(
     return build_agent_web_search_index(manifest, graph)
 
 
-def search_agent_web_index(index: dict, *, query: str, limit: int = 10) -> dict:
+def search_agent_web_index(index: dict, *, query: str, limit: int = 10, expanded_terms: list[str] | tuple[str, ...] = ()) -> dict:
     query_value = str(query).strip()
-    query_terms = _terms(query_value)
+    query_terms = set(_terms(query_value))
+    normalized_expanded_terms = [str(item).strip() for item in expanded_terms if str(item).strip()]
+    for term in normalized_expanded_terms:
+        query_terms.update(_terms(term))
     scored: list[tuple[int, dict[str, object], list[str]]] = []
     for record in index.get("records", []):
         score, matched_terms = _score_record(record, query_value, query_terms)
@@ -188,6 +191,7 @@ def search_agent_web_index(index: dict, *, query: str, limit: int = 10) -> dict:
         "version": 1,
         "query": query_value,
         "results": results,
+        "expanded_terms": normalized_expanded_terms,
         "stats": {"result_count": len(results), "indexed_record_count": int(index.get("stats", {}).get("record_count", 0))},
     }
 

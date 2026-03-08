@@ -603,6 +603,7 @@ def test_cli_agent_web_source_registry_and_registry_crawl(tmp_path, capsys):
 def test_cli_agent_web_federated_index_refresh_and_search(tmp_path, capsys):
     registry_path = tmp_path / "registry.json"
     index_path = tmp_path / "federated_index.json"
+    overlay_path = tmp_path / "semantic_overlay.json"
     state_path = tmp_path / "state.json"
     repo_a = tmp_path / "city-a"
     repo_b = tmp_path / "city-b"
@@ -621,6 +622,9 @@ def test_cli_agent_web_federated_index_refresh_and_search(tmp_path, capsys):
     capsys.readouterr()
     assert main(["agent-web-source-add", "--registry-path", str(registry_path), "--root", str(repo_b)]) == 0
     capsys.readouterr()
+    assert main(["agent-web-semantic-bridge-add", "--overlay-path", str(overlay_path), "--bridge-kind", "synonym", "--term", "bazaar", "--expansion", "marketplace"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["stats"]["bridge_count"] == 1
 
     assert main(["agent-web-federated-index-refresh", "--index-path", str(index_path), "--registry-path", str(registry_path), "--state-path", str(state_path)]) == 0
     payload = json.loads(capsys.readouterr().out)
@@ -631,7 +635,11 @@ def test_cli_agent_web_federated_index_refresh_and_search(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["semantic_extensions"]["status"] == "ready_for_overlay"
 
-    assert main(["agent-web-federated-search", "--index-path", str(index_path), "--query", "marketplace", "--limit", "3"]) == 0
+    assert main(["agent-web-semantic-expand", "--overlay-path", str(overlay_path), "--query", "bazaar search"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "marketplace" in payload["expanded_terms"]
+
+    assert main(["agent-web-federated-search", "--index-path", str(index_path), "--overlay-path", str(overlay_path), "--query", "bazaar", "--limit", "3"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["kind"] == "agent_web_federated_search_results"
     assert payload["results"][0]["source_city_id"] == "city-b"

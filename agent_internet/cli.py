@@ -24,6 +24,14 @@ from .agent_web_source_registry import (
     search_agent_web_crawl_bootstrap_from_registry,
     upsert_agent_web_source_registry_entry,
 )
+from .agent_web_semantic_overlay import (
+    DEFAULT_AGENT_WEB_SEMANTIC_OVERLAY_PATH,
+    expand_query_with_agent_web_semantic_overlay,
+    load_agent_web_semantic_overlay,
+    refresh_agent_web_semantic_overlay,
+    remove_agent_web_semantic_bridge,
+    upsert_agent_web_semantic_bridge,
+)
 from .agent_city_peer import AgentCityPeer
 from .assistant_surface import assistant_surface_snapshot_from_repo_root
 from .git_federation import GitWikiFederationSync, detect_git_remote_metadata, ensure_git_checkout
@@ -210,8 +218,47 @@ def build_parser() -> argparse.ArgumentParser:
         help="Search the persisted federated index",
     )
     agent_web_federated_search.add_argument("--index-path", default=DEFAULT_AGENT_WEB_FEDERATED_INDEX_PATH)
+    agent_web_federated_search.add_argument("--overlay-path", default=DEFAULT_AGENT_WEB_SEMANTIC_OVERLAY_PATH)
     agent_web_federated_search.add_argument("--query", required=True)
     agent_web_federated_search.add_argument("--limit", type=int, default=10)
+
+    agent_web_semantic_overlay = subparsers.add_parser(
+        "agent-web-semantic-overlay",
+        help="Read the local semantic overlay used for federated search expansion",
+    )
+    agent_web_semantic_overlay.add_argument("--overlay-path", default=DEFAULT_AGENT_WEB_SEMANTIC_OVERLAY_PATH)
+
+    agent_web_semantic_overlay_refresh = subparsers.add_parser(
+        "agent-web-semantic-overlay-refresh",
+        help="Normalize and persist the local semantic overlay",
+    )
+    agent_web_semantic_overlay_refresh.add_argument("--overlay-path", default=DEFAULT_AGENT_WEB_SEMANTIC_OVERLAY_PATH)
+
+    agent_web_semantic_bridge_add = subparsers.add_parser(
+        "agent-web-semantic-bridge-add",
+        help="Add or update a semantic bridge for federated search expansion",
+    )
+    agent_web_semantic_bridge_add.add_argument("--overlay-path", default=DEFAULT_AGENT_WEB_SEMANTIC_OVERLAY_PATH)
+    agent_web_semantic_bridge_add.add_argument("--bridge-kind", required=True)
+    agent_web_semantic_bridge_add.add_argument("--bridge-id")
+    agent_web_semantic_bridge_add.add_argument("--term", dest="terms", action="append", required=True)
+    agent_web_semantic_bridge_add.add_argument("--expansion", dest="expansions", action="append", required=True)
+    agent_web_semantic_bridge_add.add_argument("--notes", default="")
+    agent_web_semantic_bridge_add.add_argument("--disabled", action="store_true")
+
+    agent_web_semantic_bridge_remove = subparsers.add_parser(
+        "agent-web-semantic-bridge-remove",
+        help="Remove a semantic bridge from the local semantic overlay",
+    )
+    agent_web_semantic_bridge_remove.add_argument("--overlay-path", default=DEFAULT_AGENT_WEB_SEMANTIC_OVERLAY_PATH)
+    agent_web_semantic_bridge_remove.add_argument("--bridge-id", required=True)
+
+    agent_web_semantic_expand = subparsers.add_parser(
+        "agent-web-semantic-expand",
+        help="Expand a query through the local semantic overlay",
+    )
+    agent_web_semantic_expand.add_argument("--overlay-path", default=DEFAULT_AGENT_WEB_SEMANTIC_OVERLAY_PATH)
+    agent_web_semantic_expand.add_argument("--query", required=True)
 
     agent_web_read = subparsers.add_parser(
         "agent-web-read",
@@ -826,7 +873,50 @@ def cmd_agent_web_federated_index(args: argparse.Namespace) -> int:
 
 
 def cmd_agent_web_federated_search(args: argparse.Namespace) -> int:
-    payload = search_agent_web_federated_index(load_agent_web_federated_index(args.index_path), query=args.query, limit=args.limit)
+    payload = search_agent_web_federated_index(
+        load_agent_web_federated_index(args.index_path),
+        query=args.query,
+        limit=args.limit,
+        semantic_overlay=load_agent_web_semantic_overlay(args.overlay_path),
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_semantic_overlay(args: argparse.Namespace) -> int:
+    payload = load_agent_web_semantic_overlay(args.overlay_path)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_semantic_overlay_refresh(args: argparse.Namespace) -> int:
+    payload = refresh_agent_web_semantic_overlay(args.overlay_path)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_semantic_bridge_add(args: argparse.Namespace) -> int:
+    payload = upsert_agent_web_semantic_bridge(
+        args.overlay_path,
+        bridge_kind=args.bridge_kind,
+        bridge_id=args.bridge_id,
+        terms=list(args.terms),
+        expansions=list(args.expansions),
+        notes=args.notes,
+        enabled=not bool(args.disabled),
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_semantic_bridge_remove(args: argparse.Namespace) -> int:
+    payload = remove_agent_web_semantic_bridge(args.overlay_path, bridge_id=args.bridge_id)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_semantic_expand(args: argparse.Namespace) -> int:
+    payload = expand_query_with_agent_web_semantic_overlay(load_agent_web_semantic_overlay(args.overlay_path), query=args.query)
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 
@@ -1456,6 +1546,16 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_agent_web_federated_index(args)
     if args.command == "agent-web-federated-search":
         return cmd_agent_web_federated_search(args)
+    if args.command == "agent-web-semantic-overlay":
+        return cmd_agent_web_semantic_overlay(args)
+    if args.command == "agent-web-semantic-overlay-refresh":
+        return cmd_agent_web_semantic_overlay_refresh(args)
+    if args.command == "agent-web-semantic-bridge-add":
+        return cmd_agent_web_semantic_bridge_add(args)
+    if args.command == "agent-web-semantic-bridge-remove":
+        return cmd_agent_web_semantic_bridge_remove(args)
+    if args.command == "agent-web-semantic-expand":
+        return cmd_agent_web_semantic_expand(args)
     if args.command == "agent-web-read":
         return cmd_agent_web_read(args)
     if args.command == "lotus-show-steward-protocol":

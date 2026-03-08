@@ -21,6 +21,12 @@ from .agent_web_source_registry import (
     load_agent_web_source_registry,
     search_agent_web_crawl_bootstrap_from_registry,
 )
+from .agent_web_semantic_overlay import (
+    DEFAULT_AGENT_WEB_SEMANTIC_OVERLAY_PATH,
+    expand_query_with_agent_web_semantic_overlay,
+    load_agent_web_semantic_overlay,
+    refresh_agent_web_semantic_overlay,
+)
 from .assistant_surface import assistant_surface_snapshot_from_repo_root
 from .control_plane import AgentInternetControlPlane
 from .models import EndpointVisibility, IntentRecord, IntentStatus, IntentType, LotusApiScope, LotusApiToken
@@ -41,6 +47,7 @@ LOTUS_MUTATING_ACTIONS = frozenset(
         "publish_service",
         "reject_intent",
         "refresh_agent_web_federated_index",
+        "refresh_agent_web_semantic_overlay",
     },
 )
 
@@ -260,8 +267,25 @@ class LotusControlPlaneAPI:
                 index,
                 query=str(payload.get("query", "")),
                 limit=int(payload.get("limit", 10) or 10),
+                semantic_overlay=load_agent_web_semantic_overlay(str(payload.get("overlay_path", DEFAULT_AGENT_WEB_SEMANTIC_OVERLAY_PATH))),
             )
             return {"token_id": token.token_id, "agent_web_federated_search": results}
+        if action == "refresh_agent_web_semantic_overlay":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            overlay = refresh_agent_web_semantic_overlay(
+                str(payload.get("overlay_path", DEFAULT_AGENT_WEB_SEMANTIC_OVERLAY_PATH)),
+                now=payload.get("now"),
+            )
+            return {"token_id": token.token_id, "agent_web_semantic_overlay": overlay}
+        if action == "agent_web_semantic_overlay":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            overlay = load_agent_web_semantic_overlay(str(payload.get("overlay_path", DEFAULT_AGENT_WEB_SEMANTIC_OVERLAY_PATH)))
+            return {"token_id": token.token_id, "agent_web_semantic_overlay": overlay}
+        if action == "agent_web_semantic_expand":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            overlay = load_agent_web_semantic_overlay(str(payload.get("overlay_path", DEFAULT_AGENT_WEB_SEMANTIC_OVERLAY_PATH)))
+            expansion = expand_query_with_agent_web_semantic_overlay(overlay, query=str(payload.get("query", "")))
+            return {"token_id": token.token_id, "agent_web_semantic_expand": expansion}
         if action == "agent_web_document":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             document = read_agent_web_document_for_plane(
