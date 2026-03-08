@@ -1,11 +1,13 @@
 import json
 
+import pytest
+
 from agent_internet.agent_city_bridge import AgentCityBridge, city_presence_from_report
 from agent_internet.assistant_surface import assistant_social_slot_from_snapshot, assistant_space_from_snapshot
 from agent_internet.agent_city_contract import AgentCityFilesystemContract
 from agent_internet.control_plane import AgentInternetControlPlane
 from agent_internet.filesystem_transport import FilesystemFederationTransport
-from agent_internet.models import AssistantSurfaceSnapshot, CityEndpoint, CityIdentity, EndpointVisibility, ForkLineageRecord, ForkMode, HealthStatus, LotusApiScope, SlotStatus, SpaceKind, TrustLevel, TrustRecord, UpstreamSyncPolicy
+from agent_internet.models import AssistantSurfaceSnapshot, CityEndpoint, CityIdentity, EndpointVisibility, ForkLineageRecord, ForkMode, HealthStatus, IntentRecord, IntentStatus, IntentType, LotusApiScope, SlotStatus, SpaceKind, TrustLevel, TrustRecord, UpstreamSyncPolicy
 from agent_internet.snapshot import restore_control_plane, snapshot_control_plane
 
 
@@ -197,3 +199,63 @@ def test_control_plane_publishes_and_restores_fork_lineage():
 
     assert payload["fork_lineage"][0]["repo"] == "org/city-b"
     assert restored.registry.get_fork_lineage("lineage:city-b") == lineage
+
+
+def test_control_plane_publishes_and_restores_intents():
+    plane = AgentInternetControlPlane()
+    intent = IntentRecord(
+        intent_id="intent:claim-city-b",
+        intent_type=IntentType.REQUEST_SPACE_CLAIM,
+        status=IntentStatus.PENDING,
+        title="Claim assistant space",
+        description="Request claim of the assistant space for city-b.",
+        requested_by_subject_id="human:ss",
+        repo="org/city-b",
+        city_id="city-b",
+        space_id="space:city-b:moltbook_assistant",
+        created_at=321.0,
+        updated_at=321.0,
+        labels={"channel": "lotus"},
+    )
+
+    plane.upsert_intent(intent)
+    payload = snapshot_control_plane(plane)
+    restored = restore_control_plane(payload)
+
+    assert payload["intents"][0]["intent_type"] == "request_space_claim"
+    assert restored.registry.get_intent("intent:claim-city-b") == intent
+
+
+def test_control_plane_transitions_intents_with_state_rules():
+    plane = AgentInternetControlPlane()
+    plane.upsert_intent(
+        IntentRecord(
+            intent_id="intent:fork-city-b",
+            intent_type=IntentType.REQUEST_FORK,
+            requested_by_subject_id="human:ss",
+            created_at=100.0,
+            updated_at=100.0,
+        ),
+    )
+
+    accepted = plane.transition_intent(
+        intent_id="intent:fork-city-b",
+        status=IntentStatus.ACCEPTED,
+        updated_at=101.0,
+    )
+    fulfilled = plane.transition_intent(
+        intent_id="intent:fork-city-b",
+        status=IntentStatus.FULFILLED,
+        updated_at=102.0,
+    )
+
+    assert accepted.status == IntentStatus.ACCEPTED
+    assert fulfilled.status == IntentStatus.FULFILLED
+    assert fulfilled.updated_at == 102.0
+
+    with pytest.raises(ValueError, match="invalid_intent_transition"):
+        plane.transition_intent(
+            intent_id="intent:fork-city-b",
+            status=IntentStatus.REJECTED,
+            updated_at=103.0,
+        )

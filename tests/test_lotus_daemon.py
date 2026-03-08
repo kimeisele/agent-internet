@@ -14,6 +14,8 @@ from agent_internet.models import (
     ForkLineageRecord,
     ForkMode,
     HealthStatus,
+    IntentStatus,
+    IntentType,
     LotusApiScope,
     TrustLevel,
     TrustRecord,
@@ -276,5 +278,97 @@ def test_lotus_daemon_serves_lineage_http_api(tmp_path):
         assert payload["fork_lineage"][0]["lineage_id"] == "lineage:city-fork"
         assert payload["fork_lineage"][0]["fork_mode"] == "experiment"
         assert payload["fork_lineage"][0]["sync_policy"] == "advisory"
+    finally:
+        daemon.shutdown()
+
+
+def test_lotus_daemon_creates_and_lists_intents_http_api(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    root_secret = store.update(
+        lambda plane: LotusControlPlaneAPI(plane).issue_token(
+            subject="human:ss",
+            scopes=(LotusApiScope.READ.value, LotusApiScope.INTENT_WRITE.value),
+            token_secret="intent-root",
+            token_id="tok-intent-root",
+        ).secret,
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        status, created = _request_json(
+            daemon.base_url,
+            "/v1/lotus/intents",
+            method="POST",
+            token=root_secret,
+            payload={
+                "intent_id": "intent:slot-city-http",
+                "intent_type": IntentType.REQUEST_SLOT.value,
+                "title": "Request social slot",
+                "description": "Request assistant social slot exposure.",
+                "space_id": "space:city-http:moltbook_assistant",
+                "labels": {"channel": "http"},
+                "now": 789.0,
+            },
+        )
+        assert status == 200
+        assert created["intent"]["intent_id"] == "intent:slot-city-http"
+        assert created["intent"]["requested_by_subject_id"] == "human:ss"
+
+        status, listed = _request_json(daemon.base_url, "/v1/lotus/intents", token=root_secret)
+        assert status == 200
+        assert listed["intents"][0]["intent_type"] == "request_slot"
+        assert listed["intents"][0]["status"] == "pending"
+    finally:
+        daemon.shutdown()
+
+
+def test_lotus_daemon_transitions_intents_http_api(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    root_secret = store.update(
+        lambda plane: LotusControlPlaneAPI(plane).issue_token(
+            subject="operator",
+            scopes=(LotusApiScope.READ.value, LotusApiScope.INTENT_WRITE.value, LotusApiScope.INTENT_REVIEW.value),
+            token_secret="intent-review-root",
+            token_id="tok-intent-review-root",
+        ).secret,
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        status, _created = _request_json(
+            daemon.base_url,
+            "/v1/lotus/intents",
+            method="POST",
+            token=root_secret,
+            payload={
+                "intent_id": "intent:review-city-http",
+                "intent_type": IntentType.REQUEST_OPERATOR_REVIEW.value,
+                "title": "Operator review",
+                "now": 900.0,
+            },
+        )
+        assert status == 200
+
+        status, accepted = _request_json(
+            daemon.base_url,
+            "/v1/lotus/intents/intent%3Areview-city-http/accept",
+            method="POST",
+            token=root_secret,
+            payload={"now": 901.0},
+        )
+        assert status == 200
+        assert accepted["intent"]["status"] == IntentStatus.ACCEPTED.value
+
+        status, fulfilled = _request_json(
+            daemon.base_url,
+            "/v1/lotus/intents/intent%3Areview-city-http/fulfill",
+            method="POST",
+            token=root_secret,
+            payload={"now": 902.0},
+        )
+        assert status == 200
+        assert fulfilled["intent"]["status"] == IntentStatus.FULFILLED.value
     finally:
         daemon.shutdown()

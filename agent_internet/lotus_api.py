@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 
 from .assistant_surface import assistant_surface_snapshot_from_repo_root
 from .control_plane import AgentInternetControlPlane
-from .models import EndpointVisibility, LotusApiScope, LotusApiToken
+from .models import EndpointVisibility, IntentRecord, IntentStatus, IntentType, LotusApiScope, LotusApiToken
 from .snapshot import snapshot_control_plane
 from .steward_protocol_compat import summarize_steward_protocol_bindings
 
@@ -15,10 +15,15 @@ from .steward_protocol_compat import summarize_steward_protocol_bindings
 LOTUS_MUTATING_ACTIONS = frozenset(
     {
         "assign_addresses",
+        "accept_intent",
+        "cancel_intent",
+        "create_intent",
+        "fulfill_intent",
         "issue_token",
         "publish_endpoint",
         "publish_route",
         "publish_service",
+        "reject_intent",
     },
 )
 
@@ -43,6 +48,16 @@ class IssuedLotusApiToken:
 @dataclass(slots=True)
 class LotusControlPlaneAPI:
     plane: AgentInternetControlPlane
+
+    def _transition_intent(self, *, bearer_token: str, payload: dict, status: IntentStatus) -> dict:
+        token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.INTENT_REVIEW.value,))
+        updated_at = float(time.time() if payload.get("now") is None else payload["now"])
+        intent = self.plane.transition_intent(
+            intent_id=str(payload["intent_id"]),
+            status=status,
+            updated_at=updated_at,
+        )
+        return {"token_id": token.token_id, "intent": asdict(intent)}
 
     def issue_token(
         self,
@@ -95,6 +110,9 @@ class LotusControlPlaneAPI:
                 "token_id": token.token_id,
                 "fork_lineage": [asdict(lineage) for lineage in self.plane.registry.list_fork_lineage()],
             }
+        if action == "list_intents":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            return {"token_id": token.token_id, "intents": [asdict(intent) for intent in self.plane.registry.list_intents()]}
         if action == "assistant_snapshot":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             snapshot = assistant_surface_snapshot_from_repo_root(
@@ -104,6 +122,38 @@ class LotusControlPlaneAPI:
                 heartbeat_source=str(payload.get("heartbeat_source", "steward-protocol/mahamantra")),
             )
             return {"token_id": token.token_id, "assistant_snapshot": asdict(snapshot)}
+        if action == "create_intent":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.INTENT_WRITE.value,))
+            created_at = float(time.time() if payload.get("now") is None else payload["now"])
+            intent = IntentRecord(
+                intent_id=str(payload.get("intent_id") or f"intent_{created_at:.6f}".replace(".", "_")),
+                intent_type=IntentType(str(payload["intent_type"])),
+                status=IntentStatus.PENDING,
+                title=str(payload.get("title", "")),
+                description=str(payload.get("description", "")),
+                requested_by_subject_id=token.subject,
+                repo=str(payload.get("repo", "")),
+                city_id=str(payload.get("city_id", "")),
+                space_id=str(payload.get("space_id", "")),
+                slot_id=str(payload.get("slot_id", "")),
+                lineage_id=str(payload.get("lineage_id", "")),
+                discussion_id=str(payload.get("discussion_id", "")),
+                linked_issue_url=str(payload.get("linked_issue_url", "")),
+                linked_pr_url=str(payload.get("linked_pr_url", "")),
+                created_at=created_at,
+                updated_at=created_at,
+                labels=dict(payload.get("labels", {})),
+            )
+            self.plane.upsert_intent(intent)
+            return {"token_id": token.token_id, "intent": asdict(intent)}
+        if action == "accept_intent":
+            return self._transition_intent(bearer_token=bearer_token, payload=payload, status=IntentStatus.ACCEPTED)
+        if action == "reject_intent":
+            return self._transition_intent(bearer_token=bearer_token, payload=payload, status=IntentStatus.REJECTED)
+        if action == "fulfill_intent":
+            return self._transition_intent(bearer_token=bearer_token, payload=payload, status=IntentStatus.FULFILLED)
+        if action == "cancel_intent":
+            return self._transition_intent(bearer_token=bearer_token, payload=payload, status=IntentStatus.CANCELLED)
         if action == "issue_token":
             self.authenticate(bearer_token, required_scopes=(LotusApiScope.TOKEN_WRITE.value,))
             issued = self.issue_token(

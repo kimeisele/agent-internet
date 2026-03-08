@@ -117,6 +117,8 @@ class LotusApiDaemon:
                 return 200, self._call(token, "list_slots", {})
             if method == "GET" and path == "/v1/lotus/lineage":
                 return 200, self._call(token, "list_fork_lineage", {})
+            if method == "GET" and path == "/v1/lotus/intents":
+                return 200, self._call(token, "list_intents", {})
             if method == "GET" and path == "/v1/lotus/assistant-snapshot":
                 return 200, self._call(
                     token,
@@ -157,6 +159,24 @@ class LotusApiDaemon:
                 return 200, self._call(token, str(request["action"]), dict(request.get("params", {})))
             if method == "POST" and path == "/v1/lotus/tokens":
                 return 200, self._call(token, "issue_token", _decode_json_object(body))
+            if method == "POST" and path == "/v1/lotus/intents":
+                return 200, self._call(token, "create_intent", _decode_json_object(body))
+            if method == "POST" and path.startswith("/v1/lotus/intents/"):
+                suffix = path.removeprefix("/v1/lotus/intents/")
+                parts = suffix.split("/", 1)
+                if len(parts) != 2 or not parts[0] or not parts[1]:
+                    raise ValueError("invalid_intent_path")
+                action = {
+                    "accept": "accept_intent",
+                    "reject": "reject_intent",
+                    "fulfill": "fulfill_intent",
+                    "cancel": "cancel_intent",
+                }.get(parts[1])
+                if action is None:
+                    raise ValueError("invalid_intent_action")
+                payload = _decode_json_object(body)
+                payload["intent_id"] = unquote(parts[0])
+                return 200, self._call(token, action, payload)
             if method == "POST" and path == "/v1/lotus/addresses/assign":
                 return 200, self._call(token, "assign_addresses", _decode_json_object(body))
             if method == "POST" and path == "/v1/lotus/endpoints":

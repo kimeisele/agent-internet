@@ -10,6 +10,7 @@ from .models import (
     CityPresence,
     ForkLineageRecord,
     HostedEndpoint,
+    IntentRecord,
     LotusApiToken,
     LotusLinkAddress,
     LotusNetworkAddress,
@@ -64,6 +65,7 @@ class InMemoryCityRegistry:
     _spaces: dict[str, SpaceDescriptor] = field(default_factory=dict)
     _slots: dict[str, SlotDescriptor] = field(default_factory=dict)
     _fork_lineage: dict[str, ForkLineageRecord] = field(default_factory=dict)
+    _intents: dict[str, IntentRecord] = field(default_factory=dict)
     _next_link_id: int = 1
     _next_network_id: int = 1
 
@@ -238,6 +240,15 @@ class InMemoryCityRegistry:
 
     def list_fork_lineage(self) -> list[ForkLineageRecord]:
         return [self._fork_lineage[lineage_id] for lineage_id in sorted(self._fork_lineage)]
+
+    def upsert_intent(self, intent: IntentRecord) -> None:
+        self._intents[intent.intent_id] = intent
+
+    def get_intent(self, intent_id: str) -> IntentRecord | None:
+        return self._intents.get(intent_id)
+
+    def list_intents(self) -> list[IntentRecord]:
+        return [self._intents[intent_id] for intent_id in sorted(self._intents)]
 
     def announce(self, presence: CityPresence) -> None:
         self._presence[presence.city_id] = presence

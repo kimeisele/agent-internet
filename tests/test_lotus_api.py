@@ -10,6 +10,8 @@ from agent_internet.models import (
     CityIdentity,
     ForkLineageRecord,
     ForkMode,
+    IntentStatus,
+    IntentType,
     LotusApiScope,
     TrustLevel,
     TrustRecord,
@@ -268,3 +270,102 @@ def test_lotus_api_lists_fork_lineage():
     assert response["fork_lineage"][0]["lineage_id"] == "lineage:city-b"
     assert response["fork_lineage"][0]["fork_mode"] == "sovereign"
     assert response["fork_lineage"][0]["sync_policy"] == "tracked"
+
+
+def test_lotus_api_creates_and_lists_intents():
+    plane = AgentInternetControlPlane()
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="human:ss",
+        scopes=(LotusApiScope.READ.value, LotusApiScope.INTENT_WRITE.value),
+        token_secret="intent-token",
+        token_id="tok-intent",
+        now=10.0,
+    )
+
+    created = api.call(
+        bearer_token=issued.secret,
+        action="create_intent",
+        params={
+            "intent_id": "intent:fork-city-b",
+            "intent_type": IntentType.REQUEST_FORK.value,
+            "title": "Fork city-b",
+            "description": "Create a sovereign derivative line for city-b.",
+            "repo": "org/city-b",
+            "lineage_id": "lineage:city-b",
+            "labels": {"channel": "public-edge"},
+            "now": 123.0,
+        },
+    )
+    listed = api.call(bearer_token=issued.secret, action="list_intents", params={})
+
+    assert created["intent"]["intent_id"] == "intent:fork-city-b"
+    assert created["intent"]["intent_type"] == "request_fork"
+    assert created["intent"]["status"] == "pending"
+    assert created["intent"]["requested_by_subject_id"] == "human:ss"
+    assert listed["intents"][0]["lineage_id"] == "lineage:city-b"
+
+
+def test_lotus_api_transitions_intents():
+    plane = AgentInternetControlPlane()
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="operator",
+        scopes=(LotusApiScope.READ.value, LotusApiScope.INTENT_WRITE.value, LotusApiScope.INTENT_REVIEW.value),
+        token_secret="intent-review-token",
+        token_id="tok-intent-review",
+        now=10.0,
+    )
+    api.call(
+        bearer_token=issued.secret,
+        action="create_intent",
+        params={
+            "intent_id": "intent:claim-city-b",
+            "intent_type": IntentType.REQUEST_SPACE_CLAIM.value,
+            "title": "Claim city-b",
+            "now": 123.0,
+        },
+    )
+
+    accepted = api.call(
+        bearer_token=issued.secret,
+        action="accept_intent",
+        params={"intent_id": "intent:claim-city-b", "now": 124.0},
+    )
+    fulfilled = api.call(
+        bearer_token=issued.secret,
+        action="fulfill_intent",
+        params={"intent_id": "intent:claim-city-b", "now": 125.0},
+    )
+
+    assert accepted["intent"]["status"] == IntentStatus.ACCEPTED.value
+    assert fulfilled["intent"]["status"] == IntentStatus.FULFILLED.value
+    assert fulfilled["intent"]["updated_at"] == 125.0
+
+
+def test_lotus_api_rejects_intent_transition_without_review_scope():
+    plane = AgentInternetControlPlane()
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="human:ss",
+        scopes=(LotusApiScope.INTENT_WRITE.value,),
+        token_secret="intent-write-only",
+        token_id="tok-intent-write-only",
+        now=10.0,
+    )
+    api.call(
+        bearer_token=issued.secret,
+        action="create_intent",
+        params={
+            "intent_id": "intent:slot-city-b",
+            "intent_type": IntentType.REQUEST_SLOT.value,
+            "now": 123.0,
+        },
+    )
+
+    with pytest.raises(PermissionError, match="missing_scopes"):
+        api.call(
+            bearer_token=issued.secret,
+            action="accept_intent",
+            params={"intent_id": "intent:slot-city-b", "now": 124.0},
+        )

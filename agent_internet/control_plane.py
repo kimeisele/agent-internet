@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .agent_city_bridge import AgentCityBridge
 from .assistant_surface import assistant_social_slot_from_snapshot, assistant_space_from_snapshot
@@ -14,6 +14,8 @@ from .models import (
     EndpointVisibility,
     ForkLineageRecord,
     HostedEndpoint,
+    IntentRecord,
+    IntentStatus,
     LotusApiToken,
     LotusLinkAddress,
     LotusNetworkAddress,
@@ -212,6 +214,23 @@ class AgentInternetControlPlane:
 
     def upsert_fork_lineage(self, lineage: ForkLineageRecord) -> None:
         self.registry.upsert_fork_lineage(lineage)
+
+    def upsert_intent(self, intent: IntentRecord) -> None:
+        self.registry.upsert_intent(intent)
+
+    def transition_intent(self, *, intent_id: str, status: IntentStatus, updated_at: float | None = None) -> IntentRecord:
+        intent = self.registry.get_intent(intent_id)
+        if intent is None:
+            raise ValueError(f"unknown_intent:{intent_id}")
+        allowed_transitions = {
+            IntentStatus.PENDING: {IntentStatus.ACCEPTED, IntentStatus.REJECTED, IntentStatus.CANCELLED},
+            IntentStatus.ACCEPTED: {IntentStatus.FULFILLED, IntentStatus.CANCELLED},
+        }
+        if status not in allowed_transitions.get(intent.status, set()):
+            raise ValueError(f"invalid_intent_transition:{intent.status.value}->{status.value}")
+        updated = replace(intent, status=status, updated_at=updated_at)
+        self.registry.upsert_intent(updated)
+        return updated
 
     def publish_assistant_surface(self, snapshot: AssistantSurfaceSnapshot) -> tuple[SpaceDescriptor, SlotDescriptor]:
         space = assistant_space_from_snapshot(snapshot)

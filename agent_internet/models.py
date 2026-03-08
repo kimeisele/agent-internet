@@ -29,6 +29,8 @@ class LotusApiScope(StrEnum):
     ADDRESS_WRITE = "lotus.write.address"
     ENDPOINT_WRITE = "lotus.write.endpoint"
     SERVICE_WRITE = "lotus.write.service"
+    INTENT_WRITE = "lotus.write.intent"
+    INTENT_REVIEW = "lotus.write.intent.review"
     TOKEN_WRITE = "lotus.write.token"
 
 
@@ -61,6 +63,23 @@ class UpstreamSyncPolicy(StrEnum):
     ADVISORY = "advisory"
     MERGE_CANDIDATE = "merge_candidate"
     ISOLATED = "isolated"
+
+
+class IntentType(StrEnum):
+    REQUEST_SPACE_CLAIM = "request_space_claim"
+    REQUEST_SLOT = "request_slot"
+    REQUEST_FORK = "request_fork"
+    REQUEST_ISSUE = "request_issue"
+    REQUEST_PR_DRAFT = "request_pr_draft"
+    REQUEST_OPERATOR_REVIEW = "request_operator_review"
+
+
+class IntentStatus(StrEnum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    FULFILLED = "fulfilled"
+    CANCELLED = "cancelled"
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +261,27 @@ class ForkLineageRecord:
     upstream_space_id: str = ""
     forked_by_subject_id: str = ""
     created_at: float | None = None
+    labels: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class IntentRecord:
+    intent_id: str
+    intent_type: IntentType
+    status: IntentStatus = IntentStatus.PENDING
+    title: str = ""
+    description: str = ""
+    requested_by_subject_id: str = ""
+    repo: str = ""
+    city_id: str = ""
+    space_id: str = ""
+    slot_id: str = ""
+    lineage_id: str = ""
+    discussion_id: str = ""
+    linked_issue_url: str = ""
+    linked_pr_url: str = ""
+    created_at: float | None = None
+    updated_at: float | None = None
     labels: dict[str, str] = field(default_factory=dict)
 
 
