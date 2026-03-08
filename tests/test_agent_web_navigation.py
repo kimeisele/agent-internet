@@ -67,6 +67,10 @@ def test_read_agent_web_document_from_repo_root(tmp_path):
     assert "## Active Campaigns" in payload["document"]["content"]
     assert "Internet adaptation" in payload["document"]["content"]
 
+    graph_payload = read_agent_web_document_from_repo_root(repo_root, state_snapshot=state_snapshot, document_id="public_graph")
+    assert graph_payload["document"]["document_id"] == "public_graph"
+    assert "# Public Graph" in graph_payload["document"]["content"]
+
 
 def test_read_agent_web_document_rejects_non_markdown_links(tmp_path):
     repo_root = tmp_path / "city"

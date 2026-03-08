@@ -302,6 +302,68 @@ def test_lotus_daemon_serves_agent_web_manifest_http_api(tmp_path):
         daemon.shutdown()
 
 
+def test_lotus_daemon_serves_agent_web_graph_http_api(tmp_path):
+    repo_root = tmp_path / "city"
+    reports_dir = repo_root / "data" / "federation" / "reports"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "report_7.json").write_text(
+        json.dumps(
+            {
+                "heartbeat": 7,
+                "timestamp": 70.0,
+                "population": 1,
+                "alive": 1,
+                "dead": 0,
+                "chain_valid": True,
+                "active_campaigns": [{"id": "internet-adaptation", "title": "Internet adaptation", "north_star": "Continuously adapt to relevant new protocols and standards.", "status": "active", "last_gap_summary": ["keep execution bounded"]}],
+            },
+        ),
+    )
+    (repo_root / "data" / "assistant_state.json").write_text(json.dumps({"followed": ["alice"], "ops": {"posts": 1}}))
+    (repo_root / "data" / "federation" / "peer.json").write_text(
+        json.dumps({"identity": {"city_id": "city-http", "slug": "http", "repo": "org/city-http"}, "capabilities": ["moltbook"]}),
+    )
+
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    root_secret = store.update(
+        lambda plane: LotusControlPlaneAPI(plane).issue_token(
+            subject="root",
+            scopes=(LotusApiScope.READ.value, LotusApiScope.TOKEN_WRITE.value),
+            token_secret="root-secret",
+            token_id="tok-root",
+        ).secret,
+    )
+    store.update(
+        lambda plane: plane.publish_assistant_surface(
+            AssistantSurfaceSnapshot(
+                assistant_id="moltbook_assistant",
+                assistant_kind="moltbook_assistant",
+                city_id="city-http",
+                city_slug="http",
+                repo="org/city-http",
+                heartbeat_source="steward-protocol/mahamantra",
+                heartbeat=7,
+                state_present=True,
+                total_posts=1,
+                active_campaigns=({"id": "internet-adaptation", "title": "Internet adaptation", "north_star": "Continuously adapt to relevant new protocols and standards.", "status": "active", "last_gap_summary": ["keep execution bounded"]},),
+            ),
+        ),
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+    try:
+        status, payload = _request_json(
+            daemon.base_url,
+            f"/v1/lotus/agent-web-graph?root={repo_root}",
+            token=root_secret,
+        )
+        assert status == 200
+        assert payload["agent_web_graph"]["kind"] == "agent_web_public_graph"
+        assert any(node["node_id"] == "document:public_graph" for node in payload["agent_web_graph"]["nodes"])
+    finally:
+        daemon.shutdown()
+
+
 def test_lotus_daemon_serves_agent_web_document_http_api(tmp_path):
     repo_root = tmp_path / "city"
     reports_dir = repo_root / "data" / "federation" / "reports"
@@ -354,13 +416,13 @@ def test_lotus_daemon_serves_agent_web_document_http_api(tmp_path):
     try:
         status, payload = _request_json(
             daemon.base_url,
-            f"/v1/lotus/agent-web-document?root={repo_root}&document_id=assistant_surface",
+            f"/v1/lotus/agent-web-document?root={repo_root}&document_id=public_graph",
             token=root_secret,
         )
         assert status == 200
-        assert payload["agent_web_document"]["document"]["document_id"] == "assistant_surface"
-        assert payload["agent_web_document"]["document"]["path"] == "Assistant-Surface.md"
-        assert "Internet adaptation" in payload["agent_web_document"]["document"]["content"]
+        assert payload["agent_web_document"]["document"]["document_id"] == "public_graph"
+        assert payload["agent_web_document"]["document"]["path"] == "Public-Graph.md"
+        assert "# Public Graph" in payload["agent_web_document"]["document"]["content"]
     finally:
         daemon.shutdown()
 

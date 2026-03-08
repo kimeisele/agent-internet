@@ -370,9 +370,63 @@ def test_cli_agent_web_manifest(tmp_path, capsys):
     assert payload["campaigns"][0]["id"] == "internet-adaptation"
     assert payload["stats"]["space_count"] == 1
     assert payload["entrypoints"]["default"]["document_id"] == "agent_web"
+    assert payload["entrypoints"]["public_graph"]["document_id"] == "public_graph"
     assert payload["documents"][0]["document_id"] == "home"
+    assert any(document["document_id"] == "public_graph" for document in payload["documents"])
     assert payload["service_affordances"][0]["service_id"] == "city-web:forum"
     assert any(link["rel"] == "agent_web" for link in payload["links"])
+
+
+def test_cli_agent_web_graph(tmp_path, capsys):
+    repo_root = tmp_path / "city"
+    reports_dir = repo_root / "data" / "federation" / "reports"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "report_2.json").write_text(
+        json.dumps(
+            {
+                "heartbeat": 2,
+                "timestamp": 20.0,
+                "population": 1,
+                "alive": 1,
+                "dead": 0,
+                "chain_valid": True,
+                "active_campaigns": [{"id": "internet-adaptation", "title": "Internet adaptation", "north_star": "Continuously adapt to relevant new protocols and standards.", "status": "active", "last_gap_summary": ["keep execution bounded"]}],
+            },
+        ),
+    )
+    (repo_root / "data" / "assistant_state.json").write_text(json.dumps({"followed": ["alice"], "ops": {"posts": 1}}))
+    (repo_root / "data" / "federation" / "peer.json").write_text(
+        json.dumps({"identity": {"city_id": "city-web", "slug": "web", "repo": "org/city-web"}, "capabilities": ["moltbook"]}),
+    )
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "minimum_trust": "observed",
+                "identities": [],
+                "endpoints": [],
+                "link_addresses": [],
+                "network_addresses": [],
+                "hosted_endpoints": [],
+                "service_addresses": [],
+                "routes": [],
+                "api_tokens": [],
+                "spaces": [{"space_id": "space:city-web:moltbook_assistant", "kind": "assistant", "owner_subject_id": "city-web", "display_name": "moltbook_assistant", "city_id": "city-web", "repo": "org/city-web", "heartbeat_source": "steward-protocol/mahamantra", "heartbeat": 2, "labels": {}}],
+                "slots": [{"slot_id": "slot:city-web:assistant-social", "space_id": "space:city-web:moltbook_assistant", "slot_kind": "assistant_social", "holder_subject_id": "moltbook_assistant", "status": "active", "capacity": 1, "heartbeat_source": "steward-protocol/mahamantra", "heartbeat": 2, "labels": {}}],
+                "fork_lineage": [],
+                "intents": [],
+                "presence": [],
+                "trust": [],
+                "allocator": {"next_link_id": 1, "next_network_id": 1},
+            },
+        ),
+    )
+
+    assert main(["agent-web-graph", "--root", str(repo_root), "--state-path", str(state_path)]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "agent_web_public_graph"
+    assert any(node["node_id"] == "document:public_graph" for node in payload["nodes"])
+    assert any(edge["kind"] == "focuses_on" for edge in payload["edges"])
 
 
 def test_cli_agent_web_read(tmp_path, capsys):

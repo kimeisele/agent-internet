@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from .agent_web import build_agent_web_manifest
+from .agent_web_graph import build_agent_web_public_graph
 from .file_locking import write_locked_json_value
 
 HOME_SUMMARY_START = "<!-- AGENT_INTERNET_SUMMARY_START -->"
@@ -186,6 +187,7 @@ def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict, assis
         state_snapshot=state_snapshot,
         assistant_snapshot=assistant_snapshot,
     )
+    public_graph = build_agent_web_public_graph(agent_web)
     pages = {
         "Home.md": home,
         "Cities.md": cities_md.rstrip() + "\n",
@@ -193,6 +195,7 @@ def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict, assis
         "Routes.md": routes_md.rstrip() + "\n",
         "Git-Federation.md": manifest_md.rstrip() + "\n",
         "Agent-Web.md": _render_agent_web_page(agent_web),
+        "Public-Graph.md": _render_public_graph_page(public_graph),
         "Lineage.md": _render_lineage_page(current_lineage=current_lineage, lineage_records=lineage_records),
     }
     if assistant_snapshot:
@@ -284,6 +287,28 @@ def _render_agent_web_page(manifest: dict) -> str:
     for link in manifest.get("links", []):
         lines.append(f"- `{link.get('rel', '')}` → `{link.get('href', '')}` [{link.get('kind', '')}]")
     lines.extend(["", "## Raw Manifest", "", json.dumps(manifest, indent=2, sort_keys=True)])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_public_graph_page(graph: dict) -> str:
+    stats = dict(graph.get("stats", {}))
+    lines = [
+        "# Public Graph",
+        "",
+        f"- City: `{graph.get('city_id', '')}`",
+        f"- Root Node: `{graph.get('root_node_id', '')}`",
+        f"- Nodes: `{stats.get('node_count', 0)}`",
+        f"- Edges: `{stats.get('edge_count', 0)}`",
+        "",
+        "## Nodes",
+        "",
+    ]
+    for node in graph.get("nodes", [])[:20]:
+        lines.append(f"- `{node.get('node_id', '')}` ({node.get('kind', '')}) → `{node.get('label', '')}`")
+    lines.extend(["", "## Edges", ""])
+    for edge in graph.get("edges", [])[:30]:
+        lines.append(f"- `{edge.get('kind', '')}`: `{edge.get('source_id', '')}` → `{edge.get('target_id', '')}`")
+    lines.extend(["", "## Raw Graph", "", json.dumps(graph, indent=2, sort_keys=True)])
     return "\n".join(lines).rstrip() + "\n"
 
 

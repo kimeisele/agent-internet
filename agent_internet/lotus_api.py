@@ -6,6 +6,7 @@ import time
 from dataclasses import asdict, dataclass
 
 from .agent_web import build_agent_web_manifest_for_plane
+from .agent_web_graph import build_agent_web_public_graph_for_plane
 from .agent_web_navigation import read_agent_web_document_for_plane
 from .assistant_surface import assistant_surface_snapshot_from_repo_root
 from .control_plane import AgentInternetControlPlane
@@ -141,6 +142,16 @@ class LotusControlPlaneAPI:
                 heartbeat_source=str(payload.get("heartbeat_source", "steward-protocol/mahamantra")),
             )
             return {"token_id": token.token_id, "agent_web_manifest": manifest}
+        if action == "agent_web_graph":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            graph = build_agent_web_public_graph_for_plane(
+                payload["root"],
+                plane=self.plane,
+                city_id=payload.get("city_id"),
+                assistant_id=str(payload.get("assistant_id", "moltbook_assistant")),
+                heartbeat_source=str(payload.get("heartbeat_source", "steward-protocol/mahamantra")),
+            )
+            return {"token_id": token.token_id, "agent_web_graph": graph}
         if action == "agent_web_document":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             document = read_agent_web_document_for_plane(

@@ -106,7 +106,7 @@ class AgentCityPeer:
                 self.contract.git_federation_manifest_path,
                 peer_descriptor=payload,
                 remote=remote,
-                shared_pages=("Home.md", "Cities.md", "Services.md", "Routes.md", "Git-Federation.md", "Agent-Web.md"),
+                shared_pages=("Home.md", "Cities.md", "Services.md", "Routes.md", "Git-Federation.md", "Agent-Web.md", "Public-Graph.md"),
             )
         write_locked_json_value(self.contract.peer_descriptor_path, payload)
         return payload
