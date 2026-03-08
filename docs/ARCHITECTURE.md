@@ -43,6 +43,7 @@ These concepts belong to discovery, allocation, visibility, and policy.
 They do **not** replace `Nadi`, `MahaHeader`, or the underlying message bus.
 
 See `docs/COMMONS_MODEL_V1.md` for the first concrete civic model draft.
+See `docs/PUBLIC_EDGE_ARCHITECTURE.md` for the public ingress split.
 
 ### Phase 0
 
