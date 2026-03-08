@@ -241,6 +241,16 @@ class LotusApiDaemon:
                         "index_path": _query_param(query, "index_path") or "data/control_plane/agent_web_federated_index.json",
                     },
                 )
+            if method == "GET" and path == "/v1/lotus/agent-web-semantic-neighbors":
+                return 200, self._call(
+                    token,
+                    "agent_web_semantic_neighbors",
+                    {
+                        "index_path": _query_param(query, "index_path") or "data/control_plane/agent_web_federated_index.json",
+                        "record_id": _require_query_param(query, "record_id"),
+                        "limit": int(_query_param(query, "limit") or "5"),
+                    },
+                )
             if method == "GET" and path == "/v1/lotus/agent-web-federated-search":
                 return 200, self._call(
                     token,

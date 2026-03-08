@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 from .agent_web_index import search_agent_web_index
+from .agent_web_semantic_graph import build_agent_web_semantic_graph, normalize_agent_web_semantic_graph
 from .agent_web_semantic_overlay import expand_query_with_agent_web_semantic_overlay, load_agent_web_semantic_overlay
 from .agent_web_source_registry import (
     DEFAULT_AGENT_WEB_SOURCE_REGISTRY_PATH,
@@ -26,6 +27,8 @@ def refresh_agent_web_federated_index(
     *,
     registry_path: Path | str = DEFAULT_AGENT_WEB_SOURCE_REGISTRY_PATH,
     state_snapshot: dict,
+    semantic_overlay: dict | None = None,
+    wordnet_bridge: dict | None = None,
     assistant_id: str = "moltbook_assistant",
     heartbeat_source: str = "steward-protocol/mahamantra",
     now: float | None = None,
@@ -37,6 +40,7 @@ def refresh_agent_web_federated_index(
         heartbeat_source=heartbeat_source,
     )
     refreshed_at = float(time.time() if now is None else now)
+    records = [dict(item) for item in crawl.get("aggregate_index", {}).get("records", [])]
     payload = _normalize_federated_index(
         {
             "kind": "agent_web_federated_index",
@@ -45,8 +49,13 @@ def refresh_agent_web_federated_index(
             "registry": dict(crawl.get("registry", {})),
             "sources": [dict(item) for item in crawl.get("sources", [])],
             "errors": [dict(item) for item in crawl.get("errors", [])],
-            "records": [dict(item) for item in crawl.get("aggregate_index", {}).get("records", [])],
-            "semantic_extensions": _default_semantic_extensions(),
+            "records": records,
+            "semantic_graph": build_agent_web_semantic_graph(records, semantic_overlay=semantic_overlay, wordnet_bridge=wordnet_bridge),
+            "semantic_extensions": {
+                **_default_semantic_extensions(),
+                "overlay_bridge_count": int(dict(semantic_overlay or {}).get("stats", {}).get("bridge_count", 0)),
+                "wordnet_bridge_available": bool(dict(wordnet_bridge or {}).get("available", False)),
+            },
         },
     )
     write_locked_json_value(Path(path), payload)
@@ -58,6 +67,8 @@ def refresh_agent_web_federated_index_for_plane(
     *,
     registry_path: Path | str = DEFAULT_AGENT_WEB_SOURCE_REGISTRY_PATH,
     plane: object,
+    semantic_overlay: dict | None = None,
+    wordnet_bridge: dict | None = None,
     assistant_id: str = "moltbook_assistant",
     heartbeat_source: str = "steward-protocol/mahamantra",
     now: float | None = None,
@@ -66,6 +77,8 @@ def refresh_agent_web_federated_index_for_plane(
         path,
         registry_path=registry_path,
         state_snapshot=snapshot_control_plane(plane),
+        semantic_overlay=semantic_overlay,
+        wordnet_bridge=wordnet_bridge,
         assistant_id=assistant_id,
         heartbeat_source=heartbeat_source,
         now=now,
@@ -90,18 +103,22 @@ def search_agent_web_federated_index(
         expanded_terms=list(expansion.get("expanded_terms", [])),
         expanded_term_weights={str(item.get("term", "")): float(item.get("weight", 0.0)) for item in expansion.get("weighted_expanded_terms", [])},
     )
+    semantic_graph = normalize_agent_web_semantic_graph(index.get("semantic_graph", {}), records=[dict(item) for item in index.get("records", []) if isinstance(item, dict)])
+    annotated_results = [_annotate_federated_search_result(dict(result), query=str(query), expansion=expansion, semantic_graph=semantic_graph) for result in search.get("results", [])]
     semantic_extensions = {
         **dict(index.get("semantic_extensions", {})),
         "overlay_bridge_count": int(dict(overlay.get("stats", {})).get("bridge_count", 0)),
         "overlay_enabled_bridge_count": int(dict(overlay.get("stats", {})).get("enabled_bridge_count", 0)),
         "wordnet_bridge_available": bool(active_wordnet_bridge.get("available", False)),
         "wordnet_bridge_source": str(active_wordnet_bridge.get("source", "unavailable")),
+        "semantic_graph_edge_count": int(semantic_graph.get("stats", {}).get("edge_count", 0)),
+        "semantic_graph_connected_record_count": int(semantic_graph.get("stats", {}).get("connected_record_count", 0)),
     }
     return {
         "kind": "agent_web_federated_search_results",
         "version": 1,
         "query": str(search.get("query", "")),
-        "results": list(search.get("results", [])),
+        "results": annotated_results,
         "query_interpretation": {
             "raw_query": str(query),
             "input_terms": list(expansion.get("input_terms", [])),
@@ -113,7 +130,7 @@ def search_agent_web_federated_index(
         "wordnet_bridge": dict(expansion.get("wordnet_bridge", {})),
         "semantic_extensions": semantic_extensions,
         "stats": {
-            "result_count": int(search.get("stats", {}).get("result_count", 0)),
+            "result_count": len(annotated_results),
             "indexed_record_count": int(search.get("stats", {}).get("indexed_record_count", 0)),
             "source_count": int(index.get("stats", {}).get("source_count", 0)),
             "error_count": int(index.get("stats", {}).get("error_count", 0)),
@@ -148,6 +165,7 @@ def _default_federated_index() -> dict:
         "sources": [],
         "errors": [],
         "records": [],
+        "semantic_graph": normalize_agent_web_semantic_graph({}, records=[]),
         "semantic_extensions": _default_semantic_extensions(),
         "stats": {"record_count": 0, "source_count": 0, "error_count": 0, "kind_counts": {}, "source_city_ids": []},
     }
@@ -168,6 +186,7 @@ def _normalize_federated_index(payload: object) -> dict:
     sources = [dict(item) for item in raw.get("sources", []) if isinstance(item, dict)]
     errors = [dict(item) for item in raw.get("errors", []) if isinstance(item, dict)]
     registry = dict(raw.get("registry", {})) if isinstance(raw.get("registry", {}), dict) else {}
+    semantic_graph = normalize_agent_web_semantic_graph(raw.get("semantic_graph", {}), records=records)
     semantic_extensions = dict(raw.get("semantic_extensions", {})) if isinstance(raw.get("semantic_extensions", {}), dict) else {}
     return {
         "kind": "agent_web_federated_index",
@@ -190,6 +209,7 @@ def _normalize_federated_index(payload: object) -> dict:
                 str(item.get("record_id", "")),
             ),
         ),
+        "semantic_graph": semantic_graph,
         "semantic_extensions": {
             **_default_semantic_extensions(),
             **semantic_extensions,
@@ -204,6 +224,37 @@ def _normalize_federated_index(payload: object) -> dict:
             "source_city_ids": sorted({str(item.get("source_city_id", "")) for item in records if str(item.get("source_city_id", ""))}),
         },
     }
+
+
+def _annotate_federated_search_result(result: dict[str, object], *, query: str, expansion: dict, semantic_graph: dict) -> dict[str, object]:
+    record_text = _record_text(result)
+    record_terms = _tokenize_text(record_text)
+    input_terms = {str(item) for item in expansion.get("input_terms", []) if str(item)}
+    direct_matches = sorted({str(term) for term in result.get("matched_terms", []) if str(term) in input_terms})
+    expanded_term_matches = []
+    for item in expansion.get("weighted_expanded_terms", []):
+        term = str(dict(item).get("term", "")).strip().lower()
+        if not term:
+            continue
+        term_tokens = _tokenize_text(term)
+        if term in record_text or (term_tokens and term_tokens & record_terms):
+            expanded_term_matches.append({"term": term, "weight": round(float(dict(item).get("weight", 0.0) or 0.0), 6), "source_bridge_ids": list(dict(item).get("source_bridge_ids", []))})
+    semantic_bridge_matches = []
+    for bridge in expansion.get("matched_bridges", []):
+        bridge_payload = dict(bridge)
+        matched_phrases = sorted({phrase for phrase in [*bridge_payload.get("terms", []), *bridge_payload.get("expansions", [])] if str(phrase).strip() and str(phrase).strip().lower() in record_text})
+        if matched_phrases:
+            semantic_bridge_matches.append({"bridge_id": str(bridge_payload.get("bridge_id", "")), "bridge_kind": str(bridge_payload.get("bridge_kind", "")), "matched_phrases": matched_phrases, "effective_weight": round(float(bridge_payload.get("effective_weight", 0.0) or 0.0), 6)})
+    semantic_neighbors = list(dict(semantic_graph.get("neighbors_by_record_id", {})).get(str(result.get("record_id", "")), []))
+    return {**result, "why_matched": {"title_exact_match": bool(query and query.lower() in str(result.get("title", "")).lower()), "summary_exact_match": bool(query and query.lower() in str(result.get("summary", "")).lower()), "direct_term_matches": direct_matches, "expanded_term_matches": expanded_term_matches[:4], "semantic_bridge_matches": semantic_bridge_matches[:3], "semantic_neighbor_count": len(semantic_neighbors), "top_semantic_neighbors": semantic_neighbors[:2]}}
+
+
+def _record_text(record: dict[str, object]) -> str:
+    return " ".join([str(record.get("title", "")).lower(), str(record.get("summary", "")).lower(), *[str(item).lower() for item in record.get("tags", [])], *[str(item).lower() for item in record.get("terms", [])]])
+
+
+def _tokenize_text(value: str) -> set[str]:
+    return {token for token in value.lower().split() if token}
 
 
 def _count_by_kind(records: list[dict[str, object]]) -> dict[str, int]:

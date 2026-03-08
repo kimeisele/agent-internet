@@ -628,14 +628,20 @@ def test_cli_agent_web_federated_index_refresh_and_search(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["stats"]["bridge_count"] == 1
 
-    assert main(["agent-web-federated-index-refresh", "--index-path", str(index_path), "--registry-path", str(registry_path), "--state-path", str(state_path)]) == 0
+    assert main(["agent-web-federated-index-refresh", "--index-path", str(index_path), "--registry-path", str(registry_path), "--state-path", str(state_path), "--overlay-path", str(overlay_path), "--wordnet-path", str(wordnet_path)]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["kind"] == "agent_web_federated_index"
     assert payload["stats"]["source_count"] == 2
+    assert payload["semantic_graph"]["stats"]["edge_count"] > 0
 
     assert main(["agent-web-federated-index", "--index-path", str(index_path)]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["semantic_extensions"]["status"] == "ready_for_overlay"
+    semantic_record_id = payload["records"][0]["record_id"]
+
+    assert main(["agent-web-semantic-neighbors", "--index-path", str(index_path), "--record-id", semantic_record_id, "--limit", "2"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "agent_web_semantic_neighbors"
 
     assert main(["agent-web-semantic-expand", "--overlay-path", str(overlay_path), "--wordnet-path", str(wordnet_path), "--query", "bazaar search"]) == 0
     payload = json.loads(capsys.readouterr().out)
@@ -647,6 +653,7 @@ def test_cli_agent_web_federated_index_refresh_and_search(tmp_path, capsys):
     assert payload["kind"] == "agent_web_federated_search_results"
     assert payload["results"][0]["source_city_id"] == "city-b"
     assert payload["matched_semantic_bridges"][0]["bridge_kind"] == "wordnet"
+    assert payload["results"][0]["why_matched"]["expanded_term_matches"]
 
 
 def test_cli_agent_web_read(tmp_path, capsys):

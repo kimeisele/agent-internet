@@ -552,12 +552,17 @@ def test_lotus_api_refreshes_and_reads_federated_index(tmp_path):
     api = LotusControlPlaneAPI(plane)
     issued = api.issue_token(subject="operator", scopes=(LotusApiScope.READ.value,), token_secret="secret")
 
-    refresh_response = api.call(bearer_token=issued.secret, action="refresh_agent_web_federated_index", params={"index_path": str(index_path), "registry_path": str(registry_path), "now": 99.0})
+    refresh_response = api.call(bearer_token=issued.secret, action="refresh_agent_web_federated_index", params={"index_path": str(index_path), "registry_path": str(registry_path), "overlay_path": str(overlay_path), "wordnet_path": str(wordnet_path), "now": 99.0})
     assert refresh_response["agent_web_federated_index"]["refreshed_at"] == 99.0
     assert refresh_response["agent_web_federated_index"]["stats"]["source_count"] == 2
+    assert refresh_response["agent_web_federated_index"]["semantic_graph"]["stats"]["edge_count"] > 0
 
     read_response = api.call(bearer_token=issued.secret, action="agent_web_federated_index", params={"index_path": str(index_path)})
     assert read_response["agent_web_federated_index"]["semantic_extensions"]["status"] == "ready_for_overlay"
+    semantic_record_id = read_response["agent_web_federated_index"]["records"][0]["record_id"]
+
+    neighbors_response = api.call(bearer_token=issued.secret, action="agent_web_semantic_neighbors", params={"index_path": str(index_path), "record_id": semantic_record_id, "limit": 2})
+    assert neighbors_response["agent_web_semantic_neighbors"]["kind"] == "agent_web_semantic_neighbors"
 
     overlay_response = api.call(bearer_token=issued.secret, action="agent_web_semantic_overlay", params={"overlay_path": str(overlay_path)})
     assert overlay_response["agent_web_semantic_overlay"]["stats"]["bridge_count"] == 1
@@ -568,6 +573,7 @@ def test_lotus_api_refreshes_and_reads_federated_index(tmp_path):
     search_response = api.call(bearer_token=issued.secret, action="agent_web_federated_search", params={"index_path": str(index_path), "overlay_path": str(overlay_path), "wordnet_path": str(wordnet_path), "query": "bazaar", "limit": 3})
     assert search_response["agent_web_federated_search"]["results"][0]["source_city_id"] == "city-b"
     assert search_response["agent_web_federated_search"]["wordnet_bridge"]["available"] is True
+    assert search_response["agent_web_federated_search"]["results"][0]["why_matched"]["semantic_bridge_matches"]
 
 
 def test_lotus_api_returns_agent_web_document(tmp_path):

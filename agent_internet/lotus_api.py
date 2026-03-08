@@ -27,6 +27,7 @@ from .agent_web_semantic_overlay import (
     load_agent_web_semantic_overlay,
     refresh_agent_web_semantic_overlay,
 )
+from .agent_web_semantic_graph import read_agent_web_semantic_neighbors
 from .agent_web_wordnet_bridge import load_agent_web_wordnet_bridge
 from .assistant_surface import assistant_surface_snapshot_from_repo_root
 from .control_plane import AgentInternetControlPlane
@@ -252,6 +253,8 @@ class LotusControlPlaneAPI:
                 str(payload.get("index_path", DEFAULT_AGENT_WEB_FEDERATED_INDEX_PATH)),
                 registry_path=str(payload.get("registry_path", "data/control_plane/agent_web_source_registry.json")),
                 plane=self.plane,
+                semantic_overlay=load_agent_web_semantic_overlay(str(payload.get("overlay_path", DEFAULT_AGENT_WEB_SEMANTIC_OVERLAY_PATH))),
+                wordnet_bridge=None if payload.get("wordnet_path") in (None, "") else load_agent_web_wordnet_bridge(payload.get("wordnet_path")),
                 assistant_id=str(payload.get("assistant_id", "moltbook_assistant")),
                 heartbeat_source=str(payload.get("heartbeat_source", "steward-protocol/mahamantra")),
                 now=payload.get("now"),
@@ -261,6 +264,11 @@ class LotusControlPlaneAPI:
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             index = load_agent_web_federated_index(str(payload.get("index_path", DEFAULT_AGENT_WEB_FEDERATED_INDEX_PATH)))
             return {"token_id": token.token_id, "agent_web_federated_index": index}
+        if action == "agent_web_semantic_neighbors":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            index = load_agent_web_federated_index(str(payload.get("index_path", DEFAULT_AGENT_WEB_FEDERATED_INDEX_PATH)))
+            neighbors = read_agent_web_semantic_neighbors(index, record_id=str(payload.get("record_id", "")), limit=int(payload.get("limit", 5) or 5))
+            return {"token_id": token.token_id, "agent_web_semantic_neighbors": neighbors}
         if action == "agent_web_federated_search":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             index = load_agent_web_federated_index(str(payload.get("index_path", DEFAULT_AGENT_WEB_FEDERATED_INDEX_PATH)))

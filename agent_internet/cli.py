@@ -13,6 +13,7 @@ from .agent_web_federated_index import (
     refresh_agent_web_federated_index,
     search_agent_web_federated_index,
 )
+from .agent_web_semantic_graph import read_agent_web_semantic_neighbors
 from .agent_web_graph import build_agent_web_public_graph_from_repo_root
 from .agent_web_index import build_agent_web_search_index_from_repo_root, search_agent_web_index
 from .agent_web_navigation import read_agent_web_document_from_repo_root
@@ -205,6 +206,8 @@ def build_parser() -> argparse.ArgumentParser:
     agent_web_federated_index_refresh.add_argument("--index-path", default=DEFAULT_AGENT_WEB_FEDERATED_INDEX_PATH)
     agent_web_federated_index_refresh.add_argument("--registry-path", default=DEFAULT_AGENT_WEB_SOURCE_REGISTRY_PATH)
     agent_web_federated_index_refresh.add_argument("--state-path", default="data/control_plane/state.json")
+    agent_web_federated_index_refresh.add_argument("--overlay-path", default=DEFAULT_AGENT_WEB_SEMANTIC_OVERLAY_PATH)
+    agent_web_federated_index_refresh.add_argument("--wordnet-path")
     agent_web_federated_index_refresh.add_argument("--assistant-id", default="moltbook_assistant")
     agent_web_federated_index_refresh.add_argument("--heartbeat-source", default="steward-protocol/mahamantra")
 
@@ -263,6 +266,14 @@ def build_parser() -> argparse.ArgumentParser:
     agent_web_semantic_expand.add_argument("--overlay-path", default=DEFAULT_AGENT_WEB_SEMANTIC_OVERLAY_PATH)
     agent_web_semantic_expand.add_argument("--wordnet-path")
     agent_web_semantic_expand.add_argument("--query", required=True)
+
+    agent_web_semantic_neighbors = subparsers.add_parser(
+        "agent-web-semantic-neighbors",
+        help="Read persisted semantic neighbors for a federated index record",
+    )
+    agent_web_semantic_neighbors.add_argument("--index-path", default=DEFAULT_AGENT_WEB_FEDERATED_INDEX_PATH)
+    agent_web_semantic_neighbors.add_argument("--record-id", required=True)
+    agent_web_semantic_neighbors.add_argument("--limit", type=int, default=5)
 
     agent_web_read = subparsers.add_parser(
         "agent-web-read",
@@ -863,6 +874,8 @@ def cmd_agent_web_federated_index_refresh(args: argparse.Namespace) -> int:
         args.index_path,
         registry_path=args.registry_path,
         state_snapshot=snapshot_control_plane(plane),
+        semantic_overlay=load_agent_web_semantic_overlay(args.overlay_path),
+        wordnet_bridge=None if not args.wordnet_path else load_agent_web_wordnet_bridge(args.wordnet_path),
         assistant_id=args.assistant_id,
         heartbeat_source=args.heartbeat_source,
     )
@@ -926,6 +939,16 @@ def cmd_agent_web_semantic_expand(args: argparse.Namespace) -> int:
         load_agent_web_semantic_overlay(args.overlay_path),
         query=args.query,
         wordnet_bridge=load_agent_web_wordnet_bridge(args.wordnet_path),
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_agent_web_semantic_neighbors(args: argparse.Namespace) -> int:
+    payload = read_agent_web_semantic_neighbors(
+        load_agent_web_federated_index(args.index_path),
+        record_id=args.record_id,
+        limit=args.limit,
     )
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
@@ -1566,6 +1589,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_agent_web_semantic_bridge_remove(args)
     if args.command == "agent-web-semantic-expand":
         return cmd_agent_web_semantic_expand(args)
+    if args.command == "agent-web-semantic-neighbors":
+        return cmd_agent_web_semantic_neighbors(args)
     if args.command == "agent-web-read":
         return cmd_agent_web_read(args)
     if args.command == "lotus-show-steward-protocol":

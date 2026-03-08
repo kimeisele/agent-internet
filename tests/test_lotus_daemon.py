@@ -623,13 +623,19 @@ def test_lotus_daemon_refreshes_and_reads_federated_index_http_api(tmp_path):
     daemon = LotusApiDaemon(state_path=store.path, port=0)
     daemon.start_in_thread()
     try:
-        status, payload = _request_json(daemon.base_url, "/v1/lotus/agent-web-federated-index/refresh", method="POST", token=root_secret, payload={"index_path": str(index_path), "registry_path": str(registry_path), "now": 123.0})
+        status, payload = _request_json(daemon.base_url, "/v1/lotus/agent-web-federated-index/refresh", method="POST", token=root_secret, payload={"index_path": str(index_path), "registry_path": str(registry_path), "overlay_path": str(overlay_path), "wordnet_path": str(wordnet_path), "now": 123.0})
         assert status == 200
         assert payload["agent_web_federated_index"]["refreshed_at"] == 123.0
+        assert payload["agent_web_federated_index"]["semantic_graph"]["stats"]["edge_count"] > 0
 
         status, payload = _request_json(daemon.base_url, f"/v1/lotus/agent-web-federated-index?index_path={index_path}", token=root_secret)
         assert status == 200
         assert payload["agent_web_federated_index"]["stats"]["source_count"] == 2
+        semantic_record_id = payload["agent_web_federated_index"]["records"][0]["record_id"]
+
+        status, payload = _request_json(daemon.base_url, f"/v1/lotus/agent-web-semantic-neighbors?index_path={index_path}&record_id={semantic_record_id}&limit=2", token=root_secret)
+        assert status == 200
+        assert payload["agent_web_semantic_neighbors"]["kind"] == "agent_web_semantic_neighbors"
 
         status, payload = _request_json(daemon.base_url, f"/v1/lotus/agent-web-semantic-overlay?overlay_path={overlay_path}", token=root_secret)
         assert status == 200
@@ -643,6 +649,7 @@ def test_lotus_daemon_refreshes_and_reads_federated_index_http_api(tmp_path):
         assert status == 200
         assert payload["agent_web_federated_search"]["results"][0]["source_city_id"] == "city-b"
         assert payload["agent_web_federated_search"]["wordnet_bridge"]["available"] is True
+        assert payload["agent_web_federated_search"]["results"][0]["why_matched"]["expanded_term_matches"]
     finally:
         daemon.shutdown()
 

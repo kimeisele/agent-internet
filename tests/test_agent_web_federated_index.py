@@ -5,6 +5,7 @@ from agent_internet.agent_web_federated_index import (
     refresh_agent_web_federated_index,
     search_agent_web_federated_index,
 )
+from agent_internet.agent_web_semantic_graph import read_agent_web_semantic_neighbors
 from agent_internet.agent_web_semantic_overlay import upsert_agent_web_semantic_bridge, load_agent_web_semantic_overlay
 from agent_internet.agent_web_wordnet_bridge import load_agent_web_wordnet_bridge
 from agent_internet.agent_web_source_registry import upsert_agent_web_source_registry_entry
@@ -41,6 +42,8 @@ def test_refresh_and_search_agent_web_federated_index(tmp_path):
             "routes": [],
             "fork_lineage": [],
         },
+        semantic_overlay=load_agent_web_semantic_overlay(overlay_path),
+        wordnet_bridge=load_agent_web_wordnet_bridge(wordnet_path),
         now=42.0,
     )
 
@@ -48,9 +51,12 @@ def test_refresh_and_search_agent_web_federated_index(tmp_path):
     assert index["refreshed_at"] == 42.0
     assert index["stats"]["source_count"] == 2
     assert index["semantic_extensions"]["status"] == "ready_for_overlay"
+    assert index["semantic_graph"]["stats"]["edge_count"] > 0
 
     loaded = load_agent_web_federated_index(index_path)
     assert loaded["stats"]["record_count"] == index["stats"]["record_count"]
+    neighbors = read_agent_web_semantic_neighbors(loaded, record_id=loaded["records"][0]["record_id"], limit=3)
+    assert neighbors["kind"] == "agent_web_semantic_neighbors"
 
     results = search_agent_web_federated_index(
         loaded,
@@ -63,6 +69,7 @@ def test_refresh_and_search_agent_web_federated_index(tmp_path):
     assert results["results"][0]["source_city_id"] == "city-b"
     assert results["query_interpretation"]["semantic_bridges_applied"] == ["wordnet:marketplace"]
     assert results["wordnet_bridge"]["available"] is True
+    assert results["results"][0]["why_matched"]["semantic_bridge_matches"]
 
 
 def _write_repo(repo_root, *, city_id: str, repo: str, campaign_title: str):
