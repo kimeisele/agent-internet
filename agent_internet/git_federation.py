@@ -196,13 +196,31 @@ def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict, assis
         summary_lines.append(f"- Known Lineage Records: `{len(lineage_records)}`")
     summary = "\n".join(summary_lines)
     home = _replace_block("# Agent Internet Federation\n\n", HOME_SUMMARY_START, HOME_SUMMARY_END, summary)
-    cities_md = "# Cities\n\n" + "\n".join(f"- `{item['city_id']}` → `{item['repo']}`" for item in cities)
-    services_md = "# Services\n\n" + "\n".join(
-        f"- `{item['service_id']}` → `{item['public_handle']}` @ `{item['location']}`" for item in services
+    assistant_page_snapshot = {
+        "city_id": identity.get("city_id", ""),
+        "repo": identity.get("repo", ""),
+        **dict(assistant_snapshot or {}),
+    }
+    cities_md = _render_index_page(
+        title="Cities",
+        count=len(cities),
+        entries=[f"- `{item['city_id']}` → `{item['repo']}`" for item in cities],
+        empty_message="No cities have published themselves into this surface yet.",
     )
-    routes_md = "# Routes\n\n" + "\n".join(
-        f"- `{item['destination_prefix']}` via `{item['next_hop_city_id']}` ({item['nadi_type']}/{item['priority']})"
-        for item in routes
+    services_md = _render_index_page(
+        title="Services",
+        count=len(services),
+        entries=[f"- `{item['service_id']}` → `{item['public_handle']}` @ `{item['location']}`" for item in services],
+        empty_message="No services are published yet.",
+    )
+    routes_md = _render_index_page(
+        title="Routes",
+        count=len(routes),
+        entries=[
+            f"- `{item['destination_prefix']}` via `{item['next_hop_city_id']}` ({item['nadi_type']}/{item['priority']})"
+            for item in routes
+        ],
+        empty_message="No routes are published yet.",
     )
     manifest_md = "# Git Federation\n\n" + json.dumps(git_manifest, indent=2, sort_keys=True)
     agent_web = build_agent_web_manifest(
@@ -214,11 +232,12 @@ def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict, assis
     search_index = build_agent_web_search_index(agent_web, public_graph)
     pages = {
         "Home.md": home,
-        "Cities.md": cities_md.rstrip() + "\n",
-        "Services.md": services_md.rstrip() + "\n",
-        "Routes.md": routes_md.rstrip() + "\n",
+        "Cities.md": cities_md,
+        "Services.md": services_md,
+        "Routes.md": routes_md,
         "Git-Federation.md": manifest_md.rstrip() + "\n",
         "Agent-Web.md": _render_agent_web_page(agent_web),
+        "Assistant-Surface.md": _render_assistant_surface_page(assistant_page_snapshot),
         "Semantic-Capabilities.md": render_agent_web_semantic_capability_page(dict(agent_web.get("semantic_capabilities", {}))),
         "Semantic-Contracts.md": render_agent_web_semantic_contract_page(dict(agent_web.get("semantic_contracts", {}))),
         "Repo-Graph-Capabilities.md": render_agent_web_repo_graph_capability_page(dict(agent_web.get("repo_graph_capabilities", {}))),
@@ -226,10 +245,19 @@ def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict, assis
         "Public-Graph.md": _render_public_graph_page(public_graph),
         "Search-Index.md": _render_search_index_page(search_index),
         "Lineage.md": _render_lineage_page(current_lineage=current_lineage, lineage_records=lineage_records),
+        "_Sidebar.md": _render_sidebar_page(),
+        "_Footer.md": _render_footer_page(),
     }
-    if assistant_snapshot:
-        pages["Assistant-Surface.md"] = _render_assistant_surface_page(assistant_snapshot)
     return pages
+
+
+def _render_index_page(*, title: str, count: int, entries: list[str], empty_message: str) -> str:
+    lines = [f"# {title}", "", f"- Published entries: `{count}`", ""]
+    if entries:
+        lines.extend(["## Entries", "", *entries])
+    else:
+        lines.extend([empty_message, ""])
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def _render_assistant_surface_page(assistant_snapshot: dict) -> str:
@@ -253,6 +281,8 @@ def _render_assistant_surface_page(assistant_snapshot: dict) -> str:
         f"- Last Post Age (s): `{assistant_snapshot.get('last_post_age_s')}`",
         f"- Series Cursor: `{assistant_snapshot.get('series_cursor', -1)}`",
     ]
+    if not str(assistant_snapshot.get("assistant_id", "")).strip():
+        lines.extend(["", "No assistant snapshot is published yet for this city."])
     if campaigns:
         lines.extend(["", "## Active Campaigns", ""])
         for campaign in campaigns:
@@ -266,6 +296,32 @@ def _render_assistant_surface_page(assistant_snapshot: dict) -> str:
                 lines.append(f"  - Gaps: {', '.join(str(item) for item in gaps[:3])}")
     lines.extend(["", "## Raw Snapshot", "", json.dumps(assistant_snapshot, indent=2, sort_keys=True)])
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_sidebar_page() -> str:
+    links = [
+        ("Home", "Home"),
+        ("Agent Web", "Agent-Web"),
+        ("Assistant Surface", "Assistant-Surface"),
+        ("Public Graph", "Public-Graph"),
+        ("Repo Graph Capabilities", "Repo-Graph-Capabilities"),
+        ("Repo Graph Contracts", "Repo-Graph-Contracts"),
+        ("Semantic Capabilities", "Semantic-Capabilities"),
+        ("Semantic Contracts", "Semantic-Contracts"),
+        ("Search Index", "Search-Index"),
+        ("Cities", "Cities"),
+        ("Services", "Services"),
+        ("Routes", "Routes"),
+        ("Lineage", "Lineage"),
+        ("Git Federation", "Git-Federation"),
+    ]
+    lines = ["## Agent Internet", ""]
+    lines.extend(f"- [[{label}|{target}]]" for label, target in links)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_footer_page() -> str:
+    return "Agent Internet · generated public membrane\n"
 
 
 def _render_agent_web_page(manifest: dict) -> str:

@@ -43,6 +43,7 @@ def build_agent_internet_peer_descriptor(root: Path | str, *, city_id: str = "ag
             "city_id": city_id,
             "shared_pages": [
                 "Home.md",
+                "Assistant-Surface.md",
                 "Git-Federation.md",
                 "Agent-Web.md",
                 "Semantic-Capabilities.md",
