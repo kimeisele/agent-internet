@@ -17,11 +17,14 @@ def _atomic_write_json(path: Path, payload: object) -> None:
 
 
 @contextmanager
-def locked_file(path: Path, *, exclusive: bool):
+def locked_file(path: Path, *, exclusive: bool, blocking: bool = True):
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.with_suffix(path.suffix + ".lock")
     with lock_path.open("a+") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+        if not blocking:
+            mode |= fcntl.LOCK_NB
+        fcntl.flock(handle.fileno(), mode)
         try:
             yield
         finally:

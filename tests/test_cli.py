@@ -282,6 +282,72 @@ def test_cli_projection_reconcile_once(tmp_path, capsys):
     assert plane.registry.get_source_authority_feed(STEWARD_AUTHORITY_BUNDLE_FEED_ID).locator == str(bundle_path.resolve())
 
 
+def test_cli_projection_reconcile_status_and_pause_resume(tmp_path, capsys):
+    _repo_root, wiki_remote = _init_git_repo(tmp_path)
+    state_path = tmp_path / "state" / "control_plane.json"
+    bundle_path = _write_steward_authority_bundle(tmp_path)
+    store = ControlPlaneStateStore(path=state_path)
+
+    def _update(plane):
+        plane.bootstrap_steward_public_wiki_contract(now=100.0)
+        binding = plane.registry.get_projection_binding(STEWARD_PUBLIC_WIKI_BINDING_ID)
+        plane.upsert_projection_binding(replace(binding, target_locator=str(wiki_remote)))
+        plane.bootstrap_steward_public_wiki_feed(bundle_path=bundle_path, now=101.0)
+
+    store.update(_update)
+
+    assert main(["projection-feed-pause", "--state-path", str(state_path), "--feed-id", STEWARD_AUTHORITY_BUNDLE_FEED_ID]) == 0
+    paused = json.loads(capsys.readouterr().out)
+    assert paused["enabled"] is False
+
+    assert main(["projection-reconcile-status", "--state-path", str(state_path)]) == 0
+    status_payload = json.loads(capsys.readouterr().out)
+    assert status_payload["source_authority_feeds"][0]["paused"] is True
+
+    assert main(["projection-feed-resume", "--state-path", str(state_path), "--feed-id", STEWARD_AUTHORITY_BUNDLE_FEED_ID]) == 0
+    resumed = json.loads(capsys.readouterr().out)
+    assert resumed["enabled"] is True
+
+
+def test_cli_projection_reconcile_daemon(tmp_path, capsys, monkeypatch):
+    repo_root, wiki_remote = _init_git_repo(tmp_path)
+    state_path = tmp_path / "state" / "control_plane.json"
+    bundle_path = _write_steward_authority_bundle(tmp_path)
+    store = ControlPlaneStateStore(path=state_path)
+
+    def _update(plane):
+        plane.bootstrap_steward_public_wiki_contract(now=100.0)
+        binding = plane.registry.get_projection_binding(STEWARD_PUBLIC_WIKI_BINDING_ID)
+        plane.upsert_projection_binding(replace(binding, target_locator=str(wiki_remote)))
+
+    store.update(_update)
+    monkeypatch.setattr("agent_internet.projection_reconciler.time.sleep", lambda *_args, **_kwargs: None)
+
+    assert main(
+        [
+            "projection-reconcile-daemon",
+            "--root",
+            str(repo_root),
+            "--state-path",
+            str(state_path),
+            "--bundle-path",
+            str(bundle_path),
+            "--wiki-repo-url",
+            str(wiki_remote),
+            "--wiki-checkout-path",
+            str(tmp_path / "wiki-checkout"),
+            "--max-cycles",
+            "2",
+            "--idle-sleep-seconds",
+            "0",
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["cycles"] == 2
+    assert payload["published_count"] == 1
+
+
 def test_cli_git_federation_onboard_repo(tmp_path, capsys):
     repo_root, _wiki_remote = _init_git_repo(tmp_path)
     reports_dir = repo_root / "data" / "federation" / "reports"

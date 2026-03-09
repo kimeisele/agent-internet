@@ -280,6 +280,14 @@ class AgentInternetControlPlane:
     def upsert_source_authority_feed(self, record: SourceAuthorityFeedRecord) -> None:
         self.registry.upsert_source_authority_feed(record)
 
+    def set_source_authority_feed_enabled(self, feed_id: str, *, enabled: bool) -> SourceAuthorityFeedRecord:
+        existing = self.registry.get_source_authority_feed(feed_id)
+        if existing is None:
+            raise ValueError(f"unknown_source_authority_feed:{feed_id}")
+        updated = replace(existing, enabled=bool(enabled))
+        self.registry.upsert_source_authority_feed(updated)
+        return updated
+
     def upsert_projection_reconcile_status(self, record: ProjectionReconcileStatusRecord) -> None:
         self.registry.upsert_projection_reconcile_status(record)
 

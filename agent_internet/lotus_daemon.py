@@ -7,7 +7,8 @@ from pathlib import Path
 from threading import Thread
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from .lotus_api import LOTUS_MUTATING_ACTIONS, LotusControlPlaneAPI
+from .lotus_api import LOTUS_MUTATING_ACTIONS, LotusApiScope, LotusControlPlaneAPI
+from .projection_reconciler import ProjectionReconciler
 from .snapshot import ControlPlaneStateStore
 
 
@@ -123,6 +124,10 @@ class LotusApiDaemon:
                 return 200, self._call(token, "list_projection_bindings", {})
             if method == "GET" and path == "/v1/lotus/publication-statuses":
                 return 200, self._call(token, "list_publication_statuses", {})
+            if method == "GET" and path == "/v1/lotus/source-authority-feeds":
+                return 200, self._call(token, "list_source_authority_feeds", {})
+            if method == "GET" and path == "/v1/lotus/projection-reconcile-statuses":
+                return 200, self._call(token, "list_projection_reconcile_statuses", {})
             if method == "GET" and path == "/v1/lotus/lineage":
                 return 200, self._call(token, "list_fork_lineage", {})
             if method == "GET" and path == "/v1/lotus/intents":
@@ -411,6 +416,17 @@ class LotusApiDaemon:
                 return 200, self._call(token, "issue_token", _decode_json_object(body))
             if method == "POST" and path == "/v1/lotus/authority-bundles/import":
                 return 200, self._call(token, "import_authority_bundle", _decode_json_object(body))
+            if method == "POST" and path == "/v1/lotus/projection-reconcile/run":
+                return 200, self._call(token, "run_projection_reconcile_once", _decode_json_object(body))
+            if method == "POST" and path.startswith("/v1/lotus/source-authority-feeds/"):
+                suffix = path.removeprefix("/v1/lotus/source-authority-feeds/")
+                parts = suffix.split("/", 1)
+                if len(parts) != 2 or not parts[0] or not parts[1]:
+                    raise ValueError("invalid_source_authority_feed_path")
+                enabled = {"pause": False, "resume": True}.get(parts[1])
+                if enabled is None:
+                    raise ValueError("invalid_source_authority_feed_action")
+                return 200, self._call(token, "set_source_authority_feed_enabled", {"feed_id": unquote(parts[0]), "enabled": enabled})
             if method == "POST" and path == "/v1/lotus/intents":
                 return 200, self._call(token, "create_intent", _decode_json_object(body))
             if method == "POST" and path.startswith("/v1/lotus/intents/"):
@@ -451,6 +467,20 @@ class LotusApiDaemon:
 
     def _call(self, bearer_token: str, action: str, params: dict) -> dict:
         store = ControlPlaneStateStore(path=self.state_path)
+        if action == "run_projection_reconcile_once":
+            plane = store.load()
+            token = LotusControlPlaneAPI(plane).authenticate(bearer_token, required_scopes=(LotusApiScope.RECONCILE_WRITE.value,))
+            result = ProjectionReconciler(root=Path(params["root"]), state_path=self.state_path).run_once(
+                bundle_path=params.get("bundle_path"),
+                feed_id=str(params.get("feed_id", "steward-authority-bundle")),
+                poll_interval_seconds=int(params.get("poll_interval_seconds", 300)),
+                wiki_repo_url=params.get("wiki_repo_url"),
+                wiki_path=(None if params.get("wiki_path") in (None, "") else Path(str(params["wiki_path"]))),
+                push=bool(params.get("push", False)),
+                prune_generated=bool(params.get("prune_generated", False)),
+                force=bool(params.get("force", False)),
+            )
+            return {"token_id": token.token_id, "projection_reconcile": result}
         if action in LOTUS_MUTATING_ACTIONS:
             return store.update(
                 lambda plane: LotusControlPlaneAPI(plane).call(

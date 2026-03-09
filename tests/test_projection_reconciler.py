@@ -5,7 +5,7 @@ from hashlib import sha256
 
 from agent_internet.control_plane import STEWARD_AUTHORITY_BUNDLE_FEED_ID, STEWARD_PROTOCOL_REPO_ID, STEWARD_PUBLIC_WIKI_BINDING_ID
 from agent_internet.models import AuthorityExportKind, PublicationState
-from agent_internet.projection_reconciler import ProjectionReconciler
+from agent_internet.projection_reconciler import ProjectionReconcileDaemon, ProjectionReconciler
 from agent_internet.snapshot import ControlPlaneStateStore
 
 
@@ -124,3 +124,65 @@ def test_projection_reconciler_run_once_skips_publish_when_projection_current(tm
     assert second["reconcile_state"] == "success"
     assert second["publish_required"] is False
     assert second["published"] is False
+
+
+def test_projection_reconciler_respects_backoff_and_force(tmp_path):
+    repo_root, _wiki_remote = _init_git_workspace(tmp_path)
+    state_path = tmp_path / "state.json"
+    missing_bundle = tmp_path / "missing-bundle.json"
+    store = ControlPlaneStateStore(path=state_path)
+    store.update(lambda plane: plane.bootstrap_steward_public_wiki_feed(bundle_path=missing_bundle, now=100.0))
+    reconciler = ProjectionReconciler(root=repo_root, state_path=state_path)
+
+    first = reconciler.run_once()
+    second = reconciler.run_once()
+    forced = reconciler.run_once(force=True)
+    status = store.load().registry.get_projection_reconcile_status(STEWARD_PUBLIC_WIKI_BINDING_ID)
+
+    assert first["reconcile_state"] == "failed"
+    assert second["reconcile_state"] == "skipped"
+    assert second["last_error"] == "backoff_active"
+    assert forced["reconcile_state"] == "failed"
+    assert status.consecutive_failures == 2
+
+
+def test_projection_reconciler_skips_when_lock_held(tmp_path, monkeypatch):
+    repo_root, _wiki_remote = _init_git_workspace(tmp_path)
+    state_path = tmp_path / "state.json"
+    bundle_path = _write_steward_authority_bundle(tmp_path)
+    store = ControlPlaneStateStore(path=state_path)
+    store.update(lambda plane: plane.bootstrap_steward_public_wiki_feed(bundle_path=bundle_path, now=100.0))
+
+    class _BusyLock:
+        def __enter__(self):
+            raise BlockingIOError()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr("agent_internet.projection_reconciler.locked_file", lambda *args, **kwargs: _BusyLock())
+    result = ProjectionReconciler(root=repo_root, state_path=state_path).run_once()
+
+    assert result["reconcile_state"] == "skipped"
+    assert result["last_error"] == "reconcile_locked"
+
+
+def test_projection_reconcile_daemon_runs_bounded_cycles(tmp_path, monkeypatch):
+    repo_root, wiki_remote = _init_git_workspace(tmp_path)
+    state_path = tmp_path / "state.json"
+    _bind_local_wiki(state_path, wiki_remote)
+    bundle_path = _write_steward_authority_bundle(tmp_path)
+    monkeypatch.setattr("agent_internet.projection_reconciler.time.sleep", lambda *_args, **_kwargs: None)
+
+    result = ProjectionReconcileDaemon(root=repo_root, state_path=state_path).run(
+        bundle_path=bundle_path,
+        wiki_repo_url=str(wiki_remote),
+        wiki_path=tmp_path / "wiki-checkout",
+        max_cycles=2,
+        idle_sleep_seconds=0.0,
+    )
+
+    assert result["cycles"] == 2
+    assert result["published_count"] == 1
+    assert result["failed_count"] == 0
+    assert result["runs"][1]["results"][0]["publish_required"] is False
