@@ -4,10 +4,13 @@ from urllib.request import Request, urlopen
 
 import pytest
 
+from agent_internet.control_plane import STEWARD_PUBLIC_WIKI_BINDING_ID
 from agent_internet.lotus_api import LotusControlPlaneAPI
 from agent_internet.lotus_daemon import LotusApiDaemon
 from agent_internet.models import (
     AssistantSurfaceSnapshot,
+    AuthorityExportKind,
+    AuthorityExportRecord,
     CityEndpoint,
     CityIdentity,
     CityPresence,
@@ -17,6 +20,7 @@ from agent_internet.models import (
     IntentStatus,
     IntentType,
     LotusApiScope,
+    PublicationState,
     TrustLevel,
     TrustRecord,
     UpstreamSyncPolicy,
@@ -865,6 +869,63 @@ def test_lotus_daemon_serves_spaces_and_slots_http_api(tmp_path):
         status, slots = _request_json(daemon.base_url, "/v1/lotus/slots", token=root_secret)
         assert status == 200
         assert slots["slots"][0]["slot_id"] == "slot:city-http-space:assistant-social"
+    finally:
+        daemon.shutdown()
+
+
+def test_lotus_daemon_serves_federation_contract_http_api(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    root_secret = store.update(
+        lambda plane: (
+            plane.bootstrap_steward_public_wiki_contract(now=60.0),
+            plane.upsert_authority_export(
+                AuthorityExportRecord(
+                    export_id="steward-protocol/canonical-surface",
+                    repo_id="steward-protocol",
+                    export_kind=AuthorityExportKind.CANONICAL_SURFACE,
+                    version="2026-03-09T16:30:00Z",
+                    artifact_uri="agent-web://steward/canonical-surface",
+                    generated_at=61.0,
+                ),
+            ),
+            plane.upsert_publication_status(
+                plane.registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID).__class__(
+                    binding_id=STEWARD_PUBLIC_WIKI_BINDING_ID,
+                    status=PublicationState.SUCCESS,
+                    projected_from_export_id="steward-protocol/canonical-surface",
+                    target_kind="github_wiki",
+                    target_locator="github.com/kimeisele/steward-protocol.wiki.git",
+                    published_at=62.0,
+                    checked_at=62.0,
+                ),
+            ),
+            LotusControlPlaneAPI(plane).issue_token(
+                subject="root",
+                scopes=(LotusApiScope.READ.value,),
+                token_secret="federation-root",
+                token_id="tok-federation-root",
+            ).secret,
+        )[-1],
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        status, repo_roles = _request_json(daemon.base_url, "/v1/lotus/repo-roles", token=root_secret)
+        assert status == 200
+        assert {record["repo_id"] for record in repo_roles["repo_roles"]} == {"agent-internet", "steward-protocol"}
+
+        status, authority_exports = _request_json(daemon.base_url, "/v1/lotus/authority-exports", token=root_secret)
+        assert status == 200
+        assert authority_exports["authority_exports"][0]["artifact_uri"] == "agent-web://steward/canonical-surface"
+
+        status, projection_bindings = _request_json(daemon.base_url, "/v1/lotus/projection-bindings", token=root_secret)
+        assert status == 200
+        assert projection_bindings["projection_bindings"][0]["binding_id"] == STEWARD_PUBLIC_WIKI_BINDING_ID
+
+        status, publication_statuses = _request_json(daemon.base_url, "/v1/lotus/publication-statuses", token=root_secret)
+        assert status == 200
+        assert publication_statuses["publication_statuses"][0]["status"] == "success"
     finally:
         daemon.shutdown()
 

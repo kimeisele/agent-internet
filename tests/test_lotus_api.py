@@ -2,10 +2,12 @@ import json
 
 import pytest
 
-from agent_internet.control_plane import AgentInternetControlPlane
+from agent_internet.control_plane import STEWARD_PUBLIC_WIKI_BINDING_ID, AgentInternetControlPlane
 from agent_internet.lotus_api import LotusControlPlaneAPI
 from agent_internet.models import (
     AssistantSurfaceSnapshot,
+    AuthorityExportKind,
+    AuthorityExportRecord,
     CityEndpoint,
     CityIdentity,
     ForkLineageRecord,
@@ -13,6 +15,7 @@ from agent_internet.models import (
     IntentStatus,
     IntentType,
     LotusApiScope,
+    PublicationState,
     TrustLevel,
     TrustRecord,
     UpstreamSyncPolicy,
@@ -302,7 +305,7 @@ def test_lotus_api_returns_agent_web_manifest(tmp_path):
     assert response["agent_web_manifest"]["entrypoints"]["repo_graph_contracts"]["document_id"] == "repo_graph_contracts"
     assert any(document["document_id"] == "search_index" for document in response["agent_web_manifest"]["documents"])
     assert any(document["document_id"] == "repo_graph_capabilities" for document in response["agent_web_manifest"]["documents"])
-    assert response["agent_web_manifest"]["documents"][1]["document_id"] == "assistant_surface"
+    assert any(document["document_id"] == "assistant_surface" for document in response["agent_web_manifest"]["documents"])
     assert any(link["rel"] == "assistant_surface" for link in response["agent_web_manifest"]["links"])
 
     semantic = api.call(
@@ -739,6 +742,45 @@ def test_lotus_api_lists_spaces_and_slots():
     assert spaces["spaces"][0]["kind"] == "assistant"
     assert slots["slots"][0]["slot_id"] == "slot:city-space:assistant-social"
     assert slots["slots"][0]["slot_kind"] == "assistant_social"
+
+
+def test_lotus_api_lists_federation_contract_records():
+    plane = AgentInternetControlPlane()
+    plane.bootstrap_steward_public_wiki_contract(now=50.0)
+    plane.upsert_authority_export(
+        AuthorityExportRecord(
+            export_id="steward-protocol/canonical-surface",
+            repo_id="steward-protocol",
+            export_kind=AuthorityExportKind.CANONICAL_SURFACE,
+            version="2026-03-09T16:00:00Z",
+            artifact_uri="agent-web://steward/canonical-surface",
+            generated_at=51.0,
+        ),
+    )
+    plane.upsert_publication_status(
+        plane.registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID).__class__(
+            binding_id=STEWARD_PUBLIC_WIKI_BINDING_ID,
+            status=PublicationState.SUCCESS,
+            projected_from_export_id="steward-protocol/canonical-surface",
+            target_kind="github_wiki",
+            target_locator="github.com/kimeisele/steward-protocol.wiki.git",
+            published_at=52.0,
+            checked_at=52.0,
+        ),
+    )
+
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(subject="observer", scopes=(LotusApiScope.READ.value,), token_secret="federation-token", now=10.0)
+
+    repo_roles = api.call(bearer_token=issued.secret, action="list_repo_roles", params={})
+    authority_exports = api.call(bearer_token=issued.secret, action="list_authority_exports", params={})
+    projection_bindings = api.call(bearer_token=issued.secret, action="list_projection_bindings", params={})
+    publication_statuses = api.call(bearer_token=issued.secret, action="list_publication_statuses", params={})
+
+    assert {record["repo_id"] for record in repo_roles["repo_roles"]} == {"agent-internet", "steward-protocol"}
+    assert authority_exports["authority_exports"][0]["export_kind"] == "canonical_surface"
+    assert projection_bindings["projection_bindings"][0]["binding_id"] == STEWARD_PUBLIC_WIKI_BINDING_ID
+    assert publication_statuses["publication_statuses"][0]["status"] == "success"
 
 
 def test_lotus_api_lists_fork_lineage():

@@ -7,6 +7,8 @@ from typing import Callable, TypeVar
 from .file_locking import read_locked_json_value, update_locked_json_value, write_locked_json_value
 from .control_plane import AgentInternetControlPlane
 from .models import (
+    AuthorityExportKind,
+    AuthorityExportRecord,
     SlotDescriptor,
     CityEndpoint,
     CityIdentity,
@@ -24,6 +26,13 @@ from .models import (
     LotusNetworkAddress,
     LotusRoute,
     LotusServiceAddress,
+    ProjectionBindingRecord,
+    ProjectionFailurePolicy,
+    ProjectionMode,
+    PublicationState,
+    PublicationStatusRecord,
+    RepoRole,
+    RepoRoleRecord,
     SlotStatus,
     SpaceDescriptor,
     SpaceKind,
@@ -50,6 +59,10 @@ def snapshot_control_plane(plane: AgentInternetControlPlane) -> dict:
         "slots": [asdict(slot) for slot in plane.registry.list_slots()],
         "fork_lineage": [asdict(lineage) for lineage in plane.registry.list_fork_lineage()],
         "intents": [asdict(intent) for intent in plane.registry.list_intents()],
+        "repo_roles": [asdict(record) for record in plane.registry.list_repo_roles()],
+        "authority_exports": [asdict(record) for record in plane.registry.list_authority_exports()],
+        "projection_bindings": [asdict(record) for record in plane.registry.list_projection_bindings()],
+        "publication_statuses": [asdict(record) for record in plane.registry.list_publication_statuses()],
         "presence": [asdict(presence) for presence in plane.registry.list_cities()],
         "trust": [asdict(record) for record in plane.trust_engine.list_records()],
         "allocator": plane.registry.allocation_state(),
@@ -193,6 +206,62 @@ def restore_control_plane(payload: dict) -> AgentInternetControlPlane:
                 linked_pr_url=data.get("linked_pr_url", ""),
                 created_at=data.get("created_at"),
                 updated_at=data.get("updated_at"),
+                labels=dict(data.get("labels", {})),
+            ),
+        )
+    for data in payload.get("repo_roles", []):
+        plane.registry.upsert_repo_role(
+            RepoRoleRecord(
+                repo_id=data["repo_id"],
+                role=RepoRole(data.get("role", RepoRole.RUNTIME_CITY_OPERATOR.value)),
+                owner_boundary=data.get("owner_boundary", ""),
+                exports=tuple(data.get("exports", ())),
+                consumes=tuple(data.get("consumes", ())),
+                publication_targets=tuple(data.get("publication_targets", ())),
+                labels=dict(data.get("labels", {})),
+            ),
+        )
+    for data in payload.get("authority_exports", []):
+        plane.registry.upsert_authority_export(
+            AuthorityExportRecord(
+                export_id=data["export_id"],
+                repo_id=data["repo_id"],
+                export_kind=AuthorityExportKind(data.get("export_kind", AuthorityExportKind.CANONICAL_SURFACE.value)),
+                version=data.get("version", ""),
+                artifact_uri=data.get("artifact_uri", ""),
+                generated_at=data.get("generated_at"),
+                contract_version=int(data.get("contract_version", 1)),
+                content_sha256=data.get("content_sha256", ""),
+                labels=dict(data.get("labels", {})),
+            ),
+        )
+    for data in payload.get("projection_bindings", []):
+        plane.registry.upsert_projection_binding(
+            ProjectionBindingRecord(
+                binding_id=data["binding_id"],
+                source_repo_id=data["source_repo_id"],
+                required_export_kind=AuthorityExportKind(data.get("required_export_kind", AuthorityExportKind.CANONICAL_SURFACE.value)),
+                operator_repo_id=data["operator_repo_id"],
+                target_kind=data.get("target_kind", ""),
+                target_locator=data.get("target_locator", ""),
+                projection_mode=ProjectionMode(data.get("projection_mode", ProjectionMode.REQUIRED.value)),
+                failure_policy=ProjectionFailurePolicy(data.get("failure_policy", ProjectionFailurePolicy.FAIL_CLOSED.value)),
+                freshness_sla_seconds=int(data.get("freshness_sla_seconds", 3600)),
+                labels=dict(data.get("labels", {})),
+            ),
+        )
+    for data in payload.get("publication_statuses", []):
+        plane.registry.upsert_publication_status(
+            PublicationStatusRecord(
+                binding_id=data["binding_id"],
+                status=PublicationState(data.get("status", PublicationState.BLOCKED.value)),
+                projected_from_export_id=data.get("projected_from_export_id", ""),
+                target_kind=data.get("target_kind", ""),
+                target_locator=data.get("target_locator", ""),
+                published_at=data.get("published_at"),
+                checked_at=data.get("checked_at"),
+                stale=bool(data.get("stale", False)),
+                failure_reason=data.get("failure_reason", ""),
                 labels=dict(data.get("labels", {})),
             ),
         )
