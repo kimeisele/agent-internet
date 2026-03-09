@@ -19,8 +19,10 @@ from .models import (
     LotusRoute,
     LotusServiceAddress,
     ProjectionBindingRecord,
+    ProjectionReconcileStatusRecord,
     PublicationStatusRecord,
     RepoRoleRecord,
+    SourceAuthorityFeedRecord,
     SpaceDescriptor,
 )
 
@@ -76,6 +78,8 @@ class InMemoryCityRegistry:
     _authority_artifacts: dict[str, AuthorityArtifactRecord] = field(default_factory=dict)
     _projection_bindings: dict[str, ProjectionBindingRecord] = field(default_factory=dict)
     _publication_statuses: dict[str, PublicationStatusRecord] = field(default_factory=dict)
+    _source_authority_feeds: dict[str, SourceAuthorityFeedRecord] = field(default_factory=dict)
+    _projection_reconcile_statuses: dict[str, ProjectionReconcileStatusRecord] = field(default_factory=dict)
     _next_link_id: int = 1
     _next_network_id: int = 1
 
@@ -310,6 +314,24 @@ class InMemoryCityRegistry:
 
     def list_publication_statuses(self) -> list[PublicationStatusRecord]:
         return [self._publication_statuses[binding_id] for binding_id in sorted(self._publication_statuses)]
+
+    def upsert_source_authority_feed(self, record: SourceAuthorityFeedRecord) -> None:
+        self._source_authority_feeds[record.feed_id] = record
+
+    def get_source_authority_feed(self, feed_id: str) -> SourceAuthorityFeedRecord | None:
+        return self._source_authority_feeds.get(feed_id)
+
+    def list_source_authority_feeds(self) -> list[SourceAuthorityFeedRecord]:
+        return [self._source_authority_feeds[feed_id] for feed_id in sorted(self._source_authority_feeds)]
+
+    def upsert_projection_reconcile_status(self, record: ProjectionReconcileStatusRecord) -> None:
+        self._projection_reconcile_statuses[record.binding_id] = record
+
+    def get_projection_reconcile_status(self, binding_id: str) -> ProjectionReconcileStatusRecord | None:
+        return self._projection_reconcile_statuses.get(binding_id)
+
+    def list_projection_reconcile_statuses(self) -> list[ProjectionReconcileStatusRecord]:
+        return [self._projection_reconcile_statuses[binding_id] for binding_id in sorted(self._projection_reconcile_statuses)]
 
     def announce(self, presence: CityPresence) -> None:
         self._presence[presence.city_id] = presence

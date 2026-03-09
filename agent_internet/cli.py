@@ -47,6 +47,7 @@ from .local_lab import LocalDualCityLab
 from .lotus_api import LOTUS_MUTATING_ACTIONS, LotusControlPlaneAPI
 from .lotus_daemon import LotusApiDaemon
 from .models import EndpointVisibility, LotusApiScope, TrustLevel, TrustRecord
+from .projection_reconciler import ProjectionReconciler
 from .repo_capsule import extract_repo_capsule
 from .snapshot import ControlPlaneStateStore, snapshot_control_plane
 from .steward_protocol_compat import summarize_steward_protocol_bindings
@@ -89,6 +90,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     show = subparsers.add_parser("show-state", help="Print the current persisted control-plane state")
     show.add_argument("--state-path", default="data/control_plane/state.json")
+
+    reconcile_once = subparsers.add_parser(
+        "projection-reconcile-once",
+        help="Import a configured authority bundle and reconcile the bound publication once",
+    )
+    reconcile_once.add_argument("--root", required=True)
+    reconcile_once.add_argument("--state-path", default="data/control_plane/state.json")
+    reconcile_once.add_argument("--bundle-path")
+    reconcile_once.add_argument("--feed-id", default="steward-authority-bundle")
+    reconcile_once.add_argument("--poll-interval-seconds", type=int, default=300)
+    reconcile_once.add_argument("--wiki-repo-url")
+    reconcile_once.add_argument("--wiki-checkout-path")
+    reconcile_once.add_argument("--push", action="store_true")
+    reconcile_once.add_argument("--prune-generated", action="store_true")
 
     repo_capsule = subparsers.add_parser(
         "repo-capsule",
@@ -712,6 +727,21 @@ def cmd_git_federation_sync_wiki(args: argparse.Namespace) -> int:
     )
     print(json.dumps(result, indent=2))
     return 0
+
+
+def cmd_projection_reconcile_once(args: argparse.Namespace) -> int:
+    reconciler = ProjectionReconciler(root=Path(args.root), state_path=Path(args.state_path))
+    result = reconciler.run_once(
+        bundle_path=args.bundle_path,
+        feed_id=args.feed_id,
+        poll_interval_seconds=args.poll_interval_seconds,
+        wiki_repo_url=args.wiki_repo_url,
+        wiki_path=(None if not args.wiki_checkout_path else Path(args.wiki_checkout_path)),
+        push=bool(args.push),
+        prune_generated=bool(args.prune_generated),
+    )
+    print(json.dumps(result, indent=2))
+    return 0 if result["reconcile_state"] == "success" else 1
 
 
 def cmd_git_federation_onboard_repo(args: argparse.Namespace) -> int:
@@ -1928,6 +1958,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_onboard_agent_city(args)
     if args.command == "show-state":
         return cmd_show_state(args)
+    if args.command == "projection-reconcile-once":
+        return cmd_projection_reconcile_once(args)
     if args.command == "repo-capsule":
         return cmd_repo_capsule(args)
     if args.command == "agent-city-assistant-snapshot":

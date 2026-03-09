@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from agent_internet.control_plane import AgentInternetControlPlane
+from agent_internet.control_plane import STEWARD_AUTHORITY_BUNDLE_FEED_ID, STEWARD_PROTOCOL_REPO_ID, STEWARD_PUBLIC_WIKI_BINDING_ID, AgentInternetControlPlane
 from agent_internet.lotus_api import LotusControlPlaneAPI
-from agent_internet.models import CityEndpoint, CityIdentity, CityPresence, EndpointVisibility, HealthStatus, LotusApiScope, TrustLevel, TrustRecord
+from agent_internet.models import AuthorityFeedTransport, CityEndpoint, CityIdentity, CityPresence, EndpointVisibility, HealthStatus, LotusApiScope, ProjectionReconcileState, ProjectionReconcileStatusRecord, TrustLevel, TrustRecord
 from agent_internet.snapshot import ControlPlaneStateStore, restore_control_plane, snapshot_control_plane
 
 
@@ -48,6 +48,21 @@ def _build_plane() -> AgentInternetControlPlane:
         token_id="tok-snapshot",
         now=22.0,
     )
+    plane.bootstrap_steward_public_wiki_feed(bundle_path="/tmp/steward/.authority-export-bundle.json", now=23.0)
+    plane.upsert_projection_reconcile_status(
+        ProjectionReconcileStatusRecord(
+            binding_id=STEWARD_PUBLIC_WIKI_BINDING_ID,
+            feed_id=STEWARD_AUTHORITY_BUNDLE_FEED_ID,
+            status=ProjectionReconcileState.SUCCESS,
+            last_checked_at=24.0,
+            last_imported_at=24.0,
+            last_imported_source_sha="bundle-sha",
+            last_imported_export_version="v1",
+            last_publish_attempt_at=24.5,
+            last_success_at=24.5,
+            labels={"source_repo_id": STEWARD_PROTOCOL_REPO_ID},
+        ),
+    )
     return plane
 
 
@@ -65,6 +80,8 @@ def test_snapshot_roundtrip_restores_route_resolution():
     assert restored.resolve_service_address("city-b", "forum-api").public_handle == "api.forum.city-b.lotus"
     assert restored.registry.get_route("city-a:service:city-b/forum:city-b").target_city_id == "city-b"
     assert restored.registry.get_api_token("tok-snapshot").subject == "operator"
+    assert restored.registry.get_source_authority_feed(STEWARD_AUTHORITY_BUNDLE_FEED_ID).transport == AuthorityFeedTransport.FILESYSTEM_BUNDLE
+    assert restored.registry.get_projection_reconcile_status(STEWARD_PUBLIC_WIKI_BINDING_ID).status == ProjectionReconcileState.SUCCESS
 
 
 def test_state_store_persists_and_loads_control_plane(tmp_path: Path):

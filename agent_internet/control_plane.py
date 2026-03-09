@@ -12,6 +12,7 @@ from .assistant_surface import assistant_social_slot_from_snapshot, assistant_sp
 from .memory_registry import InMemoryCityRegistry
 from .models import (
     AssistantSurfaceSnapshot,
+    AuthorityFeedTransport,
     AuthorityArtifactRecord,
     AuthorityExportKind,
     AuthorityExportRecord,
@@ -32,10 +33,12 @@ from .models import (
     ProjectionBindingRecord,
     ProjectionFailurePolicy,
     ProjectionMode,
+    ProjectionReconcileStatusRecord,
     PublicationState,
     PublicationStatusRecord,
     RepoRole,
     RepoRoleRecord,
+    SourceAuthorityFeedRecord,
     SlotDescriptor,
     SpaceDescriptor,
     TrustLevel,
@@ -50,6 +53,7 @@ from .trust import InMemoryTrustEngine
 STEWARD_PROTOCOL_REPO_ID = "steward-protocol"
 AGENT_INTERNET_REPO_ID = "agent-internet"
 STEWARD_PUBLIC_WIKI_BINDING_ID = "steward-public-wiki"
+STEWARD_AUTHORITY_BUNDLE_FEED_ID = "steward-authority-bundle"
 
 
 def _json_sha256(payload: object) -> str:
@@ -273,6 +277,12 @@ class AgentInternetControlPlane:
     def upsert_publication_status(self, record: PublicationStatusRecord) -> None:
         self.registry.upsert_publication_status(record)
 
+    def upsert_source_authority_feed(self, record: SourceAuthorityFeedRecord) -> None:
+        self.registry.upsert_source_authority_feed(record)
+
+    def upsert_projection_reconcile_status(self, record: ProjectionReconcileStatusRecord) -> None:
+        self.registry.upsert_projection_reconcile_status(record)
+
     def ingest_authority_bundle(self, bundle: dict[str, Any], *, artifacts: dict[str, dict[str, Any]] | None = None, now: float | None = None) -> dict[str, object]:
         checked_at = float(time.time() if now is None else now)
         self.bootstrap_steward_public_wiki_contract(now=checked_at)
@@ -438,7 +448,8 @@ class AgentInternetControlPlane:
             publication_targets=(STEWARD_PUBLIC_WIKI_BINDING_ID,),
             labels={"projects": STEWARD_PROTOCOL_REPO_ID},
         )
-        binding = ProjectionBindingRecord(
+        existing_binding = self.registry.get_projection_binding(STEWARD_PUBLIC_WIKI_BINDING_ID)
+        binding = existing_binding or ProjectionBindingRecord(
             binding_id=STEWARD_PUBLIC_WIKI_BINDING_ID,
             source_repo_id=STEWARD_PROTOCOL_REPO_ID,
             required_export_kind=AuthorityExportKind.CANONICAL_SURFACE,
@@ -478,6 +489,32 @@ class AgentInternetControlPlane:
             "binding": binding,
             "publication_status": self.registry.get_publication_status(binding.binding_id) or status,
         }
+
+    def bootstrap_steward_public_wiki_feed(
+        self,
+        *,
+        bundle_path: str | Path,
+        feed_id: str = STEWARD_AUTHORITY_BUNDLE_FEED_ID,
+        poll_interval_seconds: int = 300,
+        now: float | None = None,
+    ) -> SourceAuthorityFeedRecord:
+        self.bootstrap_steward_public_wiki_contract(now=now)
+        existing = self.registry.get_source_authority_feed(feed_id)
+        record = SourceAuthorityFeedRecord(
+            feed_id=feed_id,
+            source_repo_id=STEWARD_PROTOCOL_REPO_ID,
+            transport=AuthorityFeedTransport.FILESYSTEM_BUNDLE,
+            locator=str(Path(bundle_path).resolve()),
+            binding_ids=(STEWARD_PUBLIC_WIKI_BINDING_ID,),
+            enabled=True if existing is None else existing.enabled,
+            poll_interval_seconds=max(int(poll_interval_seconds), 1),
+            labels={
+                "bundle_kind": "source_authority_bundle",
+                **(dict(existing.labels) if existing is not None else {}),
+            },
+        )
+        self.registry.upsert_source_authority_feed(record)
+        return record
 
     def transition_intent(self, *, intent_id: str, status: IntentStatus, updated_at: float | None = None) -> IntentRecord:
         intent = self.registry.get_intent(intent_id)

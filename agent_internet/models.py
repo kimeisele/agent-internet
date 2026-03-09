@@ -120,6 +120,17 @@ class PublicationState(StrEnum):
     BLOCKED = "blocked"
 
 
+class AuthorityFeedTransport(StrEnum):
+    FILESYSTEM_BUNDLE = "filesystem_bundle"
+
+
+class ProjectionReconcileState(StrEnum):
+    SUCCESS = "success"
+    FAILED = "failed"
+    BLOCKED = "blocked"
+    SKIPPED = "skipped"
+
+
 @dataclass(frozen=True, slots=True)
 class CityIdentity:
     city_id: str
@@ -319,6 +330,35 @@ class PublicationStatusRecord:
     checked_at: float | None = None
     stale: bool = False
     failure_reason: str = ""
+    labels: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class SourceAuthorityFeedRecord:
+    feed_id: str
+    source_repo_id: str
+    transport: AuthorityFeedTransport = AuthorityFeedTransport.FILESYSTEM_BUNDLE
+    locator: str = ""
+    binding_ids: tuple[str, ...] = ()
+    enabled: bool = True
+    poll_interval_seconds: int = 300
+    labels: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectionReconcileStatusRecord:
+    binding_id: str
+    feed_id: str
+    status: ProjectionReconcileState = ProjectionReconcileState.SKIPPED
+    last_checked_at: float | None = None
+    last_imported_at: float | None = None
+    last_imported_source_sha: str = ""
+    last_imported_export_version: str = ""
+    last_publish_attempt_at: float | None = None
+    last_success_at: float | None = None
+    consecutive_failures: int = 0
+    next_retry_at: float | None = None
+    last_error: str = ""
     labels: dict[str, str] = field(default_factory=dict)
 
 

@@ -7,6 +7,7 @@ from typing import Callable, TypeVar
 from .file_locking import read_locked_json_value, update_locked_json_value, write_locked_json_value
 from .control_plane import AgentInternetControlPlane
 from .models import (
+    AuthorityFeedTransport,
     AuthorityArtifactRecord,
     AuthorityExportKind,
     AuthorityExportRecord,
@@ -30,10 +31,13 @@ from .models import (
     ProjectionBindingRecord,
     ProjectionFailurePolicy,
     ProjectionMode,
+    ProjectionReconcileState,
+    ProjectionReconcileStatusRecord,
     PublicationState,
     PublicationStatusRecord,
     RepoRole,
     RepoRoleRecord,
+    SourceAuthorityFeedRecord,
     SlotStatus,
     SpaceDescriptor,
     SpaceKind,
@@ -65,6 +69,8 @@ def snapshot_control_plane(plane: AgentInternetControlPlane) -> dict:
         "authority_artifacts": [asdict(record) for record in plane.registry.list_authority_artifacts()],
         "projection_bindings": [asdict(record) for record in plane.registry.list_projection_bindings()],
         "publication_statuses": [asdict(record) for record in plane.registry.list_publication_statuses()],
+        "source_authority_feeds": [asdict(record) for record in plane.registry.list_source_authority_feeds()],
+        "projection_reconcile_statuses": [asdict(record) for record in plane.registry.list_projection_reconcile_statuses()],
         "presence": [asdict(presence) for presence in plane.registry.list_cities()],
         "trust": [asdict(record) for record in plane.trust_engine.list_records()],
         "allocator": plane.registry.allocation_state(),
@@ -273,6 +279,37 @@ def restore_control_plane(payload: dict) -> AgentInternetControlPlane:
                 checked_at=data.get("checked_at"),
                 stale=bool(data.get("stale", False)),
                 failure_reason=data.get("failure_reason", ""),
+                labels=dict(data.get("labels", {})),
+            ),
+        )
+    for data in payload.get("source_authority_feeds", []):
+        plane.registry.upsert_source_authority_feed(
+            SourceAuthorityFeedRecord(
+                feed_id=data["feed_id"],
+                source_repo_id=data["source_repo_id"],
+                transport=AuthorityFeedTransport(data.get("transport", AuthorityFeedTransport.FILESYSTEM_BUNDLE.value)),
+                locator=data.get("locator", ""),
+                binding_ids=tuple(str(item) for item in data.get("binding_ids", ())),
+                enabled=bool(data.get("enabled", True)),
+                poll_interval_seconds=int(data.get("poll_interval_seconds", 300)),
+                labels=dict(data.get("labels", {})),
+            ),
+        )
+    for data in payload.get("projection_reconcile_statuses", []):
+        plane.registry.upsert_projection_reconcile_status(
+            ProjectionReconcileStatusRecord(
+                binding_id=data["binding_id"],
+                feed_id=data["feed_id"],
+                status=ProjectionReconcileState(data.get("status", ProjectionReconcileState.SKIPPED.value)),
+                last_checked_at=data.get("last_checked_at"),
+                last_imported_at=data.get("last_imported_at"),
+                last_imported_source_sha=data.get("last_imported_source_sha", ""),
+                last_imported_export_version=data.get("last_imported_export_version", ""),
+                last_publish_attempt_at=data.get("last_publish_attempt_at"),
+                last_success_at=data.get("last_success_at"),
+                consecutive_failures=int(data.get("consecutive_failures", 0)),
+                next_retry_at=data.get("next_retry_at"),
+                last_error=data.get("last_error", ""),
                 labels=dict(data.get("labels", {})),
             ),
         )
