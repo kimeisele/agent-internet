@@ -83,6 +83,42 @@ class IntentStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class RepoRole(StrEnum):
+    NORMATIVE_SOURCE = "normative_source"
+    PUBLIC_MEMBRANE_OPERATOR = "public_membrane_operator"
+    RUNTIME_CITY_OPERATOR = "runtime_city_operator"
+
+
+class AuthorityExportKind(StrEnum):
+    CANONICAL_SURFACE = "canonical_surface"
+    PUBLIC_SUMMARY_REGISTRY = "public_summary_registry"
+    SOURCE_SURFACE_REGISTRY = "source_surface_registry"
+    REPO_GRAPH = "repo_graph"
+    SURFACE_METADATA = "surface_metadata"
+    AGENT_WEB_MANIFEST = "agent_web_manifest"
+    PUBLIC_GRAPH = "public_graph"
+    SEARCH_INDEX = "search_index"
+    CITY_SURFACE_SNAPSHOT = "city_surface_snapshot"
+    ASSISTANT_SURFACE_SNAPSHOT = "assistant_surface_snapshot"
+
+
+class ProjectionMode(StrEnum):
+    REQUIRED = "required"
+    ADVISORY = "advisory"
+
+
+class ProjectionFailurePolicy(StrEnum):
+    FAIL_CLOSED = "fail_closed"
+    MARK_STALE = "mark_stale"
+
+
+class PublicationState(StrEnum):
+    SUCCESS = "success"
+    STALE = "stale"
+    FAILED = "failed"
+    BLOCKED = "blocked"
+
+
 @dataclass(frozen=True, slots=True)
 class CityIdentity:
     city_id: str
@@ -223,6 +259,58 @@ class AssistantSurfaceSnapshot:
     last_post_age_s: int | None = None
     series_cursor: int = -1
     active_campaigns: tuple[dict[str, object], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RepoRoleRecord:
+    repo_id: str
+    role: RepoRole
+    owner_boundary: str = ""
+    exports: tuple[str, ...] = ()
+    consumes: tuple[str, ...] = ()
+    publication_targets: tuple[str, ...] = ()
+    labels: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorityExportRecord:
+    export_id: str
+    repo_id: str
+    export_kind: AuthorityExportKind
+    version: str
+    artifact_uri: str
+    generated_at: float | None = None
+    contract_version: int = 1
+    content_sha256: str = ""
+    labels: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectionBindingRecord:
+    binding_id: str
+    source_repo_id: str
+    required_export_kind: AuthorityExportKind
+    operator_repo_id: str
+    target_kind: str
+    target_locator: str
+    projection_mode: ProjectionMode = ProjectionMode.REQUIRED
+    failure_policy: ProjectionFailurePolicy = ProjectionFailurePolicy.FAIL_CLOSED
+    freshness_sla_seconds: int = 3600
+    labels: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class PublicationStatusRecord:
+    binding_id: str
+    status: PublicationState = PublicationState.BLOCKED
+    projected_from_export_id: str = ""
+    target_kind: str = ""
+    target_locator: str = ""
+    published_at: float | None = None
+    checked_at: float | None = None
+    stale: bool = False
+    failure_reason: str = ""
+    labels: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

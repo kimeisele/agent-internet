@@ -5,9 +5,9 @@ import pytest
 from agent_internet.agent_city_bridge import AgentCityBridge, city_presence_from_report
 from agent_internet.assistant_surface import assistant_social_slot_from_snapshot, assistant_space_from_snapshot
 from agent_internet.agent_city_contract import AgentCityFilesystemContract
-from agent_internet.control_plane import AgentInternetControlPlane
+from agent_internet.control_plane import AGENT_INTERNET_REPO_ID, STEWARD_PROTOCOL_REPO_ID, STEWARD_PUBLIC_WIKI_BINDING_ID, AgentInternetControlPlane
 from agent_internet.filesystem_transport import FilesystemFederationTransport
-from agent_internet.models import AssistantSurfaceSnapshot, CityEndpoint, CityIdentity, EndpointVisibility, ForkLineageRecord, ForkMode, HealthStatus, IntentRecord, IntentStatus, IntentType, LotusApiScope, SlotStatus, SpaceKind, TrustLevel, TrustRecord, UpstreamSyncPolicy
+from agent_internet.models import AssistantSurfaceSnapshot, AuthorityExportKind, AuthorityExportRecord, CityEndpoint, CityIdentity, EndpointVisibility, ForkLineageRecord, ForkMode, HealthStatus, IntentRecord, IntentStatus, IntentType, LotusApiScope, ProjectionFailurePolicy, ProjectionMode, PublicationState, RepoRole, SlotStatus, SpaceKind, TrustLevel, TrustRecord, UpstreamSyncPolicy
 from agent_internet.snapshot import restore_control_plane, snapshot_control_plane
 
 
@@ -270,3 +270,67 @@ def test_control_plane_transitions_intents_with_state_rules():
             status=IntentStatus.REJECTED,
             updated_at=103.0,
         )
+
+
+def test_control_plane_bootstraps_explicit_steward_public_wiki_contract():
+    plane = AgentInternetControlPlane()
+
+    seeded = plane.bootstrap_steward_public_wiki_contract(now=123.0)
+
+    steward_role = plane.registry.get_repo_role(STEWARD_PROTOCOL_REPO_ID)
+    operator_role = plane.registry.get_repo_role(AGENT_INTERNET_REPO_ID)
+    binding = plane.registry.get_projection_binding(STEWARD_PUBLIC_WIKI_BINDING_ID)
+    status = plane.registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID)
+
+    assert seeded["binding"] == binding
+    assert steward_role.role == RepoRole.NORMATIVE_SOURCE
+    assert AuthorityExportKind.CANONICAL_SURFACE.value in steward_role.exports
+    assert operator_role.role == RepoRole.PUBLIC_MEMBRANE_OPERATOR
+    assert binding.required_export_kind == AuthorityExportKind.CANONICAL_SURFACE
+    assert binding.projection_mode == ProjectionMode.REQUIRED
+    assert binding.failure_policy == ProjectionFailurePolicy.FAIL_CLOSED
+    assert status.status == PublicationState.BLOCKED
+    assert status.failure_reason == "missing_authority_export:steward-protocol:canonical_surface"
+
+
+def test_control_plane_bootstrap_preserves_existing_publication_status_and_snapshots_contract():
+    plane = AgentInternetControlPlane()
+    plane.upsert_authority_export(
+        AuthorityExportRecord(
+            export_id="steward-protocol/canonical-surface",
+            repo_id=STEWARD_PROTOCOL_REPO_ID,
+            export_kind=AuthorityExportKind.CANONICAL_SURFACE,
+            version="2026-03-09T15:00:00Z",
+            artifact_uri="agent-web://steward/canonical-surface",
+            generated_at=222.0,
+        ),
+    )
+
+    plane.bootstrap_steward_public_wiki_contract(now=223.0)
+    seeded_status = plane.registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID)
+    assert seeded_status.status == PublicationState.STALE
+    assert seeded_status.projected_from_export_id == "steward-protocol/canonical-surface"
+
+    plane.upsert_publication_status(
+        seeded_status.__class__(
+            binding_id=seeded_status.binding_id,
+            status=PublicationState.SUCCESS,
+            projected_from_export_id=seeded_status.projected_from_export_id,
+            target_kind=seeded_status.target_kind,
+            target_locator=seeded_status.target_locator,
+            published_at=224.0,
+            checked_at=224.0,
+            stale=False,
+            failure_reason="",
+        ),
+    )
+    plane.bootstrap_steward_public_wiki_contract(now=225.0)
+
+    payload = snapshot_control_plane(plane)
+    restored = restore_control_plane(payload)
+    restored_status = restored.registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID)
+
+    assert restored.registry.get_authority_export("steward-protocol/canonical-surface").artifact_uri == "agent-web://steward/canonical-surface"
+    assert restored.registry.get_projection_binding(STEWARD_PUBLIC_WIKI_BINDING_ID).target_kind == "github_wiki"
+    assert restored_status.status == PublicationState.SUCCESS
+    assert restored_status.published_at == 224.0

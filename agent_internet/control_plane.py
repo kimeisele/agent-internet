@@ -8,6 +8,8 @@ from .assistant_surface import assistant_social_slot_from_snapshot, assistant_sp
 from .memory_registry import InMemoryCityRegistry
 from .models import (
     AssistantSurfaceSnapshot,
+    AuthorityExportKind,
+    AuthorityExportRecord,
     CityEndpoint,
     CityIdentity,
     CityPresence,
@@ -22,6 +24,13 @@ from .models import (
     LotusRoute,
     LotusRouteResolution,
     LotusServiceAddress,
+    ProjectionBindingRecord,
+    ProjectionFailurePolicy,
+    ProjectionMode,
+    PublicationState,
+    PublicationStatusRecord,
+    RepoRole,
+    RepoRoleRecord,
     SlotDescriptor,
     SpaceDescriptor,
     TrustLevel,
@@ -31,6 +40,11 @@ from .router import RegistryRouter
 from .steward_protocol_compat import build_maha_route_header_hex, load_steward_protocol_bindings
 from .transport import DeliveryEnvelope, DeliveryReceipt, RelayService, TransportRegistry
 from .trust import InMemoryTrustEngine
+
+
+STEWARD_PROTOCOL_REPO_ID = "steward-protocol"
+AGENT_INTERNET_REPO_ID = "agent-internet"
+STEWARD_PUBLIC_WIKI_BINDING_ID = "steward-public-wiki"
 
 
 @dataclass(slots=True)
@@ -217,6 +231,93 @@ class AgentInternetControlPlane:
 
     def upsert_intent(self, intent: IntentRecord) -> None:
         self.registry.upsert_intent(intent)
+
+    def upsert_repo_role(self, record: RepoRoleRecord) -> None:
+        self.registry.upsert_repo_role(record)
+
+    def upsert_authority_export(self, record: AuthorityExportRecord) -> None:
+        self.registry.upsert_authority_export(record)
+
+    def upsert_projection_binding(self, record: ProjectionBindingRecord) -> None:
+        self.registry.upsert_projection_binding(record)
+
+    def upsert_publication_status(self, record: PublicationStatusRecord) -> None:
+        self.registry.upsert_publication_status(record)
+
+    def bootstrap_steward_public_wiki_contract(self, *, now: float | None = None) -> dict[str, object]:
+        checked_at = float(time.time() if now is None else now)
+        steward_role = RepoRoleRecord(
+            repo_id=STEWARD_PROTOCOL_REPO_ID,
+            role=RepoRole.NORMATIVE_SOURCE,
+            owner_boundary="normative_protocol_surface",
+            exports=(
+                AuthorityExportKind.CANONICAL_SURFACE.value,
+                AuthorityExportKind.PUBLIC_SUMMARY_REGISTRY.value,
+                AuthorityExportKind.SOURCE_SURFACE_REGISTRY.value,
+                AuthorityExportKind.REPO_GRAPH.value,
+                AuthorityExportKind.SURFACE_METADATA.value,
+            ),
+            publication_targets=(STEWARD_PUBLIC_WIKI_BINDING_ID,),
+            labels={"public_surface_owner": AGENT_INTERNET_REPO_ID},
+        )
+        operator_role = RepoRoleRecord(
+            repo_id=AGENT_INTERNET_REPO_ID,
+            role=RepoRole.PUBLIC_MEMBRANE_OPERATOR,
+            owner_boundary="public_membrane",
+            exports=(
+                AuthorityExportKind.AGENT_WEB_MANIFEST.value,
+                AuthorityExportKind.PUBLIC_GRAPH.value,
+                AuthorityExportKind.SEARCH_INDEX.value,
+            ),
+            consumes=(
+                AuthorityExportKind.CANONICAL_SURFACE.value,
+                AuthorityExportKind.PUBLIC_SUMMARY_REGISTRY.value,
+                AuthorityExportKind.REPO_GRAPH.value,
+                AuthorityExportKind.SURFACE_METADATA.value,
+            ),
+            publication_targets=(STEWARD_PUBLIC_WIKI_BINDING_ID,),
+            labels={"projects": STEWARD_PROTOCOL_REPO_ID},
+        )
+        binding = ProjectionBindingRecord(
+            binding_id=STEWARD_PUBLIC_WIKI_BINDING_ID,
+            source_repo_id=STEWARD_PROTOCOL_REPO_ID,
+            required_export_kind=AuthorityExportKind.CANONICAL_SURFACE,
+            operator_repo_id=AGENT_INTERNET_REPO_ID,
+            target_kind="github_wiki",
+            target_locator="github.com/kimeisele/steward-protocol.wiki.git",
+            projection_mode=ProjectionMode.REQUIRED,
+            failure_policy=ProjectionFailurePolicy.FAIL_CLOSED,
+            freshness_sla_seconds=3600,
+            labels={"public_surface": "steward-wiki"},
+        )
+        export = self.registry.find_authority_export(binding.source_repo_id, binding.required_export_kind.value)
+        existing_status = self.registry.get_publication_status(binding.binding_id)
+        status = existing_status or PublicationStatusRecord(
+            binding_id=binding.binding_id,
+            status=PublicationState.BLOCKED if export is None else PublicationState.STALE,
+            projected_from_export_id="" if export is None else export.export_id,
+            target_kind=binding.target_kind,
+            target_locator=binding.target_locator,
+            checked_at=checked_at,
+            stale=export is not None,
+            failure_reason=(
+                f"missing_authority_export:{binding.source_repo_id}:{binding.required_export_kind.value}"
+                if export is None
+                else "projection_not_published"
+            ),
+        )
+
+        self.registry.upsert_repo_role(steward_role)
+        self.registry.upsert_repo_role(operator_role)
+        self.registry.upsert_projection_binding(binding)
+        if existing_status is None:
+            self.registry.upsert_publication_status(status)
+        return {
+            "source_repo_role": steward_role,
+            "operator_repo_role": operator_role,
+            "binding": binding,
+            "publication_status": self.registry.get_publication_status(binding.binding_id) or status,
+        }
 
     def transition_intent(self, *, intent_id: str, status: IntentStatus, updated_at: float | None = None) -> IntentRecord:
         intent = self.registry.get_intent(intent_id)

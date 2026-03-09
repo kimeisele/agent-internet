@@ -135,6 +135,18 @@ class LotusControlPlaneAPI:
         if action == "list_slots":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "slots": [asdict(slot) for slot in self.plane.registry.list_slots()]}
+        if action == "list_repo_roles":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            return {"token_id": token.token_id, "repo_roles": [asdict(record) for record in self.plane.registry.list_repo_roles()]}
+        if action == "list_authority_exports":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            return {"token_id": token.token_id, "authority_exports": [asdict(record) for record in self.plane.registry.list_authority_exports()]}
+        if action == "list_projection_bindings":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            return {"token_id": token.token_id, "projection_bindings": [asdict(record) for record in self.plane.registry.list_projection_bindings()]}
+        if action == "list_publication_statuses":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            return {"token_id": token.token_id, "publication_statuses": [asdict(record) for record in self.plane.registry.list_publication_statuses()]}
         if action == "list_fork_lineage":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {

@@ -115,6 +115,14 @@ class LotusApiDaemon:
                 return 200, self._call(token, "list_spaces", {})
             if method == "GET" and path == "/v1/lotus/slots":
                 return 200, self._call(token, "list_slots", {})
+            if method == "GET" and path == "/v1/lotus/repo-roles":
+                return 200, self._call(token, "list_repo_roles", {})
+            if method == "GET" and path == "/v1/lotus/authority-exports":
+                return 200, self._call(token, "list_authority_exports", {})
+            if method == "GET" and path == "/v1/lotus/projection-bindings":
+                return 200, self._call(token, "list_projection_bindings", {})
+            if method == "GET" and path == "/v1/lotus/publication-statuses":
+                return 200, self._call(token, "list_publication_statuses", {})
             if method == "GET" and path == "/v1/lotus/lineage":
                 return 200, self._call(token, "list_fork_lineage", {})
             if method == "GET" and path == "/v1/lotus/intents":

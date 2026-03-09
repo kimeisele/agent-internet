@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass, field
 
 from .models import (
+    AuthorityExportRecord,
     SlotDescriptor,
     CityEndpoint,
     CityIdentity,
@@ -16,6 +17,9 @@ from .models import (
     LotusNetworkAddress,
     LotusRoute,
     LotusServiceAddress,
+    ProjectionBindingRecord,
+    PublicationStatusRecord,
+    RepoRoleRecord,
     SpaceDescriptor,
 )
 
@@ -66,6 +70,10 @@ class InMemoryCityRegistry:
     _slots: dict[str, SlotDescriptor] = field(default_factory=dict)
     _fork_lineage: dict[str, ForkLineageRecord] = field(default_factory=dict)
     _intents: dict[str, IntentRecord] = field(default_factory=dict)
+    _repo_roles: dict[str, RepoRoleRecord] = field(default_factory=dict)
+    _authority_exports: dict[str, AuthorityExportRecord] = field(default_factory=dict)
+    _projection_bindings: dict[str, ProjectionBindingRecord] = field(default_factory=dict)
+    _publication_statuses: dict[str, PublicationStatusRecord] = field(default_factory=dict)
     _next_link_id: int = 1
     _next_network_id: int = 1
 
@@ -249,6 +257,48 @@ class InMemoryCityRegistry:
 
     def list_intents(self) -> list[IntentRecord]:
         return [self._intents[intent_id] for intent_id in sorted(self._intents)]
+
+    def upsert_repo_role(self, record: RepoRoleRecord) -> None:
+        self._repo_roles[record.repo_id] = record
+
+    def get_repo_role(self, repo_id: str) -> RepoRoleRecord | None:
+        return self._repo_roles.get(repo_id)
+
+    def list_repo_roles(self) -> list[RepoRoleRecord]:
+        return [self._repo_roles[repo_id] for repo_id in sorted(self._repo_roles)]
+
+    def upsert_authority_export(self, record: AuthorityExportRecord) -> None:
+        self._authority_exports[record.export_id] = record
+
+    def get_authority_export(self, export_id: str) -> AuthorityExportRecord | None:
+        return self._authority_exports.get(export_id)
+
+    def list_authority_exports(self) -> list[AuthorityExportRecord]:
+        return [self._authority_exports[export_id] for export_id in sorted(self._authority_exports)]
+
+    def find_authority_export(self, repo_id: str, export_kind: str) -> AuthorityExportRecord | None:
+        for export in self.list_authority_exports():
+            if export.repo_id == repo_id and export.export_kind == export_kind:
+                return export
+        return None
+
+    def upsert_projection_binding(self, record: ProjectionBindingRecord) -> None:
+        self._projection_bindings[record.binding_id] = record
+
+    def get_projection_binding(self, binding_id: str) -> ProjectionBindingRecord | None:
+        return self._projection_bindings.get(binding_id)
+
+    def list_projection_bindings(self) -> list[ProjectionBindingRecord]:
+        return [self._projection_bindings[binding_id] for binding_id in sorted(self._projection_bindings)]
+
+    def upsert_publication_status(self, record: PublicationStatusRecord) -> None:
+        self._publication_statuses[record.binding_id] = record
+
+    def get_publication_status(self, binding_id: str) -> PublicationStatusRecord | None:
+        return self._publication_statuses.get(binding_id)
+
+    def list_publication_statuses(self) -> list[PublicationStatusRecord]:
+        return [self._publication_statuses[binding_id] for binding_id in sorted(self._publication_statuses)]
 
     def announce(self, presence: CityPresence) -> None:
         self._presence[presence.city_id] = presence
