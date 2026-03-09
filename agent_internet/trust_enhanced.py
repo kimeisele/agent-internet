@@ -6,6 +6,7 @@ decisions, revocation tracking, and trust delegation.
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -139,59 +140,66 @@ class EnhancedTrustEngine:
     _revocation_log: list[tuple[float, str, str, RevocationReason]] = field(default_factory=list)
     _default_level: TrustLevel = TrustLevel.UNKNOWN
     default_ttl_s: float | None = None
+    _lock: threading.Lock = field(default_factory=threading.Lock)
 
     # --- TrustEngine protocol compat ---
 
     def record(self, trust: TrustRecord) -> None:
         """Accept a basic TrustRecord (backward compat with TrustEngine protocol)."""
-        key = (trust.issuer_city_id, trust.subject_city_id)
-        existing = self._records.get(key)
-        evidence: tuple[TrustEvidence, ...] = ()
-        if existing is not None:
-            evidence = existing.evidence
-        enhanced = EnhancedTrustRecord(
-            issuer_city_id=trust.issuer_city_id,
-            subject_city_id=trust.subject_city_id,
-            level=trust.level,
-            reason=trust.reason,
-            evidence=evidence,
-            expires_at=(time.time() + self.default_ttl_s) if self.default_ttl_s else None,
-        )
-        self._records[key] = enhanced
+        with self._lock:
+            key = (trust.issuer_city_id, trust.subject_city_id)
+            existing = self._records.get(key)
+            evidence: tuple[TrustEvidence, ...] = ()
+            if existing is not None:
+                evidence = existing.evidence
+            enhanced = EnhancedTrustRecord(
+                issuer_city_id=trust.issuer_city_id,
+                subject_city_id=trust.subject_city_id,
+                level=trust.level,
+                reason=trust.reason,
+                evidence=evidence,
+                expires_at=(time.time() + self.default_ttl_s) if self.default_ttl_s else None,
+            )
+            self._records[key] = enhanced
 
     def evaluate(self, source_city_id: str, target_city_id: str) -> TrustLevel:
         """Evaluate trust level, accounting for expiration and revocation."""
         if source_city_id == target_city_id:
             return TrustLevel.TRUSTED
 
-        record = self._records.get((source_city_id, target_city_id))
-        if record is None:
-            return self._evaluate_delegated(source_city_id, target_city_id)
+        with self._lock:
+            record = self._records.get((source_city_id, target_city_id))
+            if record is None:
+                return self._evaluate_delegated(source_city_id, target_city_id)
 
-        if not record.is_active:
-            return self._default_level
+            if not record.is_active:
+                return self._default_level
 
-        return record.level
+            return record.level
 
     # --- Enhanced API ---
 
     def record_enhanced(self, record: EnhancedTrustRecord) -> None:
         """Record an enhanced trust record with full metadata."""
-        key = (record.issuer_city_id, record.subject_city_id)
-        self._records[key] = record
+        with self._lock:
+            key = (record.issuer_city_id, record.subject_city_id)
+            self._records[key] = record
 
     def get_record(self, source_city_id: str, target_city_id: str) -> EnhancedTrustRecord | None:
-        record = self._records.get((source_city_id, target_city_id))
-        if record is not None and not record.is_active:
-            return None
-        return record
+        with self._lock:
+            record = self._records.get((source_city_id, target_city_id))
+            if record is not None and not record.is_active:
+                return None
+            return record
 
     def list_records(self) -> list[TrustRecord]:
         """Return active records as basic TrustRecords for compat."""
-        return [r.to_basic_record() for r in sorted(self._records.values(), key=lambda r: (r.issuer_city_id, r.subject_city_id)) if r.is_active]
+        with self._lock:
+            return [r.to_basic_record() for r in sorted(self._records.values(), key=lambda r: (r.issuer_city_id, r.subject_city_id)) if r.is_active]
 
     def list_enhanced_records(self) -> list[EnhancedTrustRecord]:
-        return sorted(self._records.values(), key=lambda r: (r.issuer_city_id, r.subject_city_id))
+        with self._lock:
+            return sorted(self._records.values(), key=lambda r: (r.issuer_city_id, r.subject_city_id))
 
     def add_evidence(
         self,
@@ -200,26 +208,27 @@ class EnhancedTrustEngine:
         evidence: TrustEvidence,
     ) -> EnhancedTrustRecord | None:
         """Append evidence to an existing trust record."""
-        key = (source_city_id, target_city_id)
-        record = self._records.get(key)
-        if record is None:
-            return None
-        updated = EnhancedTrustRecord(
-            record_id=record.record_id,
-            issuer_city_id=record.issuer_city_id,
-            subject_city_id=record.subject_city_id,
-            level=record.level,
-            reason=record.reason,
-            evidence=record.evidence + (evidence,),
-            established_at=record.established_at,
-            expires_at=record.expires_at,
-            revoked_at=record.revoked_at,
-            revocation_reason=record.revocation_reason,
-            delegated_from=record.delegated_from,
-            labels=record.labels,
-        )
-        self._records[key] = updated
-        return updated
+        with self._lock:
+            key = (source_city_id, target_city_id)
+            record = self._records.get(key)
+            if record is None:
+                return None
+            updated = EnhancedTrustRecord(
+                record_id=record.record_id,
+                issuer_city_id=record.issuer_city_id,
+                subject_city_id=record.subject_city_id,
+                level=record.level,
+                reason=record.reason,
+                evidence=record.evidence + (evidence,),
+                established_at=record.established_at,
+                expires_at=record.expires_at,
+                revoked_at=record.revoked_at,
+                revocation_reason=record.revocation_reason,
+                delegated_from=record.delegated_from,
+                labels=record.labels,
+            )
+            self._records[key] = updated
+            return updated
 
     def revoke(
         self,
@@ -228,81 +237,87 @@ class EnhancedTrustEngine:
         reason: RevocationReason = RevocationReason.MANUAL_REVOCATION,
     ) -> EnhancedTrustRecord | None:
         """Revoke trust between two cities."""
-        key = (source_city_id, target_city_id)
-        record = self._records.get(key)
-        if record is None:
-            return None
-        now = time.time()
-        revoked = EnhancedTrustRecord(
-            record_id=record.record_id,
-            issuer_city_id=record.issuer_city_id,
-            subject_city_id=record.subject_city_id,
-            level=record.level,
-            reason=record.reason,
-            evidence=record.evidence,
-            established_at=record.established_at,
-            expires_at=record.expires_at,
-            revoked_at=now,
-            revocation_reason=reason,
-            delegated_from=record.delegated_from,
-            labels=record.labels,
-        )
-        self._records[key] = revoked
-        self._revocation_log.append((now, source_city_id, target_city_id, reason))
-        return revoked
+        with self._lock:
+            key = (source_city_id, target_city_id)
+            record = self._records.get(key)
+            if record is None:
+                return None
+            now = time.time()
+            revoked = EnhancedTrustRecord(
+                record_id=record.record_id,
+                issuer_city_id=record.issuer_city_id,
+                subject_city_id=record.subject_city_id,
+                level=record.level,
+                reason=record.reason,
+                evidence=record.evidence,
+                established_at=record.established_at,
+                expires_at=record.expires_at,
+                revoked_at=now,
+                revocation_reason=reason,
+                delegated_from=record.delegated_from,
+                labels=record.labels,
+            )
+            self._records[key] = revoked
+            self._revocation_log.append((now, source_city_id, target_city_id, reason))
+            return revoked
 
     def register_delegation(self, delegation: TrustDelegation) -> None:
         """Register a trust delegation from one city to another."""
-        self._delegations[delegation.delegation_id] = delegation
+        with self._lock:
+            self._delegations[delegation.delegation_id] = delegation
 
     def revoke_delegation(self, delegation_id: str) -> TrustDelegation | None:
-        delegation = self._delegations.get(delegation_id)
-        if delegation is None:
-            return None
-        revoked = TrustDelegation(
-            delegation_id=delegation.delegation_id,
-            delegator_city_id=delegation.delegator_city_id,
-            delegate_city_id=delegation.delegate_city_id,
-            subject_city_id=delegation.subject_city_id,
-            max_level=delegation.max_level,
-            expires_at=delegation.expires_at,
-            revoked_at=time.time(),
-            reason=delegation.reason,
-        )
-        self._delegations[delegation_id] = revoked
-        return revoked
+        with self._lock:
+            delegation = self._delegations.get(delegation_id)
+            if delegation is None:
+                return None
+            revoked = TrustDelegation(
+                delegation_id=delegation.delegation_id,
+                delegator_city_id=delegation.delegator_city_id,
+                delegate_city_id=delegation.delegate_city_id,
+                subject_city_id=delegation.subject_city_id,
+                max_level=delegation.max_level,
+                expires_at=delegation.expires_at,
+                revoked_at=time.time(),
+                reason=delegation.reason,
+            )
+            self._delegations[delegation_id] = revoked
+            return revoked
 
     def list_delegations(self) -> list[TrustDelegation]:
-        return list(self._delegations.values())
+        with self._lock:
+            return list(self._delegations.values())
 
     def revocation_log(self) -> list[tuple[float, str, str, RevocationReason]]:
-        return list(self._revocation_log)
+        with self._lock:
+            return list(self._revocation_log)
 
     def expire_stale(self) -> list[EnhancedTrustRecord]:
         """Scan and mark expired records. Returns newly expired records."""
-        expired: list[EnhancedTrustRecord] = []
-        now = time.time()
-        for key, record in list(self._records.items()):
-            if record.revoked_at is not None:
-                continue
-            if record.expires_at is not None and now > record.expires_at:
-                revoked = EnhancedTrustRecord(
-                    record_id=record.record_id,
-                    issuer_city_id=record.issuer_city_id,
-                    subject_city_id=record.subject_city_id,
-                    level=record.level,
-                    reason=record.reason,
-                    evidence=record.evidence,
-                    established_at=record.established_at,
-                    expires_at=record.expires_at,
-                    revoked_at=now,
-                    revocation_reason=RevocationReason.TRUST_EXPIRED,
-                    delegated_from=record.delegated_from,
-                    labels=record.labels,
-                )
-                self._records[key] = revoked
-                expired.append(revoked)
-        return expired
+        with self._lock:
+            expired: list[EnhancedTrustRecord] = []
+            now = time.time()
+            for key, record in list(self._records.items()):
+                if record.revoked_at is not None:
+                    continue
+                if record.expires_at is not None and now > record.expires_at:
+                    revoked = EnhancedTrustRecord(
+                        record_id=record.record_id,
+                        issuer_city_id=record.issuer_city_id,
+                        subject_city_id=record.subject_city_id,
+                        level=record.level,
+                        reason=record.reason,
+                        evidence=record.evidence,
+                        established_at=record.established_at,
+                        expires_at=record.expires_at,
+                        revoked_at=now,
+                        revocation_reason=RevocationReason.TRUST_EXPIRED,
+                        delegated_from=record.delegated_from,
+                        labels=record.labels,
+                    )
+                    self._records[key] = revoked
+                    expired.append(revoked)
+            return expired
 
     def _evaluate_delegated(self, source_city_id: str, target_city_id: str) -> TrustLevel:
         """Check if trust can be inferred via delegation chains."""

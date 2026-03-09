@@ -169,7 +169,13 @@ class EventBus:
             return 0
 
         for sub in matched:
-            sub.handler(event)
+            try:
+                sub.handler(event)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception(
+                    "Event handler %s failed for %s", sub.subscription_id, event.kind,
+                )
         return len(matched)
 
     def emit_many(self, events: list[Event]) -> int:

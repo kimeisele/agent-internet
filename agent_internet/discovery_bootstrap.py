@@ -210,69 +210,72 @@ class DiscoveryBootstrapService:
         new_peers: list[DiscoveryPeer] = []
 
         for ann in announcements:
-            if ann.city_id in self._known_peers:
-                old = self._known_peers[ann.city_id]
-                if ann.announced_at <= old.announcement.announced_at:
-                    continue
-
-            peer = DiscoveryPeer(
-                city_id=ann.city_id,
-                announcement=ann,
-            )
-
-            if self.auto_register and control_plane is not None:
-                identity = CityIdentity(
-                    city_id=ann.city_id,
-                    slug=ann.slug,
-                    repo=ann.repo,
-                    public_key=ann.public_key,
-                    labels=dict(ann.labels),
-                )
-                endpoint = CityEndpoint(
-                    city_id=ann.city_id,
-                    transport=ann.transport or "filesystem",
-                    location=ann.location,
-                )
-                register_city = getattr(control_plane, "register_city", None)
-                if callable(register_city):
-                    register_city(identity, endpoint)
-                    peer = DiscoveryPeer(
-                        city_id=ann.city_id,
-                        announcement=ann,
-                        auto_registered=True,
-                    )
-                    logger.info("Auto-registered discovered city: %s (%s)", ann.city_id, ann.slug)
-
-                announce_city = getattr(control_plane, "announce_city", None)
-                if callable(announce_city):
-                    presence = CityPresence(
-                        city_id=ann.city_id,
-                        health=HealthStatus.HEALTHY,
-                        last_seen_at=ann.announced_at,
-                        capabilities=ann.capabilities,
-                    )
-                    announce_city(presence)
-
-                if self.auto_trust_level != TrustLevel.UNKNOWN and self.own_city_id:
-                    record_trust = getattr(control_plane, "record_trust", None)
-                    if callable(record_trust):
-                        record_trust(TrustRecord(
-                            issuer_city_id=self.own_city_id,
-                            subject_city_id=ann.city_id,
-                            level=self.auto_trust_level,
-                            reason=f"auto-discovered via {ann.method.value}",
-                        ))
-                        peer = DiscoveryPeer(
-                            city_id=ann.city_id,
-                            announcement=ann,
-                            auto_registered=True,
-                            auto_trusted=True,
-                        )
-
+            if self._is_stale_announcement(ann):
+                continue
+            peer = self._process_announcement(ann, control_plane)
             self._known_peers[ann.city_id] = peer
             new_peers.append(peer)
 
         return new_peers
+
+    def _is_stale_announcement(self, ann: DiscoveryAnnouncement) -> bool:
+        """Check if this announcement is older than what we already know."""
+        old = self._known_peers.get(ann.city_id)
+        return old is not None and ann.announced_at <= old.announcement.announced_at
+
+    def _process_announcement(self, ann: DiscoveryAnnouncement, control_plane: object) -> DiscoveryPeer:
+        """Process a single announcement: register, announce presence, establish trust."""
+        registered = False
+        trusted = False
+
+        if self.auto_register and control_plane is not None:
+            registered = self._try_register_city(ann, control_plane)
+            self._try_announce_presence(ann, control_plane)
+            trusted = self._try_establish_trust(ann, control_plane)
+
+        return DiscoveryPeer(
+            city_id=ann.city_id,
+            announcement=ann,
+            auto_registered=registered,
+            auto_trusted=trusted,
+        )
+
+    def _try_register_city(self, ann: DiscoveryAnnouncement, plane: object) -> bool:
+        register_city = getattr(plane, "register_city", None)
+        if not callable(register_city):
+            return False
+        identity = CityIdentity(
+            city_id=ann.city_id, slug=ann.slug, repo=ann.repo,
+            public_key=ann.public_key, labels=dict(ann.labels),
+        )
+        endpoint = CityEndpoint(
+            city_id=ann.city_id, transport=ann.transport or "filesystem", location=ann.location,
+        )
+        register_city(identity, endpoint)
+        logger.info("Auto-registered discovered city: %s (%s)", ann.city_id, ann.slug)
+        return True
+
+    def _try_announce_presence(self, ann: DiscoveryAnnouncement, plane: object) -> bool:
+        announce_city = getattr(plane, "announce_city", None)
+        if not callable(announce_city):
+            return False
+        announce_city(CityPresence(
+            city_id=ann.city_id, health=HealthStatus.HEALTHY,
+            last_seen_at=ann.announced_at, capabilities=ann.capabilities,
+        ))
+        return True
+
+    def _try_establish_trust(self, ann: DiscoveryAnnouncement, plane: object) -> bool:
+        if self.auto_trust_level == TrustLevel.UNKNOWN or not self.own_city_id:
+            return False
+        record_trust = getattr(plane, "record_trust", None)
+        if not callable(record_trust):
+            return False
+        record_trust(TrustRecord(
+            issuer_city_id=self.own_city_id, subject_city_id=ann.city_id,
+            level=self.auto_trust_level, reason=f"auto-discovered via {ann.method.value}",
+        ))
+        return True
 
     def announce_self(
         self,

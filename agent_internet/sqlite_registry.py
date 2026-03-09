@@ -272,13 +272,13 @@ class SqliteCityRegistry:
         )
 
     def get_identity(self, city_id: str) -> CityIdentity | None:
-        row = self._conn().execute("SELECT * FROM identities WHERE city_id = ?", (city_id,)).fetchone()
+        row = self._execute_read_one("SELECT * FROM identities WHERE city_id = ?", (city_id,))
         if row is None:
             return None
         return CityIdentity(city_id=row["city_id"], slug=row["slug"], repo=row["repo"], public_key=row["public_key"], labels=json.loads(row["labels"]))
 
     def list_identities(self) -> list[CityIdentity]:
-        rows = self._conn().execute("SELECT * FROM identities ORDER BY city_id").fetchall()
+        rows = self._execute_read("SELECT * FROM identities ORDER BY city_id")
         return [CityIdentity(city_id=r["city_id"], slug=r["slug"], repo=r["repo"], public_key=r["public_key"], labels=json.loads(r["labels"])) for r in rows]
 
     # --- Endpoints ---
@@ -290,13 +290,13 @@ class SqliteCityRegistry:
         )
 
     def get_endpoint(self, city_id: str) -> CityEndpoint | None:
-        row = self._conn().execute("SELECT * FROM endpoints WHERE city_id = ?", (city_id,)).fetchone()
+        row = self._execute_read_one("SELECT * FROM endpoints WHERE city_id = ?", (city_id,))
         if row is None:
             return None
         return CityEndpoint(city_id=row["city_id"], transport=row["transport"], location=row["location"])
 
     def list_endpoints(self) -> list[CityEndpoint]:
-        rows = self._conn().execute("SELECT * FROM endpoints ORDER BY city_id").fetchall()
+        rows = self._execute_read("SELECT * FROM endpoints ORDER BY city_id")
         return [CityEndpoint(city_id=r["city_id"], transport=r["transport"], location=r["location"]) for r in rows]
 
     # --- Link addresses ---
@@ -323,13 +323,13 @@ class SqliteCityRegistry:
             return LotusLinkAddress(city_id=city_id, mac_address=mac, interface=interface, lease_started_at=started_at, lease_expires_at=expires_at)
 
     def get_link_address(self, city_id: str) -> LotusLinkAddress | None:
-        row = self._conn().execute("SELECT * FROM link_addresses WHERE city_id = ?", (city_id,)).fetchone()
+        row = self._execute_read_one("SELECT * FROM link_addresses WHERE city_id = ?", (city_id,))
         if row is None:
             return None
         return LotusLinkAddress(city_id=row["city_id"], mac_address=row["mac_address"], interface=row["interface"], lease_started_at=row["lease_started_at"], lease_expires_at=row["lease_expires_at"])
 
     def list_link_addresses(self) -> list[LotusLinkAddress]:
-        rows = self._conn().execute("SELECT * FROM link_addresses ORDER BY city_id").fetchall()
+        rows = self._execute_read("SELECT * FROM link_addresses ORDER BY city_id")
         return [LotusLinkAddress(city_id=r["city_id"], mac_address=r["mac_address"], interface=r["interface"], lease_started_at=r["lease_started_at"], lease_expires_at=r["lease_expires_at"]) for r in rows]
 
     # --- Network addresses ---
@@ -356,13 +356,13 @@ class SqliteCityRegistry:
             return LotusNetworkAddress(city_id=city_id, ip_address=ip, prefix_length=prefix_length, lease_started_at=started_at, lease_expires_at=expires_at)
 
     def get_network_address(self, city_id: str) -> LotusNetworkAddress | None:
-        row = self._conn().execute("SELECT * FROM network_addresses WHERE city_id = ?", (city_id,)).fetchone()
+        row = self._execute_read_one("SELECT * FROM network_addresses WHERE city_id = ?", (city_id,))
         if row is None:
             return None
         return LotusNetworkAddress(city_id=row["city_id"], ip_address=row["ip_address"], prefix_length=row["prefix_length"], lease_started_at=row["lease_started_at"], lease_expires_at=row["lease_expires_at"])
 
     def list_network_addresses(self) -> list[LotusNetworkAddress]:
-        rows = self._conn().execute("SELECT * FROM network_addresses ORDER BY city_id").fetchall()
+        rows = self._execute_read("SELECT * FROM network_addresses ORDER BY city_id")
         return [LotusNetworkAddress(city_id=r["city_id"], ip_address=r["ip_address"], prefix_length=r["prefix_length"], lease_started_at=r["lease_started_at"], lease_expires_at=r["lease_expires_at"]) for r in rows]
 
     # --- Hosted endpoints ---
@@ -374,13 +374,13 @@ class SqliteCityRegistry:
         )
 
     def get_hosted_endpoint(self, endpoint_id: str) -> HostedEndpoint | None:
-        row = self._conn().execute("SELECT * FROM hosted_endpoints WHERE endpoint_id = ?", (endpoint_id,)).fetchone()
+        row = self._execute_read_one("SELECT * FROM hosted_endpoints WHERE endpoint_id = ?", (endpoint_id,))
         if row is None:
             return None
         return self._row_to_hosted_endpoint(row)
 
     def get_hosted_endpoint_by_handle(self, public_handle: str, *, now: float | None = None) -> HostedEndpoint | None:
-        row = self._conn().execute("SELECT * FROM hosted_endpoints WHERE public_handle = ?", (public_handle,)).fetchone()
+        row = self._execute_read_one("SELECT * FROM hosted_endpoints WHERE public_handle = ?", (public_handle,))
         if row is None:
             return None
         ep = self._row_to_hosted_endpoint(row)
@@ -389,7 +389,7 @@ class SqliteCityRegistry:
         return ep
 
     def list_hosted_endpoints(self) -> list[HostedEndpoint]:
-        rows = self._conn().execute("SELECT * FROM hosted_endpoints ORDER BY endpoint_id").fetchall()
+        rows = self._execute_read("SELECT * FROM hosted_endpoints ORDER BY endpoint_id")
         return [self._row_to_hosted_endpoint(r) for r in rows]
 
     @staticmethod
@@ -410,7 +410,7 @@ class SqliteCityRegistry:
         )
 
     def get_service_address(self, service_id: str) -> LotusServiceAddress | None:
-        row = self._conn().execute("SELECT * FROM service_addresses WHERE service_id = ?", (service_id,)).fetchone()
+        row = self._execute_read_one("SELECT * FROM service_addresses WHERE service_id = ?", (service_id,))
         if row is None:
             return None
         svc = self._row_to_service(row)
@@ -419,7 +419,7 @@ class SqliteCityRegistry:
         return svc
 
     def get_service_address_by_name(self, owner_city_id: str, service_name: str, *, now: float | None = None) -> LotusServiceAddress | None:
-        row = self._conn().execute("SELECT * FROM service_addresses WHERE owner_city_id = ? AND service_name = ?", (owner_city_id, service_name)).fetchone()
+        row = self._execute_read_one("SELECT * FROM service_addresses WHERE owner_city_id = ? AND service_name = ?", (owner_city_id, service_name))
         if row is None:
             return None
         svc = self._row_to_service(row)
@@ -428,7 +428,7 @@ class SqliteCityRegistry:
         return svc
 
     def list_service_addresses(self) -> list[LotusServiceAddress]:
-        rows = self._conn().execute("SELECT * FROM service_addresses ORDER BY service_id").fetchall()
+        rows = self._execute_read("SELECT * FROM service_addresses ORDER BY service_id")
         return [self._row_to_service(r) for r in rows]
 
     @staticmethod
@@ -450,7 +450,7 @@ class SqliteCityRegistry:
         )
 
     def get_route(self, route_id: str) -> LotusRoute | None:
-        row = self._conn().execute("SELECT * FROM routes WHERE route_id = ?", (route_id,)).fetchone()
+        row = self._execute_read_one("SELECT * FROM routes WHERE route_id = ?", (route_id,))
         if row is None:
             return None
         route = self._row_to_route(row)
@@ -459,7 +459,7 @@ class SqliteCityRegistry:
         return route
 
     def list_routes(self) -> list[LotusRoute]:
-        rows = self._conn().execute("SELECT * FROM routes ORDER BY route_id").fetchall()
+        rows = self._execute_read("SELECT * FROM routes ORDER BY route_id")
         return [self._row_to_route(r) for r in rows]
 
     @staticmethod
@@ -481,19 +481,19 @@ class SqliteCityRegistry:
         )
 
     def get_api_token(self, token_id: str) -> LotusApiToken | None:
-        row = self._conn().execute("SELECT * FROM api_tokens WHERE token_id = ?", (token_id,)).fetchone()
+        row = self._execute_read_one("SELECT * FROM api_tokens WHERE token_id = ?", (token_id,))
         if row is None:
             return None
         return self._row_to_token(row)
 
     def get_api_token_by_sha256(self, token_sha256: str) -> LotusApiToken | None:
-        row = self._conn().execute("SELECT * FROM api_tokens WHERE token_sha256 = ?", (token_sha256,)).fetchone()
+        row = self._execute_read_one("SELECT * FROM api_tokens WHERE token_sha256 = ?", (token_sha256,))
         if row is None:
             return None
         return self._row_to_token(row)
 
     def list_api_tokens(self) -> list[LotusApiToken]:
-        rows = self._conn().execute("SELECT * FROM api_tokens ORDER BY token_id").fetchall()
+        rows = self._execute_read("SELECT * FROM api_tokens ORDER BY token_id")
         return [self._row_to_token(r) for r in rows]
 
     @staticmethod
@@ -513,13 +513,13 @@ class SqliteCityRegistry:
         )
 
     def get_space(self, space_id: str) -> SpaceDescriptor | None:
-        row = self._conn().execute("SELECT * FROM spaces WHERE space_id = ?", (space_id,)).fetchone()
+        row = self._execute_read_one("SELECT * FROM spaces WHERE space_id = ?", (space_id,))
         if row is None:
             return None
         return self._row_to_space(row)
 
     def list_spaces(self) -> list[SpaceDescriptor]:
-        rows = self._conn().execute("SELECT * FROM spaces ORDER BY space_id").fetchall()
+        rows = self._execute_read("SELECT * FROM spaces ORDER BY space_id")
         return [self._row_to_space(r) for r in rows]
 
     @staticmethod
@@ -539,13 +539,13 @@ class SqliteCityRegistry:
         )
 
     def get_slot(self, slot_id: str) -> SlotDescriptor | None:
-        row = self._conn().execute("SELECT * FROM slots WHERE slot_id = ?", (slot_id,)).fetchone()
+        row = self._execute_read_one("SELECT * FROM slots WHERE slot_id = ?", (slot_id,))
         if row is None:
             return None
         return self._row_to_slot(row)
 
     def list_slots(self) -> list[SlotDescriptor]:
-        rows = self._conn().execute("SELECT * FROM slots ORDER BY slot_id").fetchall()
+        rows = self._execute_read("SELECT * FROM slots ORDER BY slot_id")
         return [self._row_to_slot(r) for r in rows]
 
     @staticmethod
@@ -566,13 +566,13 @@ class SqliteCityRegistry:
         )
 
     def get_fork_lineage(self, lineage_id: str) -> ForkLineageRecord | None:
-        row = self._conn().execute("SELECT * FROM fork_lineage WHERE lineage_id = ?", (lineage_id,)).fetchone()
+        row = self._execute_read_one("SELECT * FROM fork_lineage WHERE lineage_id = ?", (lineage_id,))
         if row is None:
             return None
         return self._row_to_lineage(row)
 
     def list_fork_lineage(self) -> list[ForkLineageRecord]:
-        rows = self._conn().execute("SELECT * FROM fork_lineage ORDER BY lineage_id").fetchall()
+        rows = self._execute_read("SELECT * FROM fork_lineage ORDER BY lineage_id")
         return [self._row_to_lineage(r) for r in rows]
 
     @staticmethod
@@ -594,13 +594,13 @@ class SqliteCityRegistry:
         )
 
     def get_intent(self, intent_id: str) -> IntentRecord | None:
-        row = self._conn().execute("SELECT * FROM intents WHERE intent_id = ?", (intent_id,)).fetchone()
+        row = self._execute_read_one("SELECT * FROM intents WHERE intent_id = ?", (intent_id,))
         if row is None:
             return None
         return self._row_to_intent(row)
 
     def list_intents(self) -> list[IntentRecord]:
-        rows = self._conn().execute("SELECT * FROM intents ORDER BY intent_id").fetchall()
+        rows = self._execute_read("SELECT * FROM intents ORDER BY intent_id")
         return [self._row_to_intent(r) for r in rows]
 
     @staticmethod
@@ -624,19 +624,19 @@ class SqliteCityRegistry:
         )
 
     def get_presence(self, city_id: str) -> CityPresence | None:
-        row = self._conn().execute("SELECT * FROM presence WHERE city_id = ?", (city_id,)).fetchone()
+        row = self._execute_read_one("SELECT * FROM presence WHERE city_id = ?", (city_id,))
         if row is None:
             return None
         return CityPresence(city_id=row["city_id"], health=HealthStatus(row["health"]), last_seen_at=row["last_seen_at"], heartbeat=row["heartbeat"], capabilities=tuple(json.loads(row["capabilities"])))
 
     def list_cities(self) -> list[CityPresence]:
-        rows = self._conn().execute("SELECT * FROM presence ORDER BY city_id").fetchall()
+        rows = self._execute_read("SELECT * FROM presence ORDER BY city_id")
         return [CityPresence(city_id=r["city_id"], health=HealthStatus(r["health"]), last_seen_at=r["last_seen_at"], heartbeat=r["heartbeat"], capabilities=tuple(json.loads(r["capabilities"]))) for r in rows]
 
     # --- Allocation state ---
 
     def allocation_state(self) -> dict[str, int]:
-        rows = self._conn().execute("SELECT key, value FROM allocator").fetchall()
+        rows = self._execute_read("SELECT key, value FROM allocator")
         return {r["key"]: r["value"] for r in rows}
 
     def restore_allocation_state(self, *, next_link_id: int = 1, next_network_id: int = 1) -> None:

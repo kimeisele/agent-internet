@@ -346,6 +346,40 @@ class IntentActuatorRegistry:
 
         outcome = actuator.actuate(intent, context)
         self._outcomes.append(outcome)
+
+        # Transition intent state based on outcome
+        if not context.dry_run and context.control_plane is not None:
+            upsert = getattr(context.control_plane, "upsert_intent", None)
+            if callable(upsert):
+                new_status = {
+                    ActuatorResult.SUCCESS: IntentStatus.FULFILLED,
+                    ActuatorResult.FAILED: IntentStatus.REJECTED,
+                    ActuatorResult.DEFERRED: IntentStatus.ACCEPTED,
+                    ActuatorResult.SKIPPED: IntentStatus.ACCEPTED,
+                }
+                target_status = new_status.get(outcome.result, IntentStatus.ACCEPTED)
+                if target_status != intent.status:
+                    updated = IntentRecord(
+                        intent_id=intent.intent_id,
+                        intent_type=intent.intent_type,
+                        status=target_status,
+                        title=intent.title,
+                        description=intent.description,
+                        requested_by_subject_id=intent.requested_by_subject_id,
+                        repo=intent.repo,
+                        city_id=intent.city_id,
+                        space_id=intent.space_id,
+                        slot_id=intent.slot_id,
+                        lineage_id=intent.lineage_id,
+                        discussion_id=intent.discussion_id,
+                        linked_issue_url=intent.linked_issue_url,
+                        linked_pr_url=intent.linked_pr_url,
+                        created_at=intent.created_at,
+                        updated_at=time.time(),
+                        labels=intent.labels,
+                    )
+                    upsert(updated)
+
         return outcome
 
     def actuate_pending(self, intents: list[IntentRecord], context: ActuationContext) -> list[ActuationOutcome]:
