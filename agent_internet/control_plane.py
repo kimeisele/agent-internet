@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Any
 
 from .agent_city_bridge import AgentCityBridge
 from .assistant_surface import assistant_social_slot_from_snapshot, assistant_space_from_snapshot
@@ -45,6 +49,27 @@ from .trust import InMemoryTrustEngine
 STEWARD_PROTOCOL_REPO_ID = "steward-protocol"
 AGENT_INTERNET_REPO_ID = "agent-internet"
 STEWARD_PUBLIC_WIKI_BINDING_ID = "steward-public-wiki"
+
+
+def _json_sha256(payload: object) -> str:
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _load_json_object(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text())
+    if not isinstance(payload, dict):
+        raise TypeError(f"expected_json_object:{path}")
+    return payload
+
+
+def _resolve_bundle_artifact_path(bundle_dir: Path, relative_path: str) -> Path:
+    candidate = (bundle_dir / relative_path).resolve()
+    root = bundle_dir.resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"unsafe_authority_artifact_path:{relative_path}") from exc
+    return candidate
 
 
 @dataclass(slots=True)
@@ -243,6 +268,128 @@ class AgentInternetControlPlane:
 
     def upsert_publication_status(self, record: PublicationStatusRecord) -> None:
         self.registry.upsert_publication_status(record)
+
+    def ingest_authority_bundle(self, bundle: dict[str, Any], *, artifacts: dict[str, dict[str, Any]] | None = None, now: float | None = None) -> dict[str, object]:
+        checked_at = float(time.time() if now is None else now)
+        self.bootstrap_steward_public_wiki_contract(now=checked_at)
+        if str(bundle.get("kind", "")) != "source_authority_bundle":
+            raise ValueError("invalid_authority_bundle_kind")
+
+        role_payload = bundle.get("repo_role")
+        if not isinstance(role_payload, dict):
+            raise TypeError("invalid_authority_bundle_repo_role")
+        repo_role = RepoRoleRecord(
+            repo_id=str(role_payload["repo_id"]),
+            role=RepoRole(str(role_payload.get("role", RepoRole.RUNTIME_CITY_OPERATOR.value))),
+            owner_boundary=str(role_payload.get("owner_boundary", "")),
+            exports=tuple(str(item) for item in role_payload.get("exports", ())),
+            consumes=tuple(str(item) for item in role_payload.get("consumes", ())),
+            publication_targets=tuple(str(item) for item in role_payload.get("publication_targets", ())),
+            labels={str(key): str(value) for key, value in dict(role_payload.get("labels", {})).items()},
+        )
+        self.registry.upsert_repo_role(repo_role)
+
+        artifact_payloads = {str(path): payload for path, payload in (artifacts or {}).items()}
+        imported_exports: list[AuthorityExportRecord] = []
+        for item in bundle.get("authority_exports", []):
+            if not isinstance(item, dict):
+                raise TypeError("invalid_authority_export_record")
+            record = AuthorityExportRecord(
+                export_id=str(item["export_id"]),
+                repo_id=str(item["repo_id"]),
+                export_kind=AuthorityExportKind(str(item["export_kind"])),
+                version=str(item.get("version", "")),
+                artifact_uri=str(item.get("artifact_uri", "")),
+                generated_at=(None if item.get("generated_at") is None else float(item["generated_at"])),
+                contract_version=int(item.get("contract_version", 1)),
+                content_sha256=str(item.get("content_sha256", "")),
+                labels={str(key): str(value) for key, value in dict(item.get("labels", {})).items()},
+            )
+            artifact_payload = artifact_payloads.get(record.artifact_uri)
+            if artifact_payload is not None and record.content_sha256 and _json_sha256(artifact_payload) != record.content_sha256:
+                raise ValueError(f"authority_export_digest_mismatch:{record.export_id}")
+            self.registry.upsert_authority_export(record)
+            imported_exports.append(record)
+
+        publication_statuses = [self._reconcile_projection_binding(binding.binding_id, checked_at=checked_at, bundle=bundle) for binding in self.registry.list_projection_bindings()]
+        return {
+            "repo_role": repo_role,
+            "authority_exports": imported_exports,
+            "publication_statuses": publication_statuses,
+            "artifact_count": len(artifact_payloads),
+        }
+
+    def ingest_authority_bundle_path(self, bundle_path: str | Path, *, now: float | None = None) -> dict[str, object]:
+        path = Path(bundle_path).resolve()
+        bundle = _load_json_object(path)
+        artifact_paths_payload = bundle.get("artifact_paths", {})
+        if not isinstance(artifact_paths_payload, dict):
+            raise TypeError("invalid_authority_bundle_artifact_paths")
+        artifacts = {
+            str(relative_path): _load_json_object(_resolve_bundle_artifact_path(path.parent, str(relative_path)))
+            for relative_path in artifact_paths_payload.values()
+        }
+        imported = self.ingest_authority_bundle(bundle, artifacts=artifacts, now=now)
+        return imported | {"bundle_path": str(path), "artifact_paths": tuple(sorted(artifacts))}
+
+    def _reconcile_projection_binding(self, binding_id: str, *, checked_at: float, bundle: dict[str, Any]) -> PublicationStatusRecord:
+        binding = self.registry.get_projection_binding(binding_id)
+        if binding is None:
+            raise ValueError(f"unknown_projection_binding:{binding_id}")
+        export = self.registry.find_authority_export(binding.source_repo_id, binding.required_export_kind.value)
+        existing = self.registry.get_publication_status(binding.binding_id)
+        labels = dict(existing.labels if existing is not None else {})
+        if export is not None:
+            labels.update(
+                {
+                    "source_export_version": export.version,
+                    "source_export_sha256": export.content_sha256,
+                },
+            )
+            bundle_source_sha = str(bundle.get("source_sha", "")).strip()
+            if bundle_source_sha:
+                labels["authority_bundle_source_sha"] = bundle_source_sha
+            if bundle.get("generated_at") is not None:
+                labels["authority_bundle_generated_at"] = str(bundle["generated_at"])
+        else:
+            for key in ("source_export_version", "source_export_sha256", "authority_bundle_source_sha", "authority_bundle_generated_at"):
+                labels.pop(key, None)
+
+        if export is None:
+            status = PublicationStatusRecord(
+                binding_id=binding.binding_id,
+                status=PublicationState.BLOCKED,
+                projected_from_export_id="",
+                target_kind=binding.target_kind,
+                target_locator=binding.target_locator,
+                checked_at=checked_at,
+                stale=False,
+                failure_reason=f"missing_authority_export:{binding.source_repo_id}:{binding.required_export_kind.value}",
+                labels=labels,
+            )
+        else:
+            matches_current_source = (
+                existing is not None
+                and existing.projected_from_export_id == export.export_id
+                and existing.labels.get("source_export_version", "") == export.version
+                and existing.labels.get("source_export_sha256", "") == export.content_sha256
+            )
+            if matches_current_source and existing.status in {PublicationState.SUCCESS, PublicationState.FAILED, PublicationState.STALE}:
+                status = replace(existing, target_kind=binding.target_kind, target_locator=binding.target_locator, checked_at=checked_at, labels=labels)
+            else:
+                status = PublicationStatusRecord(
+                    binding_id=binding.binding_id,
+                    status=PublicationState.STALE,
+                    projected_from_export_id=export.export_id,
+                    target_kind=binding.target_kind,
+                    target_locator=binding.target_locator,
+                    checked_at=checked_at,
+                    stale=True,
+                    failure_reason="projection_out_of_date" if existing is not None and existing.published_at is not None else "projection_not_published",
+                    labels=labels,
+                )
+        self.registry.upsert_publication_status(status)
+        return status
 
     def bootstrap_steward_public_wiki_contract(self, *, now: float | None = None) -> dict[str, object]:
         checked_at = float(time.time() if now is None else now)

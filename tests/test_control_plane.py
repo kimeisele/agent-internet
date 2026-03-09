@@ -1,4 +1,5 @@
 import json
+from hashlib import sha256
 
 import pytest
 
@@ -9,6 +10,70 @@ from agent_internet.control_plane import AGENT_INTERNET_REPO_ID, STEWARD_PROTOCO
 from agent_internet.filesystem_transport import FilesystemFederationTransport
 from agent_internet.models import AssistantSurfaceSnapshot, AuthorityExportKind, AuthorityExportRecord, CityEndpoint, CityIdentity, EndpointVisibility, ForkLineageRecord, ForkMode, HealthStatus, IntentRecord, IntentStatus, IntentType, LotusApiScope, ProjectionFailurePolicy, ProjectionMode, PublicationState, RepoRole, SlotStatus, SpaceKind, TrustLevel, TrustRecord, UpstreamSyncPolicy
 from agent_internet.snapshot import restore_control_plane, snapshot_control_plane
+
+
+def _write_steward_authority_bundle(tmp_path, *, version: str = "2026-03-09T17:00:00Z", source_sha: str = "abc123"):
+    bundle_dir = tmp_path / "bundle"
+    artifacts_dir = bundle_dir / ".authority-exports"
+    artifacts_dir.mkdir(parents=True)
+    canonical_payload = {"kind": "canonical_surface", "documents": [{"document_id": "constitution", "title": "Constitution"}]}
+    public_summary_payload = {"kind": "public_summary_registry", "records": [{"id": "constitution", "public_summary": "Normative steward summary"}]}
+    source_surface_payload = {"kind": "source_surface_registry", "pages": [{"id": "CONSTITUTION", "wiki_name": "Constitution"}]}
+    repo_graph_payload = {"kind": "repo_graph", "summary": {"node_count": 4, "edge_count": 3}}
+    surface_metadata_payload = {"kind": "surface_metadata", "surface_registry": {"kind": "wiki_surface_registry", "page_count": 1}}
+    artifacts = {
+        ".authority-exports/canonical-surface.json": canonical_payload,
+        ".authority-exports/public-summary-registry.json": public_summary_payload,
+        ".authority-exports/source-surface-registry.json": source_surface_payload,
+        ".authority-exports/repo-graph.json": repo_graph_payload,
+        ".authority-exports/surface-metadata.json": surface_metadata_payload,
+    }
+    for relative_path, payload in artifacts.items():
+        target = bundle_dir / relative_path
+        target.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    authority_exports = []
+    for export_kind, relative_path in {
+        AuthorityExportKind.CANONICAL_SURFACE.value: ".authority-exports/canonical-surface.json",
+        AuthorityExportKind.PUBLIC_SUMMARY_REGISTRY.value: ".authority-exports/public-summary-registry.json",
+        AuthorityExportKind.SOURCE_SURFACE_REGISTRY.value: ".authority-exports/source-surface-registry.json",
+        AuthorityExportKind.REPO_GRAPH.value: ".authority-exports/repo-graph.json",
+        AuthorityExportKind.SURFACE_METADATA.value: ".authority-exports/surface-metadata.json",
+    }.items():
+        payload = artifacts[relative_path]
+        digest = sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        authority_exports.append(
+            {
+                "export_id": f"steward-protocol/{export_kind}",
+                "repo_id": STEWARD_PROTOCOL_REPO_ID,
+                "export_kind": export_kind,
+                "version": version,
+                "artifact_uri": relative_path,
+                "generated_at": 170.0,
+                "contract_version": 1,
+                "content_sha256": digest,
+                "labels": {"source_sha": source_sha},
+            },
+        )
+    bundle = {
+        "kind": "source_authority_bundle",
+        "contract_version": 1,
+        "generated_at": 171.0,
+        "source_sha": source_sha,
+        "repo_role": {
+            "repo_id": STEWARD_PROTOCOL_REPO_ID,
+            "role": RepoRole.NORMATIVE_SOURCE.value,
+            "owner_boundary": "normative_protocol_surface",
+            "exports": [record["export_kind"] for record in authority_exports],
+            "consumes": [],
+            "publication_targets": [STEWARD_PUBLIC_WIKI_BINDING_ID],
+            "labels": {"public_surface_owner": AGENT_INTERNET_REPO_ID},
+        },
+        "authority_exports": authority_exports,
+        "artifact_paths": {record["export_kind"]: record["artifact_uri"] for record in authority_exports},
+    }
+    bundle_path = bundle_dir / ".authority-export-bundle.json"
+    bundle_path.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n")
+    return bundle_path, bundle, artifacts
 
 
 def test_city_presence_from_report_maps_health_states():
@@ -334,3 +399,67 @@ def test_control_plane_bootstrap_preserves_existing_publication_status_and_snaps
     assert restored.registry.get_projection_binding(STEWARD_PUBLIC_WIKI_BINDING_ID).target_kind == "github_wiki"
     assert restored_status.status == PublicationState.SUCCESS
     assert restored_status.published_at == 224.0
+
+
+def test_control_plane_ingests_authority_bundle_path_and_reconciles_publication_status(tmp_path):
+    plane = AgentInternetControlPlane()
+    bundle_path, _bundle, artifacts = _write_steward_authority_bundle(tmp_path)
+
+    imported = plane.ingest_authority_bundle_path(bundle_path, now=200.0)
+
+    canonical = plane.registry.get_authority_export("steward-protocol/canonical_surface")
+    status = plane.registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID)
+
+    assert imported["artifact_count"] == len(artifacts)
+    assert canonical.artifact_uri == ".authority-exports/canonical-surface.json"
+    assert canonical.content_sha256
+    assert status.status == PublicationState.STALE
+    assert status.projected_from_export_id == canonical.export_id
+    assert status.failure_reason == "projection_not_published"
+    assert status.labels["source_export_version"] == canonical.version
+    assert status.labels["authority_bundle_source_sha"] == "abc123"
+
+
+def test_control_plane_ingest_authority_bundle_preserves_current_success_when_source_matches(tmp_path):
+    plane = AgentInternetControlPlane()
+    bundle_path, bundle, _artifacts = _write_steward_authority_bundle(tmp_path, version="2026-03-09T18:00:00Z", source_sha="def456")
+    plane.ingest_authority_bundle_path(bundle_path, now=210.0)
+    canonical = plane.registry.get_authority_export("steward-protocol/canonical_surface")
+    plane.upsert_publication_status(
+        plane.registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID).__class__(
+            binding_id=STEWARD_PUBLIC_WIKI_BINDING_ID,
+            status=PublicationState.SUCCESS,
+            projected_from_export_id=canonical.export_id,
+            target_kind="github_wiki",
+            target_locator="github.com/kimeisele/steward-protocol.wiki.git",
+            published_at=211.0,
+            checked_at=211.0,
+            stale=False,
+            failure_reason="",
+            labels={
+                "source_export_version": canonical.version,
+                "source_export_sha256": canonical.content_sha256,
+                "authority_bundle_source_sha": "def456",
+            },
+        ),
+    )
+
+    plane.ingest_authority_bundle(bundle, artifacts={}, now=212.0)
+    status = plane.registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID)
+
+    assert status.status == PublicationState.SUCCESS
+    assert status.published_at == 211.0
+    assert status.checked_at == 212.0
+    assert status.labels["source_export_sha256"] == canonical.content_sha256
+
+
+def test_control_plane_ingest_authority_bundle_rejects_digest_mismatch(tmp_path):
+    plane = AgentInternetControlPlane()
+    bundle_path, bundle, artifacts = _write_steward_authority_bundle(tmp_path)
+    bad_artifacts = dict(artifacts)
+    bad_artifacts[".authority-exports/canonical-surface.json"] = {"kind": "canonical_surface", "documents": []}
+
+    with pytest.raises(ValueError, match="authority_export_digest_mismatch:steward-protocol/canonical_surface"):
+        plane.ingest_authority_bundle(bundle, artifacts=bad_artifacts, now=220.0)
+
+    assert bundle_path.exists()

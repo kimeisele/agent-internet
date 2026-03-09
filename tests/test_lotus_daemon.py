@@ -1,4 +1,5 @@
 import json
+from hashlib import sha256
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -28,6 +29,47 @@ from agent_internet.models import (
 from agent_internet.agent_web_source_registry import upsert_agent_web_source_registry_entry
 from agent_internet.agent_web_semantic_overlay import upsert_agent_web_semantic_bridge
 from agent_internet.snapshot import ControlPlaneStateStore
+
+
+def _write_authority_bundle(tmp_path, *, version: str = "2026-03-09T20:00:00Z"):
+    bundle_dir = tmp_path / "bundle"
+    (bundle_dir / ".authority-exports").mkdir(parents=True)
+    canonical_payload = {"kind": "canonical_surface", "documents": [{"document_id": "constitution"}]}
+    canonical_path = ".authority-exports/canonical-surface.json"
+    (bundle_dir / canonical_path).write_text(json.dumps(canonical_payload, indent=2, sort_keys=True) + "\n")
+    canonical_digest = sha256(json.dumps(canonical_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    bundle = {
+        "kind": "source_authority_bundle",
+        "contract_version": 1,
+        "generated_at": 401.0,
+        "source_sha": "112233",
+        "repo_role": {
+            "repo_id": "steward-protocol",
+            "role": "normative_source",
+            "owner_boundary": "normative_protocol_surface",
+            "exports": ["canonical_surface"],
+            "consumes": [],
+            "publication_targets": [STEWARD_PUBLIC_WIKI_BINDING_ID],
+            "labels": {"public_surface_owner": "agent-internet"},
+        },
+        "authority_exports": [
+            {
+                "export_id": "steward-protocol/canonical_surface",
+                "repo_id": "steward-protocol",
+                "export_kind": "canonical_surface",
+                "version": version,
+                "artifact_uri": canonical_path,
+                "generated_at": 400.0,
+                "contract_version": 1,
+                "content_sha256": canonical_digest,
+                "labels": {"source_sha": "112233"},
+            },
+        ],
+        "artifact_paths": {"canonical_surface": canonical_path},
+    }
+    bundle_path = bundle_dir / ".authority-export-bundle.json"
+    bundle_path.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n")
+    return bundle_path
 
 
 def _request_json(base_url: str, path: str, *, method: str = "GET", token: str = "", payload: dict | None = None) -> tuple[int, dict]:
@@ -926,6 +968,40 @@ def test_lotus_daemon_serves_federation_contract_http_api(tmp_path):
         status, publication_statuses = _request_json(daemon.base_url, "/v1/lotus/publication-statuses", token=root_secret)
         assert status == 200
         assert publication_statuses["publication_statuses"][0]["status"] == "success"
+    finally:
+        daemon.shutdown()
+
+
+def test_lotus_daemon_imports_authority_bundle_http_api(tmp_path):
+    bundle_path = _write_authority_bundle(tmp_path)
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    root_secret = store.update(
+        lambda plane: LotusControlPlaneAPI(plane).issue_token(
+            subject="root",
+            scopes=(LotusApiScope.READ.value, LotusApiScope.CONTRACT_WRITE.value),
+            token_secret="contract-root",
+            token_id="tok-contract-root",
+        ).secret,
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        status, payload = _request_json(
+            daemon.base_url,
+            "/v1/lotus/authority-bundles/import",
+            method="POST",
+            token=root_secret,
+            payload={"bundle_path": str(bundle_path), "now": 405.0},
+        )
+        assert status == 200
+        assert payload["imported"]["repo_role"]["repo_id"] == "steward-protocol"
+        assert payload["imported"]["authority_exports"][0]["export_kind"] == "canonical_surface"
+        assert payload["imported"]["publication_statuses"][0]["status"] == "stale"
+
+        status, publication_statuses = _request_json(daemon.base_url, "/v1/lotus/publication-statuses", token=root_secret)
+        assert status == 200
+        assert publication_statuses["publication_statuses"][0]["labels"]["authority_bundle_source_sha"] == "112233"
     finally:
         daemon.shutdown()
 
