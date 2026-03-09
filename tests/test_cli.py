@@ -1,8 +1,11 @@
 import json
 import subprocess
+from dataclasses import replace
+from hashlib import sha256
 
 from agent_internet.cli import main
-from agent_internet.models import ForkLineageRecord, ForkMode, UpstreamSyncPolicy
+from agent_internet.control_plane import STEWARD_AUTHORITY_BUNDLE_FEED_ID, STEWARD_PROTOCOL_REPO_ID, STEWARD_PUBLIC_WIKI_BINDING_ID
+from agent_internet.models import AuthorityExportKind, ForkLineageRecord, ForkMode, PublicationState, UpstreamSyncPolicy
 from agent_internet.snapshot import ControlPlaneStateStore
 
 
@@ -25,6 +28,47 @@ def _init_git_repo(tmp_path):
     _git(repo_root, "push", "origin", "HEAD")
     _git(repo_root, "remote", "set-url", "origin", "git@github.com:org/agent-city-cli.git")
     return repo_root, wiki_remote
+
+
+def _write_steward_authority_bundle(tmp_path, *, version="v-cli", source_sha="bundle-cli"):
+    bundle_dir = tmp_path / "bundle"
+    artifacts_dir = bundle_dir / ".authority-exports"
+    artifacts_dir.mkdir(parents=True)
+    canonical_payload = {"kind": "canonical_surface", "documents": [{"document_id": "constitution", "content": "CLI steward content"}]}
+    relative_path = ".authority-exports/canonical-surface.json"
+    (bundle_dir / relative_path).write_text(json.dumps(canonical_payload, indent=2, sort_keys=True) + "\n")
+    digest = sha256(json.dumps(canonical_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    bundle = {
+        "kind": "source_authority_bundle",
+        "generated_at": 171.0,
+        "source_sha": source_sha,
+        "repo_role": {
+            "repo_id": STEWARD_PROTOCOL_REPO_ID,
+            "role": "normative_source",
+            "owner_boundary": "normative_protocol_surface",
+            "exports": [AuthorityExportKind.CANONICAL_SURFACE.value],
+            "consumes": [],
+            "publication_targets": [STEWARD_PUBLIC_WIKI_BINDING_ID],
+            "labels": {"public_surface_owner": "agent-internet"},
+        },
+        "authority_exports": [
+            {
+                "export_id": f"{STEWARD_PROTOCOL_REPO_ID}/canonical_surface",
+                "repo_id": STEWARD_PROTOCOL_REPO_ID,
+                "export_kind": AuthorityExportKind.CANONICAL_SURFACE.value,
+                "version": version,
+                "artifact_uri": relative_path,
+                "generated_at": 170.0,
+                "contract_version": 1,
+                "content_sha256": digest,
+                "labels": {"source_sha": source_sha},
+            },
+        ],
+        "artifact_paths": {AuthorityExportKind.CANONICAL_SURFACE.value: relative_path},
+    }
+    bundle_path = bundle_dir / ".authority-export-bundle.json"
+    bundle_path.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n")
+    return bundle_path
 
 
 def test_cli_onboards_agent_city_and_persists_state(tmp_path, capsys):
@@ -199,6 +243,43 @@ def test_cli_git_federation_describe_and_sync_wiki(tmp_path, capsys):
     assert "# Assistant Surface" in (clone_path / "Assistant-Surface.md").read_text()
     assert "Fork Mode: `sovereign` / Sync: `tracked`" in (clone_path / "Home.md").read_text()
     assert "Current Repo Lineage" in (clone_path / "Lineage.md").read_text()
+
+
+def test_cli_projection_reconcile_once(tmp_path, capsys):
+    repo_root, wiki_remote = _init_git_repo(tmp_path)
+    state_path = tmp_path / "state" / "control_plane.json"
+    bundle_path = _write_steward_authority_bundle(tmp_path)
+    store = ControlPlaneStateStore(path=state_path)
+
+    def _update(plane):
+        plane.bootstrap_steward_public_wiki_contract(now=100.0)
+        binding = plane.registry.get_projection_binding(STEWARD_PUBLIC_WIKI_BINDING_ID)
+        plane.upsert_projection_binding(replace(binding, target_locator=str(wiki_remote)))
+
+    store.update(_update)
+
+    assert main(
+        [
+            "projection-reconcile-once",
+            "--root",
+            str(repo_root),
+            "--state-path",
+            str(state_path),
+            "--bundle-path",
+            str(bundle_path),
+            "--wiki-repo-url",
+            str(wiki_remote),
+            "--wiki-checkout-path",
+            str(tmp_path / "wiki-checkout"),
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    plane = store.load()
+
+    assert payload["feed_id"] == STEWARD_AUTHORITY_BUNDLE_FEED_ID
+    assert payload["reconcile_state"] == "success"
+    assert payload["publication_state"] == PublicationState.SUCCESS.value
+    assert plane.registry.get_source_authority_feed(STEWARD_AUTHORITY_BUNDLE_FEED_ID).locator == str(bundle_path.resolve())
 
 
 def test_cli_git_federation_onboard_repo(tmp_path, capsys):
