@@ -4,6 +4,7 @@ import json
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from .agent_web import build_agent_web_manifest
@@ -22,6 +23,10 @@ from .agent_web_repo_graph_contracts import render_agent_web_repo_graph_contract
 from .agent_web_semantic_capabilities import render_agent_web_semantic_capability_page
 from .agent_web_semantic_contracts import render_agent_web_semantic_contract_page
 from .file_locking import write_locked_json_value
+
+
+STEWARD_PROTOCOL_REPO_ID = "steward-protocol"
+STEWARD_PUBLIC_WIKI_BINDING_ID = "steward-public-wiki"
 
 HOME_SUMMARY_START = "<!-- AGENT_INTERNET_SUMMARY_START -->"
 HOME_SUMMARY_END = "<!-- AGENT_INTERNET_SUMMARY_END -->"
@@ -174,6 +179,7 @@ def render_wiki_projection(
     routes = list(state_snapshot.get("routes", []))
     lineage_records = list(state_snapshot.get("fork_lineage", []))
     current_lineage = _resolve_current_lineage(identity=identity, git_manifest=git_manifest, lineage_records=lineage_records)
+    authority_view = _steward_authority_view(state_snapshot)
     summary_lines = [
         f"## Connected City: {identity.get('city_id', 'unknown')}",
         f"- Repo: `{identity.get('repo', '')}`",
@@ -210,6 +216,7 @@ def render_wiki_projection(
         )
     elif lineage_records:
         summary_lines.append(f"- Known Lineage Records: `{len(lineage_records)}`")
+    summary_lines.extend(_build_steward_home_summary_lines(authority_view))
     summary = "\n".join(summary_lines)
     home = _replace_block("# Agent Internet Federation\n\n", HOME_SUMMARY_START, HOME_SUMMARY_END, summary)
     assistant_page_snapshot = {
@@ -259,6 +266,8 @@ def render_wiki_projection(
         "Git-Federation.md": manifest_md.rstrip() + "\n",
         "Agent-Web.md": _render_agent_web_page(agent_web),
         "Assistant-Surface.md": _render_assistant_surface_page(assistant_page_snapshot),
+        "Steward-Authority.md": _render_steward_authority_page(authority_view),
+        "Steward-Canonical-Surface.md": _render_steward_canonical_surface_page(authority_view),
         "Semantic-Capabilities.md": render_agent_web_semantic_capability_page(dict(agent_web.get("semantic_capabilities", {}))),
         "Semantic-Contracts.md": render_agent_web_semantic_contract_page(dict(agent_web.get("semantic_contracts", {}))),
         "Repo-Graph-Capabilities.md": render_agent_web_repo_graph_capability_page(dict(agent_web.get("repo_graph_capabilities", {}))),
@@ -345,6 +354,153 @@ def _render_assistant_surface_page(assistant_snapshot: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _steward_authority_view(state_snapshot: dict) -> dict[str, Any]:
+    role = next(
+        (
+            dict(record)
+            for record in list(state_snapshot.get("repo_roles", []))
+            if isinstance(record, dict) and str(record.get("repo_id", "")) == STEWARD_PROTOCOL_REPO_ID
+        ),
+        None,
+    )
+    publication_status = next(
+        (
+            dict(record)
+            for record in list(state_snapshot.get("publication_statuses", []))
+            if isinstance(record, dict) and str(record.get("binding_id", "")) == STEWARD_PUBLIC_WIKI_BINDING_ID
+        ),
+        None,
+    )
+    exports_by_kind: dict[str, dict[str, Any]] = {}
+    for record in list(state_snapshot.get("authority_exports", [])):
+        if not isinstance(record, dict) or str(record.get("repo_id", "")) != STEWARD_PROTOCOL_REPO_ID:
+            continue
+        export_kind = str(record.get("export_kind", "")).strip()
+        if export_kind:
+            exports_by_kind[export_kind] = dict(record)
+    artifacts_by_export_id = {
+        str(record.get("export_id", "")): dict(record)
+        for record in list(state_snapshot.get("authority_artifacts", []))
+        if isinstance(record, dict)
+    }
+    artifacts_by_kind: dict[str, dict[str, Any]] = {}
+    for export_kind, export_record in exports_by_kind.items():
+        artifact_record = artifacts_by_export_id.get(str(export_record.get("export_id", "")))
+        payload = artifact_record.get("payload") if artifact_record is not None else None
+        if isinstance(payload, dict):
+            artifacts_by_kind[export_kind] = dict(payload)
+    return {
+        "role": role,
+        "publication_status": publication_status,
+        "exports_by_kind": exports_by_kind,
+        "artifacts_by_kind": artifacts_by_kind,
+    }
+
+
+def _build_steward_home_summary_lines(authority_view: dict[str, Any]) -> list[str]:
+    publication_status = authority_view.get("publication_status")
+    exports_by_kind = dict(authority_view.get("exports_by_kind", {}))
+    artifacts_by_kind = dict(authority_view.get("artifacts_by_kind", {}))
+    canonical_payload = dict(artifacts_by_kind.get("canonical_surface", {}))
+    if not publication_status and not exports_by_kind and not canonical_payload:
+        return []
+    status_labels = dict(publication_status.get("labels", {})) if isinstance(publication_status, dict) else {}
+    documents = [record for record in list(canonical_payload.get("documents", [])) if isinstance(record, dict)]
+    source_version = status_labels.get("source_export_version") or str(exports_by_kind.get("canonical_surface", {}).get("version", ""))
+    source_status = str(publication_status.get("status", "missing")) if isinstance(publication_status, dict) else "missing"
+    return [
+        f"- Steward Projection Status: `{source_status}`",
+        f"- Steward Source Export Version: `{source_version}`",
+        f"- Steward Canonical Docs: `{len(documents)}`",
+    ]
+
+
+def _render_steward_authority_page(authority_view: dict[str, Any]) -> str:
+    role = authority_view.get("role") if isinstance(authority_view.get("role"), dict) else None
+    publication_status = authority_view.get("publication_status") if isinstance(authority_view.get("publication_status"), dict) else None
+    exports_by_kind = dict(authority_view.get("exports_by_kind", {}))
+    artifacts_by_kind = dict(authority_view.get("artifacts_by_kind", {}))
+    status_labels = dict(publication_status.get("labels", {})) if publication_status is not None else {}
+    source_registry = dict(artifacts_by_kind.get("source_surface_registry", {}))
+    summary_registry = dict(artifacts_by_kind.get("public_summary_registry", {}))
+    metadata_payload = dict(artifacts_by_kind.get("surface_metadata", {}))
+    repo_graph = dict(artifacts_by_kind.get("repo_graph", {}))
+    lines = [
+        "# Steward Authority",
+        "",
+        f"- Source Repo: `{STEWARD_PROTOCOL_REPO_ID}`",
+        f"- Repo Role: `{role.get('role', 'missing') if role else 'missing'}`",
+        f"- Publication Binding: `{STEWARD_PUBLIC_WIKI_BINDING_ID}`",
+        f"- Publication Status: `{publication_status.get('status', 'missing') if publication_status else 'missing'}`",
+        f"- Projected From Export: `{publication_status.get('projected_from_export_id', '') if publication_status else ''}`",
+        f"- Source Export Version: `{status_labels.get('source_export_version') or exports_by_kind.get('canonical_surface', {}).get('version', '')}`",
+        f"- Source Export SHA256: `{status_labels.get('source_export_sha256', '')}`",
+        f"- Authority Bundle Source SHA: `{status_labels.get('authority_bundle_source_sha', '')}`",
+        f"- Imported Export Count: `{len(exports_by_kind)}`",
+        f"- Declared Source Pages: `{len([record for record in list(source_registry.get('pages', [])) if isinstance(record, dict)])}`",
+        f"- Public Summary Records: `{len([record for record in list(summary_registry.get('records', [])) if isinstance(record, dict)])}`",
+        f"- Repo Graph Nodes: `{dict(repo_graph.get('summary', {})).get('node_count', 0)}`",
+        f"- Surface Metadata Pages: `{dict(metadata_payload.get('surface_registry', {})).get('page_count', 0)}`",
+        "",
+    ]
+    if not exports_by_kind:
+        lines.extend(["No steward authority exports have been imported yet.", ""])
+        return "\n".join(lines).rstrip() + "\n"
+    lines.extend(["## Imported Authority Exports", ""])
+    for export_kind in sorted(exports_by_kind):
+        export_record = exports_by_kind[export_kind]
+        lines.append(f"- `{export_kind}` → `{export_record.get('artifact_uri', '')}` (`{export_record.get('version', '')}`)")
+    summary_records = [record for record in list(summary_registry.get("records", [])) if isinstance(record, dict)]
+    if summary_records:
+        lines.extend(["", "## Public Summaries", ""])
+        for record in summary_records:
+            title = record.get("title") or record.get("wiki_name") or record.get("id", "")
+            lines.append(f"- **{title}** — {record.get('public_summary', '')}")
+    source_pages = [record for record in list(source_registry.get("pages", [])) if isinstance(record, dict)]
+    if source_pages:
+        lines.extend(["", "## Source Surface Registry", ""])
+        for record in source_pages:
+            lines.append(f"- `{record.get('wiki_name', '')}` (`{record.get('page_class', '')}` / `{record.get('section', '')}`)")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_steward_canonical_surface_page(authority_view: dict[str, Any]) -> str:
+    publication_status = authority_view.get("publication_status") if isinstance(authority_view.get("publication_status"), dict) else None
+    status_labels = dict(publication_status.get("labels", {})) if publication_status is not None else {}
+    artifacts_by_kind = dict(authority_view.get("artifacts_by_kind", {}))
+    canonical_payload = dict(artifacts_by_kind.get("canonical_surface", {}))
+    lines = [
+        "# Steward Canonical Surface",
+        "",
+        f"- Source Repo: `{STEWARD_PROTOCOL_REPO_ID}`",
+        f"- Source Export Version: `{status_labels.get('source_export_version', '')}`",
+        f"- Source Bundle SHA: `{status_labels.get('authority_bundle_source_sha', '')}`",
+        "",
+    ]
+    documents = [record for record in list(canonical_payload.get("documents", [])) if isinstance(record, dict)]
+    if not documents:
+        lines.extend(["No imported steward canonical documents are available yet.", ""])
+        return "\n".join(lines).rstrip() + "\n"
+    lines.extend(["This page is rendered from imported steward `canonical_surface` authority artifacts.", ""])
+    for document in documents:
+        title = document.get("title") or document.get("wiki_name") or document.get("document_id", "")
+        lines.extend(
+            [
+                f"## {title}",
+                "",
+                f"- Document ID: `{document.get('document_id', '')}`",
+                f"- Wiki Name: `{document.get('wiki_name', '')}`",
+                f"- Source Path: `{document.get('source_path', '')}`",
+            ],
+        )
+        public_summary = str(document.get("public_summary", "")).strip()
+        if public_summary:
+            lines.append(f"- Public Summary: {public_summary}")
+        content = str(document.get("content", "")).strip()
+        lines.extend(["", content or "_No canonical content available._", ""])
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _render_sidebar_page() -> str:
     links = [
         ("Home", "Home"),
@@ -355,6 +511,8 @@ def _render_sidebar_page() -> str:
         ("Repo Quality", "Repo-Quality"),
         ("Agent Web", "Agent-Web"),
         ("Assistant Surface", "Assistant-Surface"),
+        ("Steward Authority", "Steward-Authority"),
+        ("Steward Canonical Surface", "Steward-Canonical-Surface"),
         ("Public Graph", "Public-Graph"),
         ("Repo Graph Capabilities", "Repo-Graph-Capabilities"),
         ("Repo Graph Contracts", "Repo-Graph-Contracts"),

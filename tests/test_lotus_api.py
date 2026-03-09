@@ -345,9 +345,11 @@ def test_lotus_api_returns_agent_web_manifest(tmp_path):
     assert response["agent_web_manifest"]["entrypoints"]["semantic_contracts"]["document_id"] == "semantic_contracts"
     assert response["agent_web_manifest"]["entrypoints"]["repo_graph_capabilities"]["document_id"] == "repo_graph_capabilities"
     assert response["agent_web_manifest"]["entrypoints"]["repo_graph_contracts"]["document_id"] == "repo_graph_contracts"
+    assert response["agent_web_manifest"]["entrypoints"]["steward_authority"]["document_id"] == "steward_authority"
     assert any(document["document_id"] == "search_index" for document in response["agent_web_manifest"]["documents"])
     assert any(document["document_id"] == "repo_graph_capabilities" for document in response["agent_web_manifest"]["documents"])
     assert any(document["document_id"] == "assistant_surface" for document in response["agent_web_manifest"]["documents"])
+    assert any(document["document_id"] == "steward_authority" for document in response["agent_web_manifest"]["documents"])
     assert any(link["rel"] == "assistant_surface" for link in response["agent_web_manifest"]["links"])
 
     semantic = api.call(

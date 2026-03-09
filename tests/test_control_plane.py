@@ -408,11 +408,15 @@ def test_control_plane_ingests_authority_bundle_path_and_reconciles_publication_
     imported = plane.ingest_authority_bundle_path(bundle_path, now=200.0)
 
     canonical = plane.registry.get_authority_export("steward-protocol/canonical_surface")
+    canonical_artifact = plane.registry.get_authority_artifact("steward-protocol/canonical_surface")
     status = plane.registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID)
 
     assert imported["artifact_count"] == len(artifacts)
     assert canonical.artifact_uri == ".authority-exports/canonical-surface.json"
     assert canonical.content_sha256
+    assert canonical_artifact is not None
+    assert canonical_artifact.payload["kind"] == "canonical_surface"
+    assert canonical_artifact.imported_at == 200.0
     assert status.status == PublicationState.STALE
     assert status.projected_from_export_id == canonical.export_id
     assert status.failure_reason == "projection_not_published"

@@ -106,6 +106,164 @@ def _ingest_new_steward_source(store: ControlPlaneStateStore, *, version: str, s
     store.update(lambda plane: plane.ingest_authority_bundle(bundle, artifacts={".authority-exports/canonical-surface.json": artifact_payload}, now=203.0))
 
 
+def _seed_steward_authority_artifacts(
+    state_path,
+    *,
+    version: str = "v-source",
+    source_sha: str = "bundle-source",
+    wiki_repo_url: str | None = None,
+):
+    store = ControlPlaneStateStore(path=state_path)
+    canonical_surface = {
+        "kind": "canonical_surface",
+        "documents": [
+            {
+                "document_id": "constitution",
+                "title": "Constitution",
+                "wiki_name": "Constitution",
+                "source_path": "docs/CONSTITUTION.md",
+                "public_summary": "Normative steward summary",
+                "content": "# Constitution\n\nThe city stands on steward protocol.",
+            },
+        ],
+    }
+    public_summary_registry = {
+        "kind": "public_summary_registry",
+        "records": [
+            {
+                "id": "constitution",
+                "title": "Constitution",
+                "wiki_name": "Constitution",
+                "public_summary": "Normative steward summary",
+            },
+        ],
+    }
+    source_surface_registry = {
+        "kind": "source_surface_registry",
+        "pages": [
+            {
+                "id": "constitution",
+                "title": "Constitution",
+                "wiki_name": "Constitution",
+                "page_class": "canonical",
+                "section": "Foundations",
+            },
+        ],
+    }
+    surface_metadata = {
+        "kind": "surface_metadata",
+        "surface_registry": {"page_count": 1, "sections": ["Foundations"]},
+    }
+    repo_graph = {"kind": "repo_graph", "summary": {"node_count": 3}}
+    artifacts = {
+        ".authority-exports/canonical-surface.json": canonical_surface,
+        ".authority-exports/public-summary-registry.json": public_summary_registry,
+        ".authority-exports/source-surface-registry.json": source_surface_registry,
+        ".authority-exports/surface-metadata.json": surface_metadata,
+        ".authority-exports/repo-graph.json": repo_graph,
+    }
+    bundle = {
+        "kind": "source_authority_bundle",
+        "generated_at": 150.0,
+        "source_sha": source_sha,
+        "repo_role": {
+            "repo_id": STEWARD_PROTOCOL_REPO_ID,
+            "role": "normative_source",
+            "owner_boundary": "normative_protocol_surface",
+            "exports": [
+                AuthorityExportKind.CANONICAL_SURFACE.value,
+                AuthorityExportKind.PUBLIC_SUMMARY_REGISTRY.value,
+                AuthorityExportKind.SOURCE_SURFACE_REGISTRY.value,
+                AuthorityExportKind.SURFACE_METADATA.value,
+                AuthorityExportKind.REPO_GRAPH.value,
+            ],
+            "consumes": [],
+            "publication_targets": [STEWARD_PUBLIC_WIKI_BINDING_ID],
+            "labels": {"public_surface_owner": "agent-internet"},
+        },
+        "authority_exports": [
+            {
+                "export_id": f"{STEWARD_PROTOCOL_REPO_ID}/canonical_surface",
+                "repo_id": STEWARD_PROTOCOL_REPO_ID,
+                "export_kind": AuthorityExportKind.CANONICAL_SURFACE.value,
+                "version": version,
+                "artifact_uri": ".authority-exports/canonical-surface.json",
+                "generated_at": 151.0,
+                "contract_version": 1,
+                "content_sha256": sha256(json.dumps(canonical_surface, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+                "labels": {"source_sha": source_sha},
+            },
+            {
+                "export_id": f"{STEWARD_PROTOCOL_REPO_ID}/public_summary_registry",
+                "repo_id": STEWARD_PROTOCOL_REPO_ID,
+                "export_kind": AuthorityExportKind.PUBLIC_SUMMARY_REGISTRY.value,
+                "version": version,
+                "artifact_uri": ".authority-exports/public-summary-registry.json",
+                "generated_at": 151.0,
+                "contract_version": 1,
+                "content_sha256": sha256(json.dumps(public_summary_registry, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+                "labels": {"source_sha": source_sha},
+            },
+            {
+                "export_id": f"{STEWARD_PROTOCOL_REPO_ID}/source_surface_registry",
+                "repo_id": STEWARD_PROTOCOL_REPO_ID,
+                "export_kind": AuthorityExportKind.SOURCE_SURFACE_REGISTRY.value,
+                "version": version,
+                "artifact_uri": ".authority-exports/source-surface-registry.json",
+                "generated_at": 151.0,
+                "contract_version": 1,
+                "content_sha256": sha256(json.dumps(source_surface_registry, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+                "labels": {"source_sha": source_sha},
+            },
+            {
+                "export_id": f"{STEWARD_PROTOCOL_REPO_ID}/surface_metadata",
+                "repo_id": STEWARD_PROTOCOL_REPO_ID,
+                "export_kind": AuthorityExportKind.SURFACE_METADATA.value,
+                "version": version,
+                "artifact_uri": ".authority-exports/surface-metadata.json",
+                "generated_at": 151.0,
+                "contract_version": 1,
+                "content_sha256": sha256(json.dumps(surface_metadata, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+                "labels": {"source_sha": source_sha},
+            },
+            {
+                "export_id": f"{STEWARD_PROTOCOL_REPO_ID}/repo_graph",
+                "repo_id": STEWARD_PROTOCOL_REPO_ID,
+                "export_kind": AuthorityExportKind.REPO_GRAPH.value,
+                "version": version,
+                "artifact_uri": ".authority-exports/repo-graph.json",
+                "generated_at": 151.0,
+                "contract_version": 1,
+                "content_sha256": sha256(json.dumps(repo_graph, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+                "labels": {"source_sha": source_sha},
+            },
+        ],
+    }
+
+    def _update(plane):
+        plane.bootstrap_steward_public_wiki_contract(now=100.0)
+        if wiki_repo_url is not None:
+            binding = plane.registry.get_projection_binding(STEWARD_PUBLIC_WIKI_BINDING_ID)
+            plane.registry.upsert_projection_binding(
+                binding.__class__(
+                    binding_id=binding.binding_id,
+                    source_repo_id=binding.source_repo_id,
+                    required_export_kind=binding.required_export_kind,
+                    operator_repo_id=binding.operator_repo_id,
+                    target_kind=binding.target_kind,
+                    target_locator=str(wiki_repo_url),
+                    projection_mode=binding.projection_mode,
+                    failure_policy=binding.failure_policy,
+                    freshness_sla_seconds=binding.freshness_sla_seconds,
+                    labels=dict(binding.labels),
+                ),
+            )
+        plane.ingest_authority_bundle(bundle, artifacts=artifacts, now=152.0)
+
+    store.update(_update)
+    return store
+
+
 def test_build_agent_internet_peer_descriptor_detects_git_metadata(tmp_path):
     work_root, _wiki_remote = _init_git_workspace(tmp_path)
     payload = build_agent_internet_peer_descriptor(work_root)
@@ -124,6 +282,8 @@ def test_build_agent_internet_wiki_materializes_pages(tmp_path):
     built = build_agent_internet_wiki(root=work_root, output_dir=tmp_path / "wiki-build", state_path=tmp_path / "state.json")
     assert any(path.name == "Agent-Web.md" for path in built)
     assert any(path.name == "Assistant-Surface.md" for path in built)
+    assert any(path.name == "Steward-Authority.md" for path in built)
+    assert any(path.name == "Steward-Canonical-Surface.md" for path in built)
     assert any(path.name == "Node-Health.md" for path in built)
     assert any(path.name == "Publication-Status.md" for path in built)
     assert any(path.name == "Federation-Status.md" for path in built)
@@ -141,6 +301,30 @@ def test_build_agent_internet_wiki_materializes_pages(tmp_path):
     assert "# Repo Quality" in (tmp_path / "wiki-build" / "Repo-Quality.md").read_text()
     assert "Tracked Files: `" in (tmp_path / "wiki-build" / "Repo-Quality.md").read_text()
     assert "Has tests: `" in (tmp_path / "wiki-build" / "Repo-Quality.md").read_text()
+    assert "No steward authority exports have been imported yet." in (tmp_path / "wiki-build" / "Steward-Authority.md").read_text()
+    assert "No imported steward canonical documents are available yet." in (tmp_path / "wiki-build" / "Steward-Canonical-Surface.md").read_text()
+    assert "[[Steward Authority|Steward-Authority]]" in (tmp_path / "wiki-build" / "_Sidebar.md").read_text()
+
+
+def test_build_agent_internet_wiki_renders_imported_steward_authority_artifacts(tmp_path):
+    work_root, _wiki_remote = _init_git_workspace(tmp_path)
+    state_path = tmp_path / "state.json"
+    store = _seed_steward_authority_artifacts(state_path, version="v-source", source_sha="bundle-source")
+
+    build_agent_internet_wiki(root=work_root, output_dir=tmp_path / "wiki-build", state_path=state_path)
+
+    authority_page = (tmp_path / "wiki-build" / "Steward-Authority.md").read_text()
+    canonical_page = (tmp_path / "wiki-build" / "Steward-Canonical-Surface.md").read_text()
+    home_page = (tmp_path / "wiki-build" / "Home.md").read_text()
+    artifact = store.load().registry.get_authority_artifact(f"{STEWARD_PROTOCOL_REPO_ID}/canonical_surface")
+
+    assert artifact is not None
+    assert artifact.payload["kind"] == "canonical_surface"
+    assert "Normative steward summary" in authority_page
+    assert "`Constitution` (`canonical` / `Foundations`)" in authority_page
+    assert "The city stands on steward protocol." in canonical_page
+    assert "Steward Source Export Version: `v-source`" in home_page
+    assert "Steward Canonical Docs: `1`" in home_page
 
 
 def test_publish_agent_internet_wiki_commits_without_push(tmp_path):

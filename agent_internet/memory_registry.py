@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass, field
 
 from .models import (
+    AuthorityArtifactRecord,
     AuthorityExportRecord,
     SlotDescriptor,
     CityEndpoint,
@@ -72,6 +73,7 @@ class InMemoryCityRegistry:
     _intents: dict[str, IntentRecord] = field(default_factory=dict)
     _repo_roles: dict[str, RepoRoleRecord] = field(default_factory=dict)
     _authority_exports: dict[str, AuthorityExportRecord] = field(default_factory=dict)
+    _authority_artifacts: dict[str, AuthorityArtifactRecord] = field(default_factory=dict)
     _projection_bindings: dict[str, ProjectionBindingRecord] = field(default_factory=dict)
     _publication_statuses: dict[str, PublicationStatusRecord] = field(default_factory=dict)
     _next_link_id: int = 1
@@ -275,6 +277,15 @@ class InMemoryCityRegistry:
 
     def list_authority_exports(self) -> list[AuthorityExportRecord]:
         return [self._authority_exports[export_id] for export_id in sorted(self._authority_exports)]
+
+    def upsert_authority_artifact(self, record: AuthorityArtifactRecord) -> None:
+        self._authority_artifacts[record.export_id] = record
+
+    def get_authority_artifact(self, export_id: str) -> AuthorityArtifactRecord | None:
+        return self._authority_artifacts.get(export_id)
+
+    def list_authority_artifacts(self) -> list[AuthorityArtifactRecord]:
+        return [self._authority_artifacts[export_id] for export_id in sorted(self._authority_artifacts)]
 
     def find_authority_export(self, repo_id: str, export_kind: str) -> AuthorityExportRecord | None:
         for export in self.list_authority_exports():

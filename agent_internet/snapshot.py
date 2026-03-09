@@ -7,6 +7,7 @@ from typing import Callable, TypeVar
 from .file_locking import read_locked_json_value, update_locked_json_value, write_locked_json_value
 from .control_plane import AgentInternetControlPlane
 from .models import (
+    AuthorityArtifactRecord,
     AuthorityExportKind,
     AuthorityExportRecord,
     SlotDescriptor,
@@ -61,6 +62,7 @@ def snapshot_control_plane(plane: AgentInternetControlPlane) -> dict:
         "intents": [asdict(intent) for intent in plane.registry.list_intents()],
         "repo_roles": [asdict(record) for record in plane.registry.list_repo_roles()],
         "authority_exports": [asdict(record) for record in plane.registry.list_authority_exports()],
+        "authority_artifacts": [asdict(record) for record in plane.registry.list_authority_artifacts()],
         "projection_bindings": [asdict(record) for record in plane.registry.list_projection_bindings()],
         "publication_statuses": [asdict(record) for record in plane.registry.list_publication_statuses()],
         "presence": [asdict(presence) for presence in plane.registry.list_cities()],
@@ -233,6 +235,15 @@ def restore_control_plane(payload: dict) -> AgentInternetControlPlane:
                 contract_version=int(data.get("contract_version", 1)),
                 content_sha256=data.get("content_sha256", ""),
                 labels=dict(data.get("labels", {})),
+            ),
+        )
+    for data in payload.get("authority_artifacts", []):
+        plane.registry.upsert_authority_artifact(
+            AuthorityArtifactRecord(
+                export_id=data["export_id"],
+                artifact_uri=data.get("artifact_uri", ""),
+                payload=dict(data.get("payload", {})),
+                imported_at=data.get("imported_at"),
             ),
         )
     for data in payload.get("projection_bindings", []):
