@@ -16,6 +16,7 @@ from .node_health import (
     render_repo_quality_page,
     render_surface_integrity_page,
 )
+from .publication_status import render_publication_status_page
 from .agent_web_repo_graph_capabilities import render_agent_web_repo_graph_capability_page
 from .agent_web_repo_graph_contracts import render_agent_web_repo_graph_contract_page
 from .agent_web_semantic_capabilities import render_agent_web_semantic_capability_page
@@ -163,6 +164,7 @@ def render_wiki_projection(
     peer_descriptor: dict,
     state_snapshot: dict,
     assistant_snapshot: dict | None = None,
+    publication_snapshot: dict | None = None,
     repo_root: Path | str | None = None,
 ) -> dict[str, str]:
     identity = dict(peer_descriptor.get("identity", {}))
@@ -247,6 +249,7 @@ def render_wiki_projection(
     pages = {
         "Home.md": home,
         "Node-Health.md": "",
+        "Publication-Status.md": render_publication_status_page(publication_snapshot),
         "Federation-Status.md": "",
         "Surface-Integrity.md": "",
         "Repo-Quality.md": "",
@@ -271,6 +274,7 @@ def render_wiki_projection(
         peer_descriptor=peer_descriptor,
         state_snapshot=state_snapshot,
         assistant_snapshot=assistant_snapshot,
+        publication_snapshot=publication_snapshot,
         rendered_pages=pages,
         agent_web=agent_web,
     )
@@ -283,6 +287,7 @@ def render_wiki_projection(
         peer_descriptor=peer_descriptor,
         state_snapshot=state_snapshot,
         assistant_snapshot=assistant_snapshot,
+        publication_snapshot=publication_snapshot,
         rendered_pages=pages,
         agent_web=agent_web,
     )
@@ -344,6 +349,7 @@ def _render_sidebar_page() -> str:
     links = [
         ("Home", "Home"),
         ("Node Health", "Node-Health"),
+        ("Publication Status", "Publication-Status"),
         ("Federation Status", "Federation-Status"),
         ("Surface Integrity", "Surface-Integrity"),
         ("Repo Quality", "Repo-Quality"),

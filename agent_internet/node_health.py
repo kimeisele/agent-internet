@@ -11,11 +11,13 @@ def build_node_surface_snapshot(
     peer_descriptor: dict,
     state_snapshot: dict,
     assistant_snapshot: dict | None,
+    publication_snapshot: dict | None,
     rendered_pages: dict[str, str],
     agent_web: dict,
 ) -> dict:
     root = Path(repo_root).resolve() if repo_root else None
     repo_quality = _build_repo_quality_snapshot(root)
+    publication_status = _build_publication_status_snapshot(publication_snapshot)
     federation_status = _build_federation_status_snapshot(
         peer_descriptor=peer_descriptor,
         state_snapshot=state_snapshot,
@@ -30,6 +32,7 @@ def build_node_surface_snapshot(
         peer_descriptor=peer_descriptor,
         assistant_snapshot=assistant_snapshot,
         repo_quality=repo_quality,
+        publication_status=publication_status,
         federation_status=federation_status,
         surface_integrity=surface_integrity,
     )
@@ -37,6 +40,7 @@ def build_node_surface_snapshot(
         "kind": "agent_internet_node_surface",
         "version": 1,
         "node_health": node_health,
+        "publication_status": publication_status,
         "surface_integrity": surface_integrity,
         "repo_quality": repo_quality,
         "federation_status": federation_status,
@@ -57,6 +61,10 @@ def render_node_health_page(snapshot: dict) -> str:
         f"- Services: `{health.get('service_count', 0)}`",
         f"- Routes: `{health.get('route_count', 0)}`",
         f"- Assistant Published: `{health.get('assistant_published', False)}`",
+        f"- Publication Status: `{health.get('publication_status', '')}`",
+        f"- Published At (UTC): `{health.get('published_at_utc', '')}`",
+        f"- Publication Source SHA: `{health.get('publication_source_sha', '')}`",
+        f"- Stale After (s): `{health.get('stale_after_seconds')}`",
         f"- Worktree Dirty (tracked): `{health.get('tracked_worktree_dirty', False)}`",
         "",
         "## Anomalies",
@@ -157,11 +165,32 @@ def render_federation_status_page(snapshot: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _build_publication_status_snapshot(snapshot: dict | None) -> dict:
+    status = dict(snapshot or {})
+    published_at_utc = str(status.get("published_at_utc", ""))
+    stale_after_seconds = status.get("stale_after_seconds")
+    return {
+        "status": str(status.get("status", "unknown")),
+        "published_at_utc": published_at_utc,
+        "source_sha": str(status.get("source_sha", "")),
+        "workflow_name": str(status.get("workflow_name", "")),
+        "push_requested": bool(status.get("push_requested", False)),
+        "prune_generated": bool(status.get("prune_generated", False)),
+        "heartbeat_enabled": bool(status.get("heartbeat_enabled", False)),
+        "schedule_interval_seconds": status.get("schedule_interval_seconds"),
+        "stale_after_seconds": stale_after_seconds,
+        "wiki_repo_url": str(status.get("wiki_repo_url", "")),
+        "commit_message": str(status.get("commit_message", "")),
+        "has_staleness_contract": bool(published_at_utc and stale_after_seconds),
+    }
+
+
 def _build_node_health_snapshot(
     *,
     peer_descriptor: dict,
     assistant_snapshot: dict | None,
     repo_quality: dict,
+    publication_status: dict,
     federation_status: dict,
     surface_integrity: dict,
 ) -> dict:
@@ -196,6 +225,10 @@ def _build_node_health_snapshot(
         "service_count": service_count,
         "route_count": route_count,
         "assistant_published": assistant_published,
+        "publication_status": str(publication_status.get("status", "unknown")),
+        "published_at_utc": str(publication_status.get("published_at_utc", "")),
+        "publication_source_sha": str(publication_status.get("source_sha", "")),
+        "stale_after_seconds": publication_status.get("stale_after_seconds"),
         "tracked_worktree_dirty": bool(repo_quality.get("tracked_worktree_dirty", False)),
         "anomalies": anomalies,
     }

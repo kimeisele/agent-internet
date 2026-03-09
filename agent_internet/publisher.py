@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .agent_web import DOCUMENT_SPECS
 from .git_federation import detect_git_remote_metadata, ensure_git_checkout, render_wiki_projection
+from .publication_status import DEFAULT_PUBLICATION_WORKFLOW_NAME, build_publication_snapshot
 from .snapshot import ControlPlaneStateStore, snapshot_control_plane
 
 DEFAULT_AGENT_INTERNET_CAPABILITIES = (
@@ -19,6 +20,7 @@ DEFAULT_AGENT_INTERNET_CAPABILITIES = (
 )
 
 WIKI_GENERATED_INVENTORY = ".wiki-generated-inventory.json"
+PUBLICATION_METADATA_PATH = ".agent-web-publication.json"
 
 
 def probe_wiki_remote(wiki_repo_url: str) -> dict:
@@ -57,7 +59,7 @@ def build_agent_internet_wiki(
 ) -> list[Path]:
     target = Path(output_dir).resolve()
     target.mkdir(parents=True, exist_ok=True)
-    pages = _render_pages(root=root, state_path=state_path, city_id=city_id)
+    pages = _render_pages(root=root, state_path=state_path, city_id=city_id, publication_snapshot=None)
     built: list[Path] = []
     for relative_path, content in pages.items():
         path = target / relative_path
@@ -85,16 +87,31 @@ def publish_agent_internet_wiki(
         raise RuntimeError(f"wiki_remote_unavailable:{effective_wiki_repo_url}:{probe['stderr'] or 'git ls-remote failed'}")
     checkout = ensure_git_checkout(effective_wiki_repo_url, wiki_path or (repo_root / ".agent_internet" / "wiki"))
     _ensure_local_git_identity(checkout)
-    pages = _render_pages(root=repo_root, state_path=state_path, city_id=city_id)
-    generated_paths = sorted(_normalize_relative_paths(pages))
+    source_sha = _git_output(["rev-parse", "HEAD"], cwd=repo_root).strip() or "unknown"
+    commit_message = f"agent-web: publish surfaces from {source_sha}"
+    publication_snapshot = build_publication_snapshot(
+        source_sha=source_sha,
+        wiki_repo_url=effective_wiki_repo_url,
+        status="published",
+        workflow_name=DEFAULT_PUBLICATION_WORKFLOW_NAME,
+        push_requested=push,
+        prune_generated=prune_generated,
+        commit_message=commit_message,
+    )
+    pages = _render_pages(
+        root=repo_root,
+        state_path=state_path,
+        city_id=city_id,
+        publication_snapshot=publication_snapshot,
+    )
+    generated_paths = sorted(_normalize_relative_paths(pages) + [PUBLICATION_METADATA_PATH])
     for relative_path, content in pages.items():
         target = checkout / _normalize_relative_path(relative_path)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content)
+    write_publication_result(checkout / PUBLICATION_METADATA_PATH, publication_snapshot)
     pruned = _prune_generated_paths(checkout, keep_paths=generated_paths) if prune_generated else []
     _write_generated_inventory(checkout, generated_paths)
-    source_sha = _git_output(["rev-parse", "HEAD"], cwd=repo_root).strip() or "unknown"
-    commit_message = f"agent-web: publish surfaces from {source_sha}"
     changed = _git_commit_all(checkout, commit_message, push=push)
     return {
         "changed": changed,
@@ -107,6 +124,7 @@ def publish_agent_internet_wiki(
         "wiki_repo_url": effective_wiki_repo_url,
         "pushed": bool(push and changed),
         "source_sha": source_sha,
+        "published_at_utc": publication_snapshot["published_at_utc"],
         "commit_message": commit_message,
     }
 
@@ -118,14 +136,25 @@ def write_publication_result(path: Path | str, result: dict) -> Path:
     return target
 
 
-def _render_pages(*, root: Path | str, state_path: Path | str, city_id: str) -> dict[str, str]:
+def _render_pages(*, root: Path | str, state_path: Path | str, city_id: str, publication_snapshot: dict | None) -> dict[str, str]:
+    repo_root = Path(root).resolve()
     store = ControlPlaneStateStore(path=Path(state_path))
     peer_descriptor = build_agent_internet_peer_descriptor(root, city_id=city_id)
+    effective_publication_snapshot = publication_snapshot or build_publication_snapshot(
+        source_sha=_git_output(["rev-parse", "HEAD"], cwd=repo_root).strip() or "unknown",
+        wiki_repo_url=str(peer_descriptor.get("git_federation", {}).get("wiki_repo_url", "")),
+        status="build_preview",
+        workflow_name="local_build",
+        push_requested=False,
+        prune_generated=False,
+        commit_message="agent-web: local build preview",
+    )
     return render_wiki_projection(
         peer_descriptor=peer_descriptor,
         state_snapshot=snapshot_control_plane(store.load()),
         assistant_snapshot=None,
-        repo_root=Path(root).resolve(),
+        publication_snapshot=effective_publication_snapshot,
+        repo_root=repo_root,
     )
 
 

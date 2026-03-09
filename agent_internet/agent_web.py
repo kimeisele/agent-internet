@@ -14,6 +14,7 @@ from .file_locking import read_locked_json_value
 DOCUMENT_SPECS = (
     ("home", "wiki_home", "summary", "Home", "Home.md", True),
     ("node_health", "node_health", "node_health", "Node Health", "Node-Health.md", True),
+    ("publication_status", "publication_status", "publication_status", "Publication Status", "Publication-Status.md", True),
     ("federation_status", "federation_status", "federation_status", "Federation Status", "Federation-Status.md", True),
     ("surface_integrity", "surface_integrity", "surface_integrity", "Surface Integrity", "Surface-Integrity.md", False),
     ("repo_quality", "repo_quality", "repo_quality", "Repo Quality", "Repo-Quality.md", False),
@@ -185,6 +186,7 @@ def _build_entrypoints() -> dict[str, dict[str, str]]:
         "default": {"document_id": "agent_web", "rel": "agent_web"},
         "home": {"document_id": "home", "rel": "wiki_home"},
         "node_health": {"document_id": "node_health", "rel": "node_health"},
+        "publication_status": {"document_id": "publication_status", "rel": "publication_status"},
         "federation_status": {"document_id": "federation_status", "rel": "federation_status"},
         "surface_integrity": {"document_id": "surface_integrity", "rel": "surface_integrity"},
         "repo_quality": {"document_id": "repo_quality", "rel": "repo_quality"},
