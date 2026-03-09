@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .agent_web import DOCUMENT_SPECS
 from .git_federation import detect_git_remote_metadata, ensure_git_checkout, render_wiki_projection
+from .models import PublicationState, PublicationStatusRecord
 from .publication_status import DEFAULT_PUBLICATION_WORKFLOW_NAME, build_publication_snapshot, sanitize_remote_url
 from .snapshot import ControlPlaneStateStore, snapshot_control_plane
 
@@ -82,38 +85,69 @@ def publish_agent_internet_wiki(
     repo_root = Path(root).resolve()
     peer_descriptor = build_agent_internet_peer_descriptor(repo_root, city_id=city_id)
     effective_wiki_repo_url = wiki_repo_url or str(peer_descriptor["git_federation"]["wiki_repo_url"])
-    probe = probe_wiki_remote(effective_wiki_repo_url)
-    if not probe["reachable"]:
-        raise RuntimeError(f"wiki_remote_unavailable:{effective_wiki_repo_url}:{probe['stderr'] or 'git ls-remote failed'}")
-    checkout = ensure_git_checkout(effective_wiki_repo_url, wiki_path or (repo_root / ".agent_internet" / "wiki"))
-    _ensure_local_git_identity(checkout)
     source_sha = _git_output(["rev-parse", "HEAD"], cwd=repo_root).strip() or "unknown"
     commit_message = f"agent-web: publish surfaces from {source_sha}"
-    publication_snapshot = build_publication_snapshot(
-        source_sha=source_sha,
+    projection_context = _prepare_projection_publication(
+        state_path=state_path,
         wiki_repo_url=effective_wiki_repo_url,
-        status="published",
-        workflow_name=DEFAULT_PUBLICATION_WORKFLOW_NAME,
+        operator_source_sha=source_sha,
         push_requested=push,
-        prune_generated=prune_generated,
         commit_message=commit_message,
     )
-    pages = _render_pages(
-        root=repo_root,
+    if projection_context is not None and projection_context["status"] == PublicationState.BLOCKED:
+        raise RuntimeError(str(projection_context["failure_reason"]))
+    try:
+        probe = probe_wiki_remote(effective_wiki_repo_url)
+        if not probe["reachable"]:
+            raise RuntimeError(f"wiki_remote_unavailable:{effective_wiki_repo_url}:{probe['stderr'] or 'git ls-remote failed'}")
+        checkout = ensure_git_checkout(effective_wiki_repo_url, wiki_path or (repo_root / ".agent_internet" / "wiki"))
+        _ensure_local_git_identity(checkout)
+        publication_snapshot = build_publication_snapshot(
+            source_sha=source_sha,
+            wiki_repo_url=effective_wiki_repo_url,
+            status="published",
+            workflow_name=DEFAULT_PUBLICATION_WORKFLOW_NAME,
+            push_requested=push,
+            prune_generated=prune_generated,
+            commit_message=commit_message,
+        )
+        pages = _render_pages(
+            root=repo_root,
+            state_path=state_path,
+            city_id=city_id,
+            publication_snapshot=publication_snapshot,
+        )
+        generated_paths = sorted(_normalize_relative_paths(pages) + [PUBLICATION_METADATA_PATH])
+        for relative_path, content in pages.items():
+            target = checkout / _normalize_relative_path(relative_path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content)
+        write_publication_result(checkout / PUBLICATION_METADATA_PATH, publication_snapshot)
+        pruned = _prune_generated_paths(checkout, keep_paths=generated_paths) if prune_generated else []
+        _write_generated_inventory(checkout, generated_paths)
+        changed = _git_commit_all(checkout, commit_message, push=push)
+    except Exception as exc:
+        failure_status = _record_projection_publication_outcome(
+            state_path=state_path,
+            wiki_repo_url=effective_wiki_repo_url,
+            operator_source_sha=source_sha,
+            push_requested=push,
+            commit_message=commit_message,
+            status=PublicationState.FAILED,
+            failure_reason=f"projection_publish_failed:{type(exc).__name__}:{exc}",
+        )
+        if failure_status is not None:
+            raise RuntimeError(f"{exc} [binding={failure_status.binding_id}]") from exc
+        raise
+    success_status = _record_projection_publication_outcome(
         state_path=state_path,
-        city_id=city_id,
-        publication_snapshot=publication_snapshot,
+        wiki_repo_url=effective_wiki_repo_url,
+        operator_source_sha=source_sha,
+        push_requested=push,
+        commit_message=commit_message,
+        status=PublicationState.SUCCESS,
     )
-    generated_paths = sorted(_normalize_relative_paths(pages) + [PUBLICATION_METADATA_PATH])
-    for relative_path, content in pages.items():
-        target = checkout / _normalize_relative_path(relative_path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content)
-    write_publication_result(checkout / PUBLICATION_METADATA_PATH, publication_snapshot)
-    pruned = _prune_generated_paths(checkout, keep_paths=generated_paths) if prune_generated else []
-    _write_generated_inventory(checkout, generated_paths)
-    changed = _git_commit_all(checkout, commit_message, push=push)
-    return {
+    result = {
         "changed": changed,
         "built": len(pages),
         "generated_inventory": str(checkout / WIKI_GENERATED_INVENTORY),
@@ -127,6 +161,10 @@ def publish_agent_internet_wiki(
         "published_at_utc": publication_snapshot["published_at_utc"],
         "commit_message": commit_message,
     }
+    if success_status is not None:
+        result["binding_id"] = success_status.binding_id
+        result["publication_state"] = success_status.status.value
+    return result
 
 
 def write_publication_result(path: Path | str, result: dict) -> Path:
@@ -185,6 +223,169 @@ def _git_output(args: list[str], *, cwd: Path) -> str:
 
 def _normalize_relative_paths(pages: dict[str, str]) -> list[str]:
     return [_normalize_relative_path(path) for path in pages]
+
+
+def _normalize_target_locator(locator: str | None) -> str:
+    value = sanitize_remote_url(locator).strip()
+    if not value:
+        return ""
+    if "://" in value:
+        parsed = urlsplit(value)
+        if parsed.scheme == "file":
+            return str(Path(parsed.path).resolve())
+        host = parsed.hostname or ""
+        if parsed.port is not None:
+            host = f"{host}:{parsed.port}"
+        return f"{host}/{parsed.path.lstrip('/')}".strip("/")
+    if "@" in value and ":" in value and not value.startswith(("/", "./", "../")):
+        prefix, path = value.split(":", 1)
+        return f"{prefix.split('@', 1)[-1]}/{path.lstrip('/')}".strip("/")
+    candidate = Path(value)
+    if candidate.is_absolute():
+        return str(candidate.resolve())
+    return value.strip("/")
+
+
+def _matching_projection_binding(plane, *, wiki_repo_url: str):
+    normalized_target = _normalize_target_locator(wiki_repo_url)
+    if not normalized_target:
+        return None
+    for binding in plane.registry.list_projection_bindings():
+        if binding.target_kind != "github_wiki":
+            continue
+        if _normalize_target_locator(binding.target_locator) == normalized_target:
+            return binding
+    return None
+
+
+def _publication_status_labels(*, existing: PublicationStatusRecord | None, export, operator_source_sha: str, wiki_repo_url: str, push_requested: bool, commit_message: str) -> dict[str, str]:
+    labels = dict(existing.labels if existing is not None else {})
+    labels.update(
+        {
+            "operator_source_sha": operator_source_sha,
+            "projection_target_locator": _normalize_target_locator(wiki_repo_url),
+            "projection_target_url": sanitize_remote_url(wiki_repo_url),
+            "push_requested": "true" if push_requested else "false",
+            "operator_commit_message": commit_message,
+        },
+    )
+    if export is not None:
+        labels["source_export_version"] = export.version
+        labels["source_export_sha256"] = export.content_sha256
+    else:
+        labels.pop("source_export_version", None)
+        labels.pop("source_export_sha256", None)
+    return labels
+
+
+def _prepare_projection_publication(*, state_path: Path | str, wiki_repo_url: str, operator_source_sha: str, push_requested: bool, commit_message: str):
+    store = ControlPlaneStateStore(path=Path(state_path))
+    checked_at = time.time()
+
+    def _update(plane):
+        if not plane.registry.list_projection_bindings():
+            plane.bootstrap_steward_public_wiki_contract(now=checked_at)
+        binding = _matching_projection_binding(plane, wiki_repo_url=wiki_repo_url)
+        if binding is None:
+            return None
+        export = plane.registry.find_authority_export(binding.source_repo_id, binding.required_export_kind.value)
+        existing = plane.registry.get_publication_status(binding.binding_id)
+        labels = _publication_status_labels(
+            existing=existing,
+            export=export,
+            operator_source_sha=operator_source_sha,
+            wiki_repo_url=wiki_repo_url,
+            push_requested=push_requested,
+            commit_message=commit_message,
+        )
+        if export is None:
+            status = PublicationStatusRecord(
+                binding_id=binding.binding_id,
+                status=PublicationState.BLOCKED,
+                projected_from_export_id="",
+                target_kind=binding.target_kind,
+                target_locator=binding.target_locator,
+                checked_at=checked_at,
+                stale=False,
+                failure_reason=f"missing_authority_export:{binding.source_repo_id}:{binding.required_export_kind.value}",
+                labels=labels,
+            )
+            plane.upsert_publication_status(status)
+            return {"binding_id": binding.binding_id, "status": status.status, "failure_reason": status.failure_reason}
+        return {"binding_id": binding.binding_id, "status": PublicationState.STALE, "export_id": export.export_id}
+
+    return store.update(_update)
+
+
+def _record_projection_publication_outcome(*, state_path: Path | str, wiki_repo_url: str, operator_source_sha: str, push_requested: bool, commit_message: str, status: PublicationState, failure_reason: str = "") -> PublicationStatusRecord | None:
+    store = ControlPlaneStateStore(path=Path(state_path))
+    checked_at = time.time()
+
+    def _update(plane):
+        if not plane.registry.list_projection_bindings():
+            plane.bootstrap_steward_public_wiki_contract(now=checked_at)
+        binding = _matching_projection_binding(plane, wiki_repo_url=wiki_repo_url)
+        if binding is None:
+            return None
+        export = plane.registry.find_authority_export(binding.source_repo_id, binding.required_export_kind.value)
+        existing = plane.registry.get_publication_status(binding.binding_id)
+        labels = _publication_status_labels(
+            existing=existing,
+            export=export,
+            operator_source_sha=operator_source_sha,
+            wiki_repo_url=wiki_repo_url,
+            push_requested=push_requested,
+            commit_message=commit_message,
+        )
+        if export is None:
+            record = PublicationStatusRecord(
+                binding_id=binding.binding_id,
+                status=PublicationState.BLOCKED,
+                projected_from_export_id="",
+                target_kind=binding.target_kind,
+                target_locator=binding.target_locator,
+                checked_at=checked_at,
+                stale=False,
+                failure_reason=f"missing_authority_export:{binding.source_repo_id}:{binding.required_export_kind.value}",
+                labels=labels,
+            )
+        elif status == PublicationState.SUCCESS:
+            record = PublicationStatusRecord(
+                binding_id=binding.binding_id,
+                status=PublicationState.SUCCESS,
+                projected_from_export_id=export.export_id,
+                target_kind=binding.target_kind,
+                target_locator=binding.target_locator,
+                published_at=checked_at,
+                checked_at=checked_at,
+                stale=False,
+                failure_reason="",
+                labels=labels,
+            )
+        else:
+            membrane_current = bool(
+                existing is not None
+                and existing.status == PublicationState.SUCCESS
+                and existing.projected_from_export_id == export.export_id
+                and existing.labels.get("source_export_version", "") == export.version
+                and existing.labels.get("source_export_sha256", "") == export.content_sha256
+            )
+            record = PublicationStatusRecord(
+                binding_id=binding.binding_id,
+                status=PublicationState.FAILED,
+                projected_from_export_id=export.export_id,
+                target_kind=binding.target_kind,
+                target_locator=binding.target_locator,
+                published_at=(existing.published_at if existing is not None else None),
+                checked_at=checked_at,
+                stale=not membrane_current,
+                failure_reason=failure_reason,
+                labels=labels,
+            )
+        plane.upsert_publication_status(record)
+        return record
+
+    return store.update(_update)
 
 
 def _normalize_relative_path(path: str) -> str:

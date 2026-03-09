@@ -1,8 +1,14 @@
 import json
 import subprocess
+from hashlib import sha256
 
+import pytest
+
+from agent_internet.control_plane import STEWARD_PROTOCOL_REPO_ID, STEWARD_PUBLIC_WIKI_BINDING_ID
+from agent_internet.models import AuthorityExportKind, AuthorityExportRecord, PublicationState
 from agent_internet.publication_status import sanitize_remote_url
 from agent_internet.publisher import build_agent_internet_peer_descriptor, build_agent_internet_wiki, probe_wiki_remote, publish_agent_internet_wiki
+from agent_internet.snapshot import ControlPlaneStateStore
 
 
 def _git(cwd, *args):
@@ -26,6 +32,78 @@ def _init_git_workspace(tmp_path):
     _git(work_root, "push", "origin", "HEAD")
     _git(work_root, "remote", "set-url", "origin", "git@github.com:org/agent-internet.git")
     return work_root, wiki_remote
+
+
+def _seed_steward_public_wiki_binding(state_path, *, wiki_repo_url: str, version: str = "v1", source_sha: str = "bundle-sha"):
+    artifact_payload = {"kind": "canonical_surface", "documents": [{"document_id": "constitution"}]}
+    digest = sha256(json.dumps(artifact_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    store = ControlPlaneStateStore(path=state_path)
+
+    def _update(plane):
+        plane.bootstrap_steward_public_wiki_contract(now=100.0)
+        binding = plane.registry.get_projection_binding(STEWARD_PUBLIC_WIKI_BINDING_ID)
+        plane.registry.upsert_projection_binding(
+            binding.__class__(
+                binding_id=binding.binding_id,
+                source_repo_id=binding.source_repo_id,
+                required_export_kind=binding.required_export_kind,
+                operator_repo_id=binding.operator_repo_id,
+                target_kind=binding.target_kind,
+                target_locator=str(wiki_repo_url),
+                projection_mode=binding.projection_mode,
+                failure_policy=binding.failure_policy,
+                freshness_sla_seconds=binding.freshness_sla_seconds,
+                labels=dict(binding.labels),
+            ),
+        )
+        plane.upsert_authority_export(
+            AuthorityExportRecord(
+                export_id=f"{STEWARD_PROTOCOL_REPO_ID}/canonical_surface",
+                repo_id=STEWARD_PROTOCOL_REPO_ID,
+                export_kind=AuthorityExportKind.CANONICAL_SURFACE,
+                version=version,
+                artifact_uri=".authority-exports/canonical-surface.json",
+                generated_at=101.0,
+                content_sha256=digest,
+                labels={"source_sha": source_sha},
+            ),
+        )
+
+    store.update(_update)
+    return store
+
+
+def _ingest_new_steward_source(store: ControlPlaneStateStore, *, version: str, source_sha: str, document_id: str = "constitution-v2"):
+    artifact_payload = {"kind": "canonical_surface", "documents": [{"document_id": document_id}]}
+    digest = sha256(json.dumps(artifact_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    bundle = {
+        "kind": "source_authority_bundle",
+        "generated_at": 202.0,
+        "source_sha": source_sha,
+        "repo_role": {
+            "repo_id": STEWARD_PROTOCOL_REPO_ID,
+            "role": "normative_source",
+            "owner_boundary": "normative_protocol_surface",
+            "exports": [AuthorityExportKind.CANONICAL_SURFACE.value],
+            "consumes": [],
+            "publication_targets": [STEWARD_PUBLIC_WIKI_BINDING_ID],
+            "labels": {"public_surface_owner": "agent-internet"},
+        },
+        "authority_exports": [
+            {
+                "export_id": f"{STEWARD_PROTOCOL_REPO_ID}/canonical_surface",
+                "repo_id": STEWARD_PROTOCOL_REPO_ID,
+                "export_kind": AuthorityExportKind.CANONICAL_SURFACE.value,
+                "version": version,
+                "artifact_uri": ".authority-exports/canonical-surface.json",
+                "generated_at": 201.0,
+                "contract_version": 1,
+                "content_sha256": digest,
+                "labels": {"source_sha": source_sha},
+            },
+        ],
+    }
+    store.update(lambda plane: plane.ingest_authority_bundle(bundle, artifacts={".authority-exports/canonical-surface.json": artifact_payload}, now=203.0))
 
 
 def test_build_agent_internet_peer_descriptor_detects_git_metadata(tmp_path):
@@ -88,6 +166,119 @@ def test_publish_agent_internet_wiki_commits_without_push(tmp_path):
     publication_payload = json.loads((tmp_path / "wiki-checkout" / ".agent-web-publication.json").read_text())
     assert "x-access-token" not in publication_payload["wiki_repo_url"]
     assert publication_payload["wiki_repo_url"] == str(wiki_remote)
+
+
+def test_publish_agent_internet_wiki_records_success_for_bound_projection(tmp_path):
+    work_root, wiki_remote = _init_git_workspace(tmp_path)
+    state_path = tmp_path / "state.json"
+    store = _seed_steward_public_wiki_binding(state_path, wiki_repo_url=str(wiki_remote), version="v-success", source_sha="bundle-success")
+
+    result = publish_agent_internet_wiki(
+        root=work_root,
+        state_path=state_path,
+        wiki_path=tmp_path / "wiki-checkout",
+        wiki_repo_url=str(wiki_remote),
+        push=False,
+    )
+
+    status = store.load().registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID)
+
+    assert result["binding_id"] == STEWARD_PUBLIC_WIKI_BINDING_ID
+    assert result["publication_state"] == PublicationState.SUCCESS.value
+    assert status.status == PublicationState.SUCCESS
+    assert status.projected_from_export_id == f"{STEWARD_PROTOCOL_REPO_ID}/canonical_surface"
+    assert status.published_at is not None
+    assert status.stale is False
+    assert status.failure_reason == ""
+    assert status.labels["source_export_version"] == "v-success"
+    assert status.labels["operator_source_sha"] == result["source_sha"]
+
+
+def test_publish_agent_internet_wiki_records_failed_projection_attempt(tmp_path, monkeypatch):
+    work_root, wiki_remote = _init_git_workspace(tmp_path)
+    state_path = tmp_path / "state.json"
+    store = _seed_steward_public_wiki_binding(state_path, wiki_repo_url=str(wiki_remote), version="v-fail", source_sha="bundle-fail")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("simulated-publish-failure")
+
+    monkeypatch.setattr("agent_internet.publisher._git_commit_all", boom)
+
+    with pytest.raises(RuntimeError, match="simulated-publish-failure"):
+        publish_agent_internet_wiki(
+            root=work_root,
+            state_path=state_path,
+            wiki_path=tmp_path / "wiki-checkout",
+            wiki_repo_url=str(wiki_remote),
+            push=False,
+        )
+
+    status = store.load().registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID)
+
+    assert status.status == PublicationState.FAILED
+    assert status.projected_from_export_id == f"{STEWARD_PROTOCOL_REPO_ID}/canonical_surface"
+    assert status.failure_reason.startswith("projection_publish_failed:RuntimeError:simulated-publish-failure")
+    assert status.checked_at is not None
+
+
+def test_publish_agent_internet_wiki_success_becomes_stale_after_new_source_import(tmp_path):
+    work_root, wiki_remote = _init_git_workspace(tmp_path)
+    state_path = tmp_path / "state.json"
+    store = _seed_steward_public_wiki_binding(state_path, wiki_repo_url=str(wiki_remote), version="v1", source_sha="bundle-v1")
+
+    publish_agent_internet_wiki(
+        root=work_root,
+        state_path=state_path,
+        wiki_path=tmp_path / "wiki-checkout",
+        wiki_repo_url=str(wiki_remote),
+        push=False,
+    )
+    _ingest_new_steward_source(store, version="v2", source_sha="bundle-v2")
+
+    status = store.load().registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID)
+
+    assert status.status == PublicationState.STALE
+    assert status.failure_reason == "projection_out_of_date"
+    assert status.labels["source_export_version"] == "v2"
+    assert status.labels["authority_bundle_source_sha"] == "bundle-v2"
+
+
+def test_publish_agent_internet_wiki_blocks_bound_projection_without_imported_source(tmp_path):
+    work_root, wiki_remote = _init_git_workspace(tmp_path)
+    state_path = tmp_path / "state.json"
+    store = ControlPlaneStateStore(path=state_path)
+
+    def _update(plane):
+        plane.bootstrap_steward_public_wiki_contract(now=100.0)
+        binding = plane.registry.get_projection_binding(STEWARD_PUBLIC_WIKI_BINDING_ID)
+        plane.registry.upsert_projection_binding(
+            binding.__class__(
+                binding_id=binding.binding_id,
+                source_repo_id=binding.source_repo_id,
+                required_export_kind=binding.required_export_kind,
+                operator_repo_id=binding.operator_repo_id,
+                target_kind=binding.target_kind,
+                target_locator=str(wiki_remote),
+                projection_mode=binding.projection_mode,
+                failure_policy=binding.failure_policy,
+                freshness_sla_seconds=binding.freshness_sla_seconds,
+                labels=dict(binding.labels),
+            ),
+        )
+
+    store.update(_update)
+
+    with pytest.raises(RuntimeError, match="missing_authority_export:steward-protocol:canonical_surface"):
+        publish_agent_internet_wiki(
+            root=work_root,
+            state_path=state_path,
+            wiki_path=tmp_path / "wiki-checkout",
+            wiki_repo_url=str(wiki_remote),
+            push=False,
+        )
+
+    status = store.load().registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID)
+    assert status.status == PublicationState.BLOCKED
 
 
 def test_publish_agent_internet_wiki_prunes_only_stale_generated_pages(tmp_path):
