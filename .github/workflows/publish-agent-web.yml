@@ -8,7 +8,6 @@ on:
       - 'docs/**'
       - 'scripts/build_agent_web_wiki.py'
       - 'scripts/publish_agent_web_wiki.py'
-      - 'tests/test_cli.py'
       - 'tests/test_repo_capsule.py'
       - 'tests/test_publisher.py'
       - '.github/workflows/publish-agent-web.yml'
@@ -52,11 +51,10 @@ jobs:
             agent_internet/repo_capsule.py \
             scripts/build_agent_web_wiki.py \
             scripts/publish_agent_web_wiki.py \
-            tests/test_cli.py \
             tests/test_git_federation.py \
             tests/test_repo_capsule.py \
             tests/test_publisher.py
-          python -m pytest -q tests/test_cli.py tests/test_git_federation.py tests/test_repo_capsule.py tests/test_publisher.py
+          python -m pytest -q tests/test_git_federation.py tests/test_repo_capsule.py tests/test_publisher.py
           python scripts/build_agent_web_wiki.py --output-dir .agent_internet/wiki-build-ci
 
       - name: Configure git identity

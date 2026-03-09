@@ -256,31 +256,6 @@ def test_cli_show_state_prints_snapshot(tmp_path, capsys):
     assert payload["service_addresses"] == []
 
 
-def test_cli_repo_capsule(tmp_path, capsys):
-    root = tmp_path / "sample-repo"
-    pkg = root / "sample_pkg"
-    root.mkdir()
-    pkg.mkdir()
-    (root / "README.md").write_text("# Sample Repo\n\nRepo capsule summary.\n")
-    (root / "pyproject.toml").write_text(
-        "[project]\nname='sample-repo'\n[project.scripts]\nsample='sample_pkg.cli:main'\n",
-    )
-    (pkg / "__init__.py").write_text('"""Sample package."""\n')
-    (pkg / "cli.py").write_text('"""CLI entrypoint."""\n')
-    _git(tmp_path, "init", str(root))
-    _git(root, "config", "user.email", "test@example.com")
-    _git(root, "config", "user.name", "Test User")
-    _git(root, "remote", "add", "origin", "git@github.com:org/sample-repo.git")
-    _git(root, "add", ".")
-    _git(root, "commit", "-m", "init")
-
-    assert main(["repo-capsule", "--root", str(root)]) == 0
-
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["identity"]["repo_name"] == "sample-repo"
-    assert payload["interfaces"]["cli_entrypoints"][0]["name"] == "sample"
-
-
 def test_cli_agent_city_assistant_snapshot(tmp_path, capsys):
     repo_root = tmp_path / "city"
     reports_dir = repo_root / "data" / "federation" / "reports"

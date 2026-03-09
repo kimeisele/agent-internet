@@ -1,5 +1,7 @@
+import json
 import subprocess
 
+from agent_internet.cli import main
 from agent_internet.repo_capsule import extract_repo_capsule
 
 
@@ -41,3 +43,28 @@ def test_extract_repo_capsule_summarizes_repo(tmp_path):
     assert "sample_pkg" in payload["architecture"]["package_roots"]
     assert any(module["path"] == "sample_pkg/cli.py" for module in payload["architecture"]["key_modules"])
     assert payload["audit"]["counts"]["test_file_count"] == 1
+
+
+def test_cli_repo_capsule(tmp_path, capsys):
+    root = tmp_path / "sample-repo"
+    pkg = root / "sample_pkg"
+    root.mkdir()
+    pkg.mkdir()
+    (root / "README.md").write_text("# Sample Repo\n\nRepo capsule summary.\n")
+    (root / "pyproject.toml").write_text(
+        "[project]\nname='sample-repo'\n[project.scripts]\nsample='sample_pkg.cli:main'\n",
+    )
+    (pkg / "__init__.py").write_text('"""Sample package."""\n')
+    (pkg / "cli.py").write_text('"""CLI entrypoint."""\n')
+    _git(tmp_path, "init", str(root))
+    _git(root, "config", "user.email", "test@example.com")
+    _git(root, "config", "user.name", "Test User")
+    _git(root, "remote", "add", "origin", "git@github.com:org/sample-repo.git")
+    _git(root, "add", ".")
+    _git(root, "commit", "-m", "init")
+
+    assert main(["repo-capsule", "--root", str(root)]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["identity"]["repo_name"] == "sample-repo"
+    assert payload["interfaces"]["cli_entrypoints"][0]["name"] == "sample"
