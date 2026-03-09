@@ -1,4 +1,5 @@
 import json
+from hashlib import sha256
 
 import pytest
 
@@ -22,6 +23,47 @@ from agent_internet.models import (
 )
 from agent_internet.agent_web_source_registry import upsert_agent_web_source_registry_entry
 from agent_internet.agent_web_semantic_overlay import upsert_agent_web_semantic_bridge
+
+
+def _write_authority_bundle(tmp_path, *, version: str = "2026-03-09T19:00:00Z"):
+    bundle_dir = tmp_path / "bundle"
+    (bundle_dir / ".authority-exports").mkdir(parents=True)
+    canonical_payload = {"kind": "canonical_surface", "documents": [{"document_id": "constitution"}]}
+    canonical_path = ".authority-exports/canonical-surface.json"
+    (bundle_dir / canonical_path).write_text(json.dumps(canonical_payload, indent=2, sort_keys=True) + "\n")
+    canonical_digest = sha256(json.dumps(canonical_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    bundle = {
+        "kind": "source_authority_bundle",
+        "contract_version": 1,
+        "generated_at": 301.0,
+        "source_sha": "fedcba",
+        "repo_role": {
+            "repo_id": "steward-protocol",
+            "role": "normative_source",
+            "owner_boundary": "normative_protocol_surface",
+            "exports": ["canonical_surface"],
+            "consumes": [],
+            "publication_targets": [STEWARD_PUBLIC_WIKI_BINDING_ID],
+            "labels": {"public_surface_owner": "agent-internet"},
+        },
+        "authority_exports": [
+            {
+                "export_id": "steward-protocol/canonical_surface",
+                "repo_id": "steward-protocol",
+                "export_kind": "canonical_surface",
+                "version": version,
+                "artifact_uri": canonical_path,
+                "generated_at": 300.0,
+                "contract_version": 1,
+                "content_sha256": canonical_digest,
+                "labels": {"source_sha": "fedcba"},
+            },
+        ],
+        "artifact_paths": {"canonical_surface": canonical_path},
+    }
+    path = bundle_dir / ".authority-export-bundle.json"
+    path.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n")
+    return path
 
 
 def test_lotus_api_issues_token_and_allows_scoped_calls():
@@ -781,6 +823,24 @@ def test_lotus_api_lists_federation_contract_records():
     assert authority_exports["authority_exports"][0]["export_kind"] == "canonical_surface"
     assert projection_bindings["projection_bindings"][0]["binding_id"] == STEWARD_PUBLIC_WIKI_BINDING_ID
     assert publication_statuses["publication_statuses"][0]["status"] == "success"
+
+
+def test_lotus_api_imports_authority_bundle_path(tmp_path):
+    plane = AgentInternetControlPlane()
+    bundle_path = _write_authority_bundle(tmp_path)
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(subject="operator", scopes=(LotusApiScope.CONTRACT_WRITE.value, LotusApiScope.READ.value), token_secret="contract-token", now=10.0)
+
+    imported = api.call(
+        bearer_token=issued.secret,
+        action="import_authority_bundle",
+        params={"bundle_path": str(bundle_path), "now": 305.0},
+    )
+
+    assert imported["imported"]["repo_role"]["repo_id"] == "steward-protocol"
+    assert imported["imported"]["authority_exports"][0]["content_sha256"]
+    assert imported["imported"]["publication_statuses"][0]["status"] == "stale"
+    assert plane.registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID).labels["authority_bundle_source_sha"] == "fedcba"
 
 
 def test_lotus_api_lists_fork_lineage():

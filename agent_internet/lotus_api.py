@@ -48,6 +48,7 @@ LOTUS_MUTATING_ACTIONS = frozenset(
         "cancel_intent",
         "create_intent",
         "fulfill_intent",
+        "import_authority_bundle",
         "issue_token",
         "publish_endpoint",
         "publish_route",
@@ -435,6 +436,23 @@ class LotusControlPlaneAPI:
                 token_secret=payload.get("token_secret", ""),
             )
             return {"token": asdict(issued.token), "secret": issued.secret}
+        if action == "import_authority_bundle":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.CONTRACT_WRITE.value,))
+            imported = self.plane.ingest_authority_bundle_path(
+                payload["bundle_path"],
+                now=(None if payload.get("now") is None else float(payload["now"])),
+            )
+            return {
+                "token_id": token.token_id,
+                "imported": {
+                    "repo_role": asdict(imported["repo_role"]),
+                    "authority_exports": [asdict(record) for record in imported["authority_exports"]],
+                    "publication_statuses": [asdict(record) for record in imported["publication_statuses"]],
+                    "artifact_count": imported["artifact_count"],
+                    "bundle_path": imported["bundle_path"],
+                    "artifact_paths": list(imported["artifact_paths"]),
+                },
+            }
         if action == "assign_addresses":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.ADDRESS_WRITE.value,))
             link, network = self.plane.assign_lotus_addresses(payload["city_id"], ttl_s=payload.get("ttl_s"))

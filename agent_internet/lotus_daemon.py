@@ -409,6 +409,8 @@ class LotusApiDaemon:
                 return 200, self._call(token, str(request["action"]), dict(request.get("params", {})))
             if method == "POST" and path == "/v1/lotus/tokens":
                 return 200, self._call(token, "issue_token", _decode_json_object(body))
+            if method == "POST" and path == "/v1/lotus/authority-bundles/import":
+                return 200, self._call(token, "import_authority_bundle", _decode_json_object(body))
             if method == "POST" and path == "/v1/lotus/intents":
                 return 200, self._call(token, "create_intent", _decode_json_object(body))
             if method == "POST" and path.startswith("/v1/lotus/intents/"):
