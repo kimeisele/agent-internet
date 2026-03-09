@@ -9,6 +9,13 @@ from urllib.parse import urlsplit, urlunsplit
 from .agent_web import build_agent_web_manifest
 from .agent_web_graph import build_agent_web_public_graph
 from .agent_web_index import build_agent_web_search_index
+from .node_health import (
+    build_node_surface_snapshot,
+    render_federation_status_page,
+    render_node_health_page,
+    render_repo_quality_page,
+    render_surface_integrity_page,
+)
 from .agent_web_repo_graph_capabilities import render_agent_web_repo_graph_capability_page
 from .agent_web_repo_graph_contracts import render_agent_web_repo_graph_contract_page
 from .agent_web_semantic_capabilities import render_agent_web_semantic_capability_page
@@ -112,6 +119,7 @@ class GitWikiFederationSync:
             peer_descriptor=peer_descriptor,
             state_snapshot=state_snapshot,
             assistant_snapshot=assistant_snapshot,
+            repo_root=self.repo_root,
         )
         for relative_path, content in pages.items():
             target = wiki_path / relative_path
@@ -150,7 +158,13 @@ def write_git_federation_manifest(path: Path, *, peer_descriptor: dict, remote: 
     return payload
 
 
-def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict, assistant_snapshot: dict | None = None) -> dict[str, str]:
+def render_wiki_projection(
+    *,
+    peer_descriptor: dict,
+    state_snapshot: dict,
+    assistant_snapshot: dict | None = None,
+    repo_root: Path | str | None = None,
+) -> dict[str, str]:
     identity = dict(peer_descriptor.get("identity", {}))
     git_manifest = dict(peer_descriptor.get("git_federation", {}))
     cities = list(state_snapshot.get("identities", []))
@@ -232,6 +246,10 @@ def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict, assis
     search_index = build_agent_web_search_index(agent_web, public_graph)
     pages = {
         "Home.md": home,
+        "Node-Health.md": "",
+        "Federation-Status.md": "",
+        "Surface-Integrity.md": "",
+        "Repo-Quality.md": "",
         "Cities.md": cities_md,
         "Services.md": services_md,
         "Routes.md": routes_md,
@@ -248,6 +266,30 @@ def render_wiki_projection(*, peer_descriptor: dict, state_snapshot: dict, assis
         "_Sidebar.md": _render_sidebar_page(),
         "_Footer.md": _render_footer_page(),
     }
+    node_surface = build_node_surface_snapshot(
+        repo_root=repo_root,
+        peer_descriptor=peer_descriptor,
+        state_snapshot=state_snapshot,
+        assistant_snapshot=assistant_snapshot,
+        rendered_pages=pages,
+        agent_web=agent_web,
+    )
+    pages["Node-Health.md"] = render_node_health_page(node_surface)
+    pages["Federation-Status.md"] = render_federation_status_page(node_surface)
+    pages["Surface-Integrity.md"] = render_surface_integrity_page(node_surface)
+    pages["Repo-Quality.md"] = render_repo_quality_page(node_surface)
+    node_surface = build_node_surface_snapshot(
+        repo_root=repo_root,
+        peer_descriptor=peer_descriptor,
+        state_snapshot=state_snapshot,
+        assistant_snapshot=assistant_snapshot,
+        rendered_pages=pages,
+        agent_web=agent_web,
+    )
+    pages["Node-Health.md"] = render_node_health_page(node_surface)
+    pages["Federation-Status.md"] = render_federation_status_page(node_surface)
+    pages["Surface-Integrity.md"] = render_surface_integrity_page(node_surface)
+    pages["Repo-Quality.md"] = render_repo_quality_page(node_surface)
     return pages
 
 
@@ -301,6 +343,10 @@ def _render_assistant_surface_page(assistant_snapshot: dict) -> str:
 def _render_sidebar_page() -> str:
     links = [
         ("Home", "Home"),
+        ("Node Health", "Node-Health"),
+        ("Federation Status", "Federation-Status"),
+        ("Surface Integrity", "Surface-Integrity"),
+        ("Repo Quality", "Repo-Quality"),
         ("Agent Web", "Agent-Web"),
         ("Assistant Surface", "Assistant-Surface"),
         ("Public Graph", "Public-Graph"),

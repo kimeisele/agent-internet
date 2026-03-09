@@ -13,8 +13,13 @@ from .file_locking import read_locked_json_value
 
 DOCUMENT_SPECS = (
     ("home", "wiki_home", "summary", "Home", "Home.md", True),
+    ("node_health", "node_health", "node_health", "Node Health", "Node-Health.md", True),
+    ("federation_status", "federation_status", "federation_status", "Federation Status", "Federation-Status.md", True),
+    ("surface_integrity", "surface_integrity", "surface_integrity", "Surface Integrity", "Surface-Integrity.md", False),
+    ("repo_quality", "repo_quality", "repo_quality", "Repo Quality", "Repo-Quality.md", False),
     ("assistant_surface", "assistant_surface", "assistant_surface", "Assistant Surface", "Assistant-Surface.md", True),
     ("agent_web", "agent_web", "manifest", "Agent Web", "Agent-Web.md", True),
+    ("git_federation", "git_federation", "federation_manifest", "Git Federation", "Git-Federation.md", False),
     ("semantic_capabilities", "semantic_capabilities", "semantic_capability_manifest", "Semantic Capabilities", "Semantic-Capabilities.md", True),
     ("semantic_contracts", "semantic_contracts", "semantic_contract_manifest", "Semantic Contracts", "Semantic-Contracts.md", True),
     ("repo_graph_capabilities", "repo_graph_capabilities", "repo_graph_capability_manifest", "Repo Graph Capabilities", "Repo-Graph-Capabilities.md", True),
@@ -179,6 +184,10 @@ def _build_entrypoints() -> dict[str, dict[str, str]]:
     return {
         "default": {"document_id": "agent_web", "rel": "agent_web"},
         "home": {"document_id": "home", "rel": "wiki_home"},
+        "node_health": {"document_id": "node_health", "rel": "node_health"},
+        "federation_status": {"document_id": "federation_status", "rel": "federation_status"},
+        "surface_integrity": {"document_id": "surface_integrity", "rel": "surface_integrity"},
+        "repo_quality": {"document_id": "repo_quality", "rel": "repo_quality"},
         "assistant_surface": {"document_id": "assistant_surface", "rel": "assistant_surface"},
         "semantic_capabilities": {"document_id": "semantic_capabilities", "rel": "semantic_capabilities"},
         "semantic_contracts": {"document_id": "semantic_contracts", "rel": "semantic_contracts"},
@@ -186,8 +195,10 @@ def _build_entrypoints() -> dict[str, dict[str, str]]:
         "repo_graph_contracts": {"document_id": "repo_graph_contracts", "rel": "repo_graph_contracts"},
         "public_graph": {"document_id": "public_graph", "rel": "public_graph"},
         "search_index": {"document_id": "search_index", "rel": "search_index"},
+        "git_federation": {"document_id": "git_federation", "rel": "git_federation"},
         "services": {"document_id": "services", "rel": "services"},
         "routes": {"document_id": "routes", "rel": "routes"},
+        "cities": {"document_id": "cities", "rel": "cities"},
         "lineage": {"document_id": "lineage", "rel": "lineage"},
     }
 

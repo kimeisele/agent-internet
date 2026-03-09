@@ -143,7 +143,16 @@ def test_git_wiki_sync_projects_pages_and_pushes(tmp_path):
     assert '"kind": "agent_web_search_index"' in (clone_path / "Search-Index.md").read_text()
     assert "# Lineage" in (clone_path / "Lineage.md").read_text()
     assert "Sync Policy: `advisory`" in (clone_path / "Lineage.md").read_text()
+    assert "# Node Health" in (clone_path / "Node-Health.md").read_text()
+    assert "Status: `healthy`" in (clone_path / "Node-Health.md").read_text()
+    assert "# Federation Status" in (clone_path / "Federation-Status.md").read_text()
+    assert "Status: `networked`" in (clone_path / "Federation-Status.md").read_text()
+    assert "Missing Declared Documents: `0`" in (clone_path / "Surface-Integrity.md").read_text()
+    assert "# Repo Quality" in (clone_path / "Repo-Quality.md").read_text()
+    assert "Tracked Files: `" in (clone_path / "Repo-Quality.md").read_text()
+    assert "Has tests: `" in (clone_path / "Repo-Quality.md").read_text()
     assert "[[Assistant Surface|Assistant-Surface]]" in (clone_path / "_Sidebar.md").read_text()
+    assert "[[Node Health|Node-Health]]" in (clone_path / "_Sidebar.md").read_text()
     assert "generated public membrane" in (clone_path / "_Footer.md").read_text()
 
 

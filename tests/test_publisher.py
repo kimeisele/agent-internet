@@ -39,10 +39,20 @@ def test_build_agent_internet_wiki_materializes_pages(tmp_path):
     built = build_agent_internet_wiki(root=work_root, output_dir=tmp_path / "wiki-build", state_path=tmp_path / "state.json")
     assert any(path.name == "Agent-Web.md" for path in built)
     assert any(path.name == "Assistant-Surface.md" for path in built)
+    assert any(path.name == "Node-Health.md" for path in built)
+    assert any(path.name == "Federation-Status.md" for path in built)
+    assert any(path.name == "Surface-Integrity.md" for path in built)
+    assert any(path.name == "Repo-Quality.md" for path in built)
     assert any(path.name == "_Sidebar.md" for path in built)
     assert "# Repo Graph Capabilities" in (tmp_path / "wiki-build" / "Repo-Graph-Capabilities.md").read_text()
     assert "No assistant snapshot is published yet for this city." in (tmp_path / "wiki-build" / "Assistant-Surface.md").read_text()
     assert "No services are published yet." in (tmp_path / "wiki-build" / "Services.md").read_text()
+    assert "# Node Health" in (tmp_path / "wiki-build" / "Node-Health.md").read_text()
+    assert "# Federation Status" in (tmp_path / "wiki-build" / "Federation-Status.md").read_text()
+    assert "Missing Declared Documents: `0`" in (tmp_path / "wiki-build" / "Surface-Integrity.md").read_text()
+    assert "# Repo Quality" in (tmp_path / "wiki-build" / "Repo-Quality.md").read_text()
+    assert "Tracked Files: `" in (tmp_path / "wiki-build" / "Repo-Quality.md").read_text()
+    assert "Has tests: `" in (tmp_path / "wiki-build" / "Repo-Quality.md").read_text()
 
 
 def test_publish_agent_internet_wiki_commits_without_push(tmp_path):

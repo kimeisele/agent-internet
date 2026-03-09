@@ -98,6 +98,7 @@ def read_agent_web_document_from_repo_root(
         peer_descriptor=peer_descriptor,
         state_snapshot=state_snapshot,
         assistant_snapshot=assistant_snapshot,
+        repo_root=repo_root,
     )
     document_path = str(document_descriptor.get("href", link.get("href", "")))
     if document_path not in pages:

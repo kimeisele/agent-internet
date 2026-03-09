@@ -4,6 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 
+from .agent_web import DOCUMENT_SPECS
 from .git_federation import detect_git_remote_metadata, ensure_git_checkout, render_wiki_projection
 from .snapshot import ControlPlaneStateStore, snapshot_control_plane
 
@@ -14,6 +15,7 @@ DEFAULT_AGENT_INTERNET_CAPABILITIES = (
     "repo_graph_capability_manifest",
     "repo_graph_contract_manifest",
     "git_federation",
+    "node_health_surface",
 )
 
 WIKI_GENERATED_INVENTORY = ".wiki-generated-inventory.json"
@@ -41,19 +43,7 @@ def build_agent_internet_peer_descriptor(root: Path | str, *, city_id: str = "ag
             "repo_ref": remote.repo_ref,
             "wiki_repo_url": remote.wiki_repo_url,
             "city_id": city_id,
-            "shared_pages": [
-                "Home.md",
-                "Assistant-Surface.md",
-                "Git-Federation.md",
-                "Agent-Web.md",
-                "Semantic-Capabilities.md",
-                "Semantic-Contracts.md",
-                "Repo-Graph-Capabilities.md",
-                "Repo-Graph-Contracts.md",
-                "Public-Graph.md",
-                "Search-Index.md",
-                "Lineage.md",
-            ],
+            "shared_pages": [href for _document_id, _rel, _kind, _title, href, _entrypoint in DOCUMENT_SPECS],
         },
     }
 
@@ -135,6 +125,7 @@ def _render_pages(*, root: Path | str, state_path: Path | str, city_id: str) -> 
         peer_descriptor=peer_descriptor,
         state_snapshot=snapshot_control_plane(store.load()),
         assistant_snapshot=None,
+        repo_root=Path(root).resolve(),
     )
 
 
