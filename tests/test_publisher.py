@@ -1,6 +1,7 @@
 import json
 import subprocess
 
+from agent_internet.publication_status import sanitize_remote_url
 from agent_internet.publisher import build_agent_internet_peer_descriptor, build_agent_internet_wiki, probe_wiki_remote, publish_agent_internet_wiki
 
 
@@ -32,6 +33,12 @@ def test_build_agent_internet_peer_descriptor_detects_git_metadata(tmp_path):
     payload = build_agent_internet_peer_descriptor(work_root)
     assert payload["identity"]["repo"] == "org/agent-internet"
     assert payload["git_federation"]["wiki_repo_url"] == "git@github.com:org/agent-internet.wiki.git"
+
+
+def test_sanitize_remote_url_removes_embedded_credentials():
+    sanitized = sanitize_remote_url("https://x-access-token:secret-token@github.com/org/agent-internet.wiki.git")
+
+    assert sanitized == "https://github.com/org/agent-internet.wiki.git"
 
 
 def test_build_agent_internet_wiki_materializes_pages(tmp_path):
@@ -75,7 +82,12 @@ def test_publish_agent_internet_wiki_commits_without_push(tmp_path):
     assert log.startswith("agent-web: publish surfaces from ")
     assert (tmp_path / "wiki-checkout" / ".wiki-generated-inventory.json").exists()
     assert (tmp_path / "wiki-checkout" / ".agent-web-publication.json").exists()
-    assert "Status: `published`" in (tmp_path / "wiki-checkout" / "Publication-Status.md").read_text()
+    publication_page = (tmp_path / "wiki-checkout" / "Publication-Status.md").read_text()
+    assert "Status: `published`" in publication_page
+    assert "x-access-token" not in publication_page
+    publication_payload = json.loads((tmp_path / "wiki-checkout" / ".agent-web-publication.json").read_text())
+    assert "x-access-token" not in publication_payload["wiki_repo_url"]
+    assert publication_payload["wiki_repo_url"] == str(wiki_remote)
 
 
 def test_publish_agent_internet_wiki_prunes_only_stale_generated_pages(tmp_path):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from urllib.parse import urlsplit, urlunsplit
 
 DEFAULT_PUBLICATION_WORKFLOW_NAME = "Publish Agent Web Wiki"
 DEFAULT_PUBLICATION_SCHEDULE_INTERVAL_SECONDS = 3600
@@ -28,7 +29,7 @@ def build_publication_snapshot(
         "status": status,
         "published_at_utc": timestamp,
         "source_sha": str(source_sha or "unknown"),
-        "wiki_repo_url": str(wiki_repo_url or ""),
+        "wiki_repo_url": sanitize_remote_url(wiki_repo_url),
         "workflow_name": str(workflow_name or ""),
         "push_requested": bool(push_requested),
         "prune_generated": bool(prune_generated),
@@ -41,6 +42,19 @@ def build_publication_snapshot(
 
 def current_utc_timestamp() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def sanitize_remote_url(url: str | None) -> str:
+    value = str(url or "").strip()
+    if not value or "://" not in value:
+        return value
+    parts = urlsplit(value)
+    if not (parts.username or parts.password):
+        return value
+    host = parts.hostname or ""
+    if parts.port is not None:
+        host = f"{host}:{parts.port}"
+    return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
 
 
 def render_publication_status_page(snapshot: dict | None) -> str:

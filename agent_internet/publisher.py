@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .agent_web import DOCUMENT_SPECS
 from .git_federation import detect_git_remote_metadata, ensure_git_checkout, render_wiki_projection
-from .publication_status import DEFAULT_PUBLICATION_WORKFLOW_NAME, build_publication_snapshot
+from .publication_status import DEFAULT_PUBLICATION_WORKFLOW_NAME, build_publication_snapshot, sanitize_remote_url
 from .snapshot import ControlPlaneStateStore, snapshot_control_plane
 
 DEFAULT_AGENT_INTERNET_CAPABILITIES = (
@@ -121,7 +121,7 @@ def publish_agent_internet_wiki(
         "pruned": len(pruned),
         "pruned_paths": pruned,
         "wiki_path": str(checkout),
-        "wiki_repo_url": effective_wiki_repo_url,
+        "wiki_repo_url": sanitize_remote_url(effective_wiki_repo_url),
         "pushed": bool(push and changed),
         "source_sha": source_sha,
         "published_at_utc": publication_snapshot["published_at_utc"],
