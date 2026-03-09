@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from agent_internet.publisher import publish_agent_internet_wiki, write_publication_result
+from agent_internet.publisher import probe_wiki_remote, publish_agent_internet_wiki, write_publication_result
 
 
 def main() -> int:
@@ -20,7 +20,16 @@ def main() -> int:
     parser.add_argument("--city-id", default="agent-internet")
     parser.add_argument("--push", action="store_true")
     parser.add_argument("--result-path")
+    parser.add_argument("--probe-only", action="store_true")
     args = parser.parse_args()
+    if args.probe_only:
+        if not args.wiki_url:
+            raise SystemExit("--wiki-url is required with --probe-only")
+        result = probe_wiki_remote(args.wiki_url)
+        if args.result_path:
+            write_publication_result(ROOT / args.result_path, result)
+        print(result)
+        return 0 if result["reachable"] else 2
     result = publish_agent_internet_wiki(
         root=ROOT,
         state_path=ROOT / args.state_path,

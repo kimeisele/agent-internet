@@ -47,6 +47,7 @@ from .local_lab import LocalDualCityLab
 from .lotus_api import LOTUS_MUTATING_ACTIONS, LotusControlPlaneAPI
 from .lotus_daemon import LotusApiDaemon
 from .models import EndpointVisibility, LotusApiScope, TrustLevel, TrustRecord
+from .repo_capsule import extract_repo_capsule
 from .snapshot import ControlPlaneStateStore, snapshot_control_plane
 from .steward_protocol_compat import summarize_steward_protocol_bindings
 
@@ -88,6 +89,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     show = subparsers.add_parser("show-state", help="Print the current persisted control-plane state")
     show.add_argument("--state-path", default="data/control_plane/state.json")
+
+    repo_capsule = subparsers.add_parser(
+        "repo-capsule",
+        help="Extract a bounded machine-readable capsule for a repository root",
+    )
+    repo_capsule.add_argument("--root", required=True)
+    repo_capsule.add_argument("--max-items", type=int, default=12)
 
     assistant_snapshot = subparsers.add_parser(
         "agent-city-assistant-snapshot",
@@ -799,6 +807,12 @@ def cmd_show_state(args: argparse.Namespace) -> int:
     store = ControlPlaneStateStore(path=Path(args.state_path))
     plane = store.load()
     print(json.dumps(snapshot_control_plane(plane), indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_repo_capsule(args: argparse.Namespace) -> int:
+    payload = extract_repo_capsule(args.root, max_items=args.max_items)
+    print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 
 
@@ -1736,6 +1750,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_onboard_agent_city(args)
     if args.command == "show-state":
         return cmd_show_state(args)
+    if args.command == "repo-capsule":
+        return cmd_repo_capsule(args)
     if args.command == "agent-city-assistant-snapshot":
         return cmd_agent_city_assistant_snapshot(args)
     if args.command == "agent-web-manifest":

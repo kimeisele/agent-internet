@@ -1,6 +1,6 @@
 import subprocess
 
-from agent_internet.publisher import build_agent_internet_peer_descriptor, build_agent_internet_wiki, publish_agent_internet_wiki
+from agent_internet.publisher import build_agent_internet_peer_descriptor, build_agent_internet_wiki, probe_wiki_remote, publish_agent_internet_wiki
 
 
 def _git(cwd, *args):
@@ -53,3 +53,17 @@ def test_publish_agent_internet_wiki_commits_without_push(tmp_path):
     assert result["pushed"] is False
     log = _git(tmp_path / "wiki-checkout", "log", "-1", "--pretty=%s").stdout.strip()
     assert log.startswith("agent-web: publish surfaces from ")
+
+
+def test_probe_wiki_remote_reports_missing_remote(tmp_path):
+    missing = probe_wiki_remote(str(tmp_path / "missing.wiki.git"))
+
+    assert missing["reachable"] is False
+
+
+def test_probe_wiki_remote_reports_existing_remote(tmp_path):
+    _work_root, wiki_remote = _init_git_workspace(tmp_path)
+
+    payload = probe_wiki_remote(str(wiki_remote))
+
+    assert payload["reachable"] is True

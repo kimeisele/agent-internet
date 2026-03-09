@@ -17,6 +17,16 @@ DEFAULT_AGENT_INTERNET_CAPABILITIES = (
 )
 
 
+def probe_wiki_remote(wiki_repo_url: str) -> dict:
+    result = subprocess.run(["git", "ls-remote", wiki_repo_url], capture_output=True, text=True)
+    return {
+        "kind": "agent_internet_wiki_remote_probe",
+        "wiki_repo_url": wiki_repo_url,
+        "reachable": result.returncode == 0,
+        "stderr": result.stderr.strip(),
+    }
+
+
 def build_agent_internet_peer_descriptor(root: Path | str, *, city_id: str = "agent-internet") -> dict:
     remote = detect_git_remote_metadata(root)
     return {
@@ -76,6 +86,9 @@ def publish_agent_internet_wiki(
     repo_root = Path(root).resolve()
     peer_descriptor = build_agent_internet_peer_descriptor(repo_root, city_id=city_id)
     effective_wiki_repo_url = wiki_repo_url or str(peer_descriptor["git_federation"]["wiki_repo_url"])
+    probe = probe_wiki_remote(effective_wiki_repo_url)
+    if not probe["reachable"]:
+        raise RuntimeError(f"wiki_remote_unavailable:{effective_wiki_repo_url}:{probe['stderr'] or 'git ls-remote failed'}")
     checkout = ensure_git_checkout(effective_wiki_repo_url, wiki_path or (repo_root / ".agent_internet" / "wiki"))
     _ensure_local_git_identity(checkout)
     pages = _render_pages(root=repo_root, state_path=state_path, city_id=city_id)

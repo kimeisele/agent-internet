@@ -2,12 +2,13 @@ name: Publish Agent Web Wiki
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - 'agent_internet/**'
       - 'docs/**'
       - 'scripts/build_agent_web_wiki.py'
       - 'scripts/publish_agent_web_wiki.py'
+      - 'tests/test_repo_capsule.py'
       - 'tests/test_publisher.py'
       - '.github/workflows/publish-agent-web.yml'
   schedule:
@@ -47,17 +48,37 @@ jobs:
             agent_internet/agent_web_repo_graph.py \
             agent_internet/git_federation.py \
             agent_internet/publisher.py \
+            agent_internet/repo_capsule.py \
             scripts/build_agent_web_wiki.py \
             scripts/publish_agent_web_wiki.py \
             tests/test_git_federation.py \
+            tests/test_repo_capsule.py \
             tests/test_publisher.py
-          python -m pytest -q tests/test_git_federation.py tests/test_publisher.py
+          python -m pytest -q tests/test_git_federation.py tests/test_repo_capsule.py tests/test_publisher.py
           python scripts/build_agent_web_wiki.py --output-dir .agent_internet/wiki-build-ci
 
       - name: Configure git identity
         run: |
           git config --global user.name "agent-internet-bot"
           git config --global user.email "bot@agent-internet"
+
+      - name: Preflight wiki remote
+        env:
+          WIKI_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git
+        run: |
+          set +e
+          python scripts/publish_agent_web_wiki.py \
+            --wiki-url "$WIKI_URL" \
+            --probe-only \
+            --result-path .agent_internet/wiki-preflight.json
+          STATUS=$?
+          echo '## Agent Web Wiki Preflight' >> "$GITHUB_STEP_SUMMARY"
+          cat .agent_internet/wiki-preflight.json >> "$GITHUB_STEP_SUMMARY"
+          if [ "$STATUS" -ne 0 ]; then
+            echo '' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Enable the GitHub wiki for this repository before publish can succeed.' >> "$GITHUB_STEP_SUMMARY"
+            exit "$STATUS"
+          fi
 
       - name: Publish agent web wiki
         env:
