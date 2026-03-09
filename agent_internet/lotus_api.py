@@ -50,6 +50,8 @@ LOTUS_MUTATING_ACTIONS = frozenset(
         "fulfill_intent",
         "import_authority_bundle",
         "issue_token",
+        "run_projection_reconcile_once",
+        "set_source_authority_feed_enabled",
         "publish_endpoint",
         "publish_route",
         "publish_service",
@@ -148,6 +150,15 @@ class LotusControlPlaneAPI:
         if action == "list_publication_statuses":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "publication_statuses": [asdict(record) for record in self.plane.registry.list_publication_statuses()]}
+        if action == "list_source_authority_feeds":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            return {"token_id": token.token_id, "source_authority_feeds": [asdict(record) for record in self.plane.registry.list_source_authority_feeds()]}
+        if action == "list_projection_reconcile_statuses":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            return {
+                "token_id": token.token_id,
+                "projection_reconcile_statuses": [asdict(record) for record in self.plane.registry.list_projection_reconcile_statuses()],
+            }
         if action == "list_fork_lineage":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {
@@ -453,6 +464,10 @@ class LotusControlPlaneAPI:
                     "artifact_paths": list(imported["artifact_paths"]),
                 },
             }
+        if action == "set_source_authority_feed_enabled":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.RECONCILE_WRITE.value,))
+            feed = self.plane.set_source_authority_feed_enabled(payload["feed_id"], enabled=bool(payload["enabled"]))
+            return {"token_id": token.token_id, "source_authority_feed": asdict(feed)}
         if action == "assign_addresses":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.ADDRESS_WRITE.value,))
             link, network = self.plane.assign_lotus_addresses(payload["city_id"], ttl_s=payload.get("ttl_s"))

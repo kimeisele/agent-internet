@@ -1,11 +1,13 @@
 import json
+import subprocess
+from dataclasses import replace
 from hashlib import sha256
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import pytest
 
-from agent_internet.control_plane import STEWARD_PUBLIC_WIKI_BINDING_ID
+from agent_internet.control_plane import STEWARD_AUTHORITY_BUNDLE_FEED_ID, STEWARD_PUBLIC_WIKI_BINDING_ID
 from agent_internet.lotus_api import LotusControlPlaneAPI
 from agent_internet.lotus_daemon import LotusApiDaemon
 from agent_internet.models import (
@@ -70,6 +72,26 @@ def _write_authority_bundle(tmp_path, *, version: str = "2026-03-09T20:00:00Z"):
     bundle_path = bundle_dir / ".authority-export-bundle.json"
     bundle_path.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n")
     return bundle_path
+
+
+def _git(cwd, *args):
+    subprocess.run(["git", *args], cwd=str(cwd), check=True, capture_output=True, text=True)
+
+
+def _init_git_repo(tmp_path):
+    repo_remote = tmp_path / "agent-internet.git"
+    wiki_remote = tmp_path / "steward-protocol.wiki.git"
+    repo_root = tmp_path / "agent-internet"
+    _git(tmp_path, "init", "--bare", str(repo_remote))
+    _git(tmp_path, "init", "--bare", str(wiki_remote))
+    _git(tmp_path, "clone", str(repo_remote), str(repo_root))
+    _git(repo_root, "config", "user.email", "test@example.com")
+    _git(repo_root, "config", "user.name", "Test User")
+    (repo_root / "README.md").write_text("# agent internet\n")
+    _git(repo_root, "add", ".")
+    _git(repo_root, "commit", "-m", "init")
+    _git(repo_root, "push", "origin", "HEAD")
+    return repo_root, wiki_remote
 
 
 def _request_json(base_url: str, path: str, *, method: str = "GET", token: str = "", payload: dict | None = None) -> tuple[int, dict]:
@@ -872,6 +894,66 @@ def test_lotus_daemon_serves_agent_web_document_http_api(tmp_path):
         assert payload["agent_web_document"]["document"]["document_id"] == "semantic_contracts"
         assert payload["agent_web_document"]["document"]["path"] == "Semantic-Contracts.md"
         assert "# Semantic Contracts" in payload["agent_web_document"]["document"]["content"]
+    finally:
+        daemon.shutdown()
+
+
+def test_lotus_daemon_serves_projection_reconcile_http_api(tmp_path):
+    repo_root, wiki_remote = _init_git_repo(tmp_path)
+    bundle_path = _write_authority_bundle(tmp_path)
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    secret = store.update(
+        lambda plane: (
+            plane.bootstrap_steward_public_wiki_contract(now=100.0),
+            plane.upsert_projection_binding(
+                replace(
+                    plane.registry.get_projection_binding(STEWARD_PUBLIC_WIKI_BINDING_ID),
+                    target_locator=str(wiki_remote),
+                ),
+            ),
+            LotusControlPlaneAPI(plane).issue_token(
+                subject="reconcile-operator",
+                scopes=(LotusApiScope.READ.value, LotusApiScope.RECONCILE_WRITE.value),
+                token_secret="reconcile-http-token",
+                token_id="tok-reconcile-http",
+            ).secret,
+        )[-1],
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        status, run_payload = _request_json(
+            daemon.base_url,
+            "/v1/lotus/projection-reconcile/run",
+            method="POST",
+            token=secret,
+            payload={
+                "root": str(repo_root),
+                "bundle_path": str(bundle_path),
+                "wiki_repo_url": str(wiki_remote),
+                "wiki_path": str(tmp_path / "wiki-checkout"),
+            },
+        )
+        assert status == 200
+        assert run_payload["projection_reconcile"]["published"] is True
+
+        status, feeds = _request_json(daemon.base_url, "/v1/lotus/source-authority-feeds", token=secret)
+        assert status == 200
+        assert feeds["source_authority_feeds"][0]["feed_id"] == STEWARD_AUTHORITY_BUNDLE_FEED_ID
+
+        status, reconcile_statuses = _request_json(daemon.base_url, "/v1/lotus/projection-reconcile-statuses", token=secret)
+        assert status == 200
+        assert reconcile_statuses["projection_reconcile_statuses"][0]["status"] == "success"
+
+        status, paused = _request_json(
+            daemon.base_url,
+            f"/v1/lotus/source-authority-feeds/{STEWARD_AUTHORITY_BUNDLE_FEED_ID}/pause",
+            method="POST",
+            token=secret,
+        )
+        assert status == 200
+        assert paused["source_authority_feed"]["enabled"] is False
     finally:
         daemon.shutdown()
 

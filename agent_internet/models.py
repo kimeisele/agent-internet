@@ -27,6 +27,7 @@ class EndpointVisibility(StrEnum):
 class LotusApiScope(StrEnum):
     READ = "lotus.read"
     CONTRACT_WRITE = "lotus.write.contract"
+    RECONCILE_WRITE = "lotus.write.reconcile"
     ADDRESS_WRITE = "lotus.write.address"
     ENDPOINT_WRITE = "lotus.write.endpoint"
     SERVICE_WRITE = "lotus.write.service"

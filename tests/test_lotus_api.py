@@ -3,7 +3,7 @@ from hashlib import sha256
 
 import pytest
 
-from agent_internet.control_plane import STEWARD_PUBLIC_WIKI_BINDING_ID, AgentInternetControlPlane
+from agent_internet.control_plane import STEWARD_AUTHORITY_BUNDLE_FEED_ID, STEWARD_PUBLIC_WIKI_BINDING_ID, AgentInternetControlPlane
 from agent_internet.lotus_api import LotusControlPlaneAPI
 from agent_internet.models import (
     AssistantSurfaceSnapshot,
@@ -17,6 +17,8 @@ from agent_internet.models import (
     IntentType,
     LotusApiScope,
     PublicationState,
+    ProjectionReconcileState,
+    ProjectionReconcileStatusRecord,
     TrustLevel,
     TrustRecord,
     UpstreamSyncPolicy,
@@ -129,6 +131,42 @@ def test_lotus_api_generates_cli_safe_secret_prefix():
     issued = api.issue_token(subject="operator", scopes=(LotusApiScope.READ.value,))
 
     assert issued.secret.startswith("lotus_")
+
+
+def test_lotus_api_lists_projection_feeds_and_reconcile_status(tmp_path):
+    plane = AgentInternetControlPlane()
+    bundle_path = _write_authority_bundle(tmp_path)
+    plane.bootstrap_steward_public_wiki_feed(bundle_path=bundle_path, now=10.0)
+    plane.upsert_projection_reconcile_status(
+        ProjectionReconcileStatusRecord(
+            binding_id=STEWARD_PUBLIC_WIKI_BINDING_ID,
+            feed_id=STEWARD_AUTHORITY_BUNDLE_FEED_ID,
+            status=ProjectionReconcileState.SKIPPED,
+            last_checked_at=11.0,
+            next_retry_at=120.0,
+            last_error="backoff_active",
+        ),
+    )
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="operator",
+        scopes=(LotusApiScope.READ.value, LotusApiScope.RECONCILE_WRITE.value),
+        token_secret="reconcile-token",
+        token_id="tok-reconcile",
+        now=10.0,
+    )
+
+    feeds = api.call(bearer_token=issued.secret, action="list_source_authority_feeds", params={})
+    statuses = api.call(bearer_token=issued.secret, action="list_projection_reconcile_statuses", params={})
+    paused = api.call(
+        bearer_token=issued.secret,
+        action="set_source_authority_feed_enabled",
+        params={"feed_id": STEWARD_AUTHORITY_BUNDLE_FEED_ID, "enabled": False},
+    )
+
+    assert feeds["source_authority_feeds"][0]["feed_id"] == STEWARD_AUTHORITY_BUNDLE_FEED_ID
+    assert statuses["projection_reconcile_statuses"][0]["last_error"] == "backoff_active"
+    assert paused["source_authority_feed"]["enabled"] is False
 
 
 def test_lotus_api_publishes_and_resolves_next_hop():
