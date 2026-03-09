@@ -1735,8 +1735,186 @@ def cmd_lab_immigrate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_operator_status(args: argparse.Namespace) -> int:
+    from .operator_status import build_operator_dashboard, format_dashboard_text
+
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    dashboard = build_operator_dashboard(plane)
+    if args.format == "text":
+        print(format_dashboard_text(dashboard))
+    else:
+        from dataclasses import asdict
+
+        print(json.dumps(asdict(dashboard), indent=2, default=str))
+    return 0
+
+
+def cmd_discovery_scan(args: argparse.Namespace) -> int:
+    from .discovery_bootstrap import DiscoveryBootstrapService, FilesystemBeaconScanner
+
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    service = DiscoveryBootstrapService(
+        own_city_id=args.city_id,
+        auto_register=args.auto_register,
+        auto_trust_level=TrustLevel(args.trust_level),
+    )
+    service.add_scanner(FilesystemBeaconScanner(beacon_dir=Path(args.beacon_dir)))
+    new_peers = service.discover_and_register(plane)
+    if new_peers:
+        store.save(plane)
+    for peer in new_peers:
+        print(
+            json.dumps(
+                {
+                    "city_id": peer.city_id,
+                    "auto_registered": peer.auto_registered,
+                    "auto_trusted": peer.auto_trusted,
+                    "method": peer.announcement.method.value,
+                },
+                indent=2,
+            ),
+        )
+    if not new_peers:
+        print("No new peers discovered.")
+    return 0
+
+
+def cmd_discovery_announce(args: argparse.Namespace) -> int:
+    from .discovery_bootstrap import DiscoveryBootstrapService, FilesystemBeaconScanner
+
+    service = DiscoveryBootstrapService(own_city_id=args.city_id)
+    scanner = FilesystemBeaconScanner(beacon_dir=Path(args.beacon_dir))
+    service.add_scanner(scanner)
+    ann = service.announce_self(
+        slug=args.slug or "",
+        repo=args.repo or "",
+        transport=args.transport,
+        location=args.location or "",
+        capabilities=tuple(args.capability) if args.capability else (),
+    )
+    print(json.dumps({"announcement_id": ann.announcement_id, "city_id": ann.city_id, "method": ann.method.value}, indent=2))
+    return 0
+
+
+def cmd_trust_revoke(args: argparse.Namespace) -> int:
+    from .trust_enhanced import EnhancedTrustEngine, RevocationReason
+
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    if not isinstance(plane.trust_engine, EnhancedTrustEngine):
+        print("Trust engine is not enhanced. Use --enhanced-trust when initializing.")
+        return 1
+    result = plane.trust_engine.revoke(
+        args.issuer,
+        args.subject,
+        reason=RevocationReason(args.reason),
+    )
+    if result is None:
+        print(f"No trust record found for {args.issuer} -> {args.subject}")
+        return 1
+    store.save(plane)
+    print(f"Revoked trust: {args.issuer} -> {args.subject} (reason: {args.reason})")
+    return 0
+
+
+def cmd_intent_actuate(args: argparse.Namespace) -> int:
+    from .intent_actuators import ActuationContext, IntentActuatorRegistry
+
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    registry = IntentActuatorRegistry.with_defaults()
+    context = ActuationContext(
+        control_plane=plane,
+        dry_run=args.dry_run,
+    )
+    intents = plane.registry.list_intents()
+    outcomes = registry.actuate_pending(intents, context)
+    if not args.dry_run:
+        store.save(plane)
+    for outcome in outcomes:
+        print(
+            json.dumps(
+                {
+                    "intent_id": outcome.intent_id,
+                    "result": outcome.result.value,
+                    "detail": outcome.detail,
+                    "artifacts": outcome.artifacts,
+                },
+                indent=2,
+            ),
+        )
+    if not outcomes:
+        print("No accepted intents to actuate.")
+    return 0
+
+
+def cmd_contract_verify(args: argparse.Namespace) -> int:
+    from .contract_verification import ContractVerifier
+
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    verifier = ContractVerifier.with_defaults(discovery=plane.registry)
+    results = verifier.verify_city(args.city_id) if args.city_id else verifier.verify_all()
+    for result in results:
+        print(
+            json.dumps(
+                {
+                    "city_id": result.city_id,
+                    "contract": result.contract_name,
+                    "status": result.overall_status.value,
+                    "violations": list(result.violations),
+                    "probes": len(result.probes),
+                },
+                indent=2,
+            ),
+        )
+    if not results:
+        print("No contracts to verify.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
+
+    # --- New subcommands (v0.2) ---
+    sub = parser._subparsers._actions[1]  # type: ignore[union-attr]
+
+    status_cmd = sub.add_parser("operator-status", help="Show operator dashboard")
+    status_cmd.add_argument("--state-path", default="data/control_plane/state.json")
+    status_cmd.add_argument("--format", choices=["text", "json"], default="text")
+
+    scan_cmd = sub.add_parser("discovery-scan", help="Scan for new cities and auto-register")
+    scan_cmd.add_argument("--city-id", required=True)
+    scan_cmd.add_argument("--state-path", default="data/control_plane/state.json")
+    scan_cmd.add_argument("--beacon-dir", default=".agent-internet/beacons")
+    scan_cmd.add_argument("--auto-register", action="store_true", default=True)
+    scan_cmd.add_argument("--trust-level", default=TrustLevel.OBSERVED.value, choices=[level.value for level in TrustLevel])
+
+    announce_cmd = sub.add_parser("discovery-announce", help="Announce this city for discovery")
+    announce_cmd.add_argument("--city-id", required=True)
+    announce_cmd.add_argument("--beacon-dir", default=".agent-internet/beacons")
+    announce_cmd.add_argument("--slug", default="")
+    announce_cmd.add_argument("--repo", default="")
+    announce_cmd.add_argument("--transport", default="filesystem")
+    announce_cmd.add_argument("--location", default="")
+    announce_cmd.add_argument("--capability", action="append", default=[])
+
+    revoke_cmd = sub.add_parser("trust-revoke", help="Revoke trust between cities")
+    revoke_cmd.add_argument("--issuer", required=True)
+    revoke_cmd.add_argument("--subject", required=True)
+    revoke_cmd.add_argument("--reason", default="manual_revocation")
+    revoke_cmd.add_argument("--state-path", default="data/control_plane/state.json")
+
+    actuate_cmd = sub.add_parser("intent-actuate", help="Actuate accepted intents")
+    actuate_cmd.add_argument("--state-path", default="data/control_plane/state.json")
+    actuate_cmd.add_argument("--dry-run", action="store_true")
+
+    verify_cmd = sub.add_parser("contract-verify", help="Verify capability contracts")
+    verify_cmd.add_argument("--state-path", default="data/control_plane/state.json")
+    verify_cmd.add_argument("--city-id", default="")
+
     args = parser.parse_args(argv)
     if args.command == "publish-agent-city-peer":
         return cmd_publish_agent_city_peer(args)
@@ -1858,6 +2036,18 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_lab_execute_code(args)
     if args.command == "lab-immigrate":
         return cmd_lab_immigrate(args)
+    if args.command == "operator-status":
+        return cmd_operator_status(args)
+    if args.command == "discovery-scan":
+        return cmd_discovery_scan(args)
+    if args.command == "discovery-announce":
+        return cmd_discovery_announce(args)
+    if args.command == "trust-revoke":
+        return cmd_trust_revoke(args)
+    if args.command == "intent-actuate":
+        return cmd_intent_actuate(args)
+    if args.command == "contract-verify":
+        return cmd_contract_verify(args)
     parser.error(f"Unknown command: {args.command}")
     return 2
 

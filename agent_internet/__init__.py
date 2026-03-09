@@ -84,6 +84,40 @@ from .transport import (
 )
 from .trust import InMemoryTrustEngine, trust_allows
 
+# --- New modules (v0.2) ---
+from .event_bus import Event, EventBus, EventKind, Subscription
+from .trust_enhanced import (
+    EnhancedTrustEngine,
+    EnhancedTrustRecord,
+    EvidenceKind,
+    RevocationReason,
+    TrustDelegation,
+    TrustEvidence,
+)
+from .thread_safe_registry import ThreadSafeRegistryWrapper
+from .https_transport import HttpsTransport, HttpsTransportConfig
+from .intent_actuators import (
+    ActuationContext,
+    ActuationOutcome,
+    ActuatorResult,
+    IntentActuatorRegistry,
+)
+from .contract_verification import (
+    ContractManifest,
+    ContractVerificationResult,
+    ContractVerifier,
+    CapabilityDescriptor,
+    VerificationStatus,
+)
+from .discovery_bootstrap import (
+    DiscoveryAnnouncement,
+    DiscoveryBootstrapService,
+    DiscoveryPeer,
+    FilesystemBeaconScanner,
+)
+from .operator_status import OperatorDashboard, build_operator_dashboard, format_dashboard_text
+from .sqlite_registry import SqliteCityRegistry
+
 __all__ = [
     "AgentCityDirectiveFactory",
     "AgentCityDirectiveExecutionAdapter",
@@ -177,4 +211,35 @@ __all__ = [
     "trust_allows",
     "validate_agent_city_directive",
     "write_locked_json_value",
+    # --- New modules (v0.2) ---
+    "Event",
+    "EventBus",
+    "EventKind",
+    "Subscription",
+    "EnhancedTrustEngine",
+    "EnhancedTrustRecord",
+    "EvidenceKind",
+    "RevocationReason",
+    "TrustDelegation",
+    "TrustEvidence",
+    "ThreadSafeRegistryWrapper",
+    "HttpsTransport",
+    "HttpsTransportConfig",
+    "ActuationContext",
+    "ActuationOutcome",
+    "ActuatorResult",
+    "IntentActuatorRegistry",
+    "ContractManifest",
+    "ContractVerificationResult",
+    "ContractVerifier",
+    "CapabilityDescriptor",
+    "VerificationStatus",
+    "DiscoveryAnnouncement",
+    "DiscoveryBootstrapService",
+    "DiscoveryPeer",
+    "FilesystemBeaconScanner",
+    "OperatorDashboard",
+    "build_operator_dashboard",
+    "format_dashboard_text",
+    "SqliteCityRegistry",
 ]
