@@ -12,6 +12,7 @@ from .assistant_surface import assistant_social_slot_from_snapshot, assistant_sp
 from .memory_registry import InMemoryCityRegistry
 from .models import (
     AssistantSurfaceSnapshot,
+    AuthorityArtifactRecord,
     AuthorityExportKind,
     AuthorityExportRecord,
     CityEndpoint,
@@ -263,6 +264,9 @@ class AgentInternetControlPlane:
     def upsert_authority_export(self, record: AuthorityExportRecord) -> None:
         self.registry.upsert_authority_export(record)
 
+    def upsert_authority_artifact(self, record: AuthorityArtifactRecord) -> None:
+        self.registry.upsert_authority_artifact(record)
+
     def upsert_projection_binding(self, record: ProjectionBindingRecord) -> None:
         self.registry.upsert_projection_binding(record)
 
@@ -309,6 +313,15 @@ class AgentInternetControlPlane:
             if artifact_payload is not None and record.content_sha256 and _json_sha256(artifact_payload) != record.content_sha256:
                 raise ValueError(f"authority_export_digest_mismatch:{record.export_id}")
             self.registry.upsert_authority_export(record)
+            if artifact_payload is not None:
+                self.registry.upsert_authority_artifact(
+                    AuthorityArtifactRecord(
+                        export_id=record.export_id,
+                        artifact_uri=record.artifact_uri,
+                        payload=dict(artifact_payload),
+                        imported_at=checked_at,
+                    ),
+                )
             imported_exports.append(record)
 
         publication_statuses = [self._reconcile_projection_binding(binding.binding_id, checked_at=checked_at, bundle=bundle) for binding in self.registry.list_projection_bindings()]

@@ -287,6 +287,14 @@ class AuthorityExportRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class AuthorityArtifactRecord:
+    export_id: str
+    artifact_uri: str
+    payload: dict[str, object] = field(default_factory=dict)
+    imported_at: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ProjectionBindingRecord:
     binding_id: str
     source_repo_id: str
