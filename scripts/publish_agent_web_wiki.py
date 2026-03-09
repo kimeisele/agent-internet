@@ -19,6 +19,7 @@ def main() -> int:
     parser.add_argument("--wiki-url")
     parser.add_argument("--city-id", default="agent-internet")
     parser.add_argument("--push", action="store_true")
+    parser.add_argument("--prune-generated", action="store_true")
     parser.add_argument("--result-path")
     parser.add_argument("--probe-only", action="store_true")
     args = parser.parse_args()
@@ -36,6 +37,7 @@ def main() -> int:
         wiki_path=Path(args.wiki_path).resolve() if args.wiki_path else None,
         wiki_repo_url=args.wiki_url,
         push=args.push,
+        prune_generated=args.prune_generated,
         city_id=args.city_id,
     )
     if args.result_path:

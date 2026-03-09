@@ -16,6 +16,8 @@ DEFAULT_AGENT_INTERNET_CAPABILITIES = (
     "git_federation",
 )
 
+WIKI_GENERATED_INVENTORY = ".wiki-generated-inventory.json"
+
 
 def probe_wiki_remote(wiki_repo_url: str) -> dict:
     result = subprocess.run(["git", "ls-remote", wiki_repo_url], capture_output=True, text=True)
@@ -81,6 +83,7 @@ def publish_agent_internet_wiki(
     wiki_path: Path | None = None,
     wiki_repo_url: str | None = None,
     push: bool = False,
+    prune_generated: bool = False,
     city_id: str = "agent-internet",
 ) -> dict:
     repo_root = Path(root).resolve()
@@ -92,16 +95,23 @@ def publish_agent_internet_wiki(
     checkout = ensure_git_checkout(effective_wiki_repo_url, wiki_path or (repo_root / ".agent_internet" / "wiki"))
     _ensure_local_git_identity(checkout)
     pages = _render_pages(root=repo_root, state_path=state_path, city_id=city_id)
+    generated_paths = sorted(_normalize_relative_paths(pages))
     for relative_path, content in pages.items():
-        target = checkout / relative_path
+        target = checkout / _normalize_relative_path(relative_path)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content)
+    pruned = _prune_generated_paths(checkout, keep_paths=generated_paths) if prune_generated else []
+    _write_generated_inventory(checkout, generated_paths)
     source_sha = _git_output(["rev-parse", "HEAD"], cwd=repo_root).strip() or "unknown"
     commit_message = f"agent-web: publish surfaces from {source_sha}"
     changed = _git_commit_all(checkout, commit_message, push=push)
     return {
         "changed": changed,
         "built": len(pages),
+        "generated_inventory": str(checkout / WIKI_GENERATED_INVENTORY),
+        "prune_generated": prune_generated,
+        "pruned": len(pruned),
+        "pruned_paths": pruned,
         "wiki_path": str(checkout),
         "wiki_repo_url": effective_wiki_repo_url,
         "pushed": bool(push and changed),
@@ -150,3 +160,56 @@ def _git_commit_all(root: Path, message: str, *, push: bool) -> bool:
 def _git_output(args: list[str], *, cwd: Path) -> str:
     completed = subprocess.run(["git", *args], cwd=str(cwd), check=True, capture_output=True, text=True)
     return completed.stdout
+
+
+def _normalize_relative_paths(pages: dict[str, str]) -> list[str]:
+    return [_normalize_relative_path(path) for path in pages]
+
+
+def _normalize_relative_path(path: str) -> str:
+    relative = Path(path)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ValueError(f"unsafe wiki relative path: {path}")
+    return relative.as_posix()
+
+
+def _read_generated_inventory(root: Path) -> list[str]:
+    path = root / WIKI_GENERATED_INVENTORY
+    if not path.exists():
+        return []
+    payload = json.loads(path.read_text())
+    files = payload.get("files", [])
+    return [_normalize_relative_path(str(item)) for item in files]
+
+
+def _write_generated_inventory(root: Path, files: list[str]) -> Path:
+    path = root / WIKI_GENERATED_INVENTORY
+    payload = {
+        "kind": "generated_wiki_inventory",
+        "version": 1,
+        "files": sorted({_normalize_relative_path(path) for path in files}),
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return path
+
+
+def _prune_generated_paths(root: Path, *, keep_paths: list[str]) -> list[str]:
+    keep = set(_normalize_relative_path(path) for path in keep_paths)
+    stale = [path for path in _read_generated_inventory(root) if path not in keep]
+    removed: list[str] = []
+    for relative_path in stale:
+        target = root / relative_path
+        if target.exists():
+            target.unlink()
+            _prune_empty_parent_dirs(target.parent, stop=root)
+            removed.append(relative_path)
+    return removed
+
+
+def _prune_empty_parent_dirs(path: Path, *, stop: Path) -> None:
+    current = path
+    while current != stop and current.exists():
+        if any(current.iterdir()):
+            return
+        current.rmdir()
+        current = current.parent

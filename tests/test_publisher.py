@@ -1,3 +1,4 @@
+import json
 import subprocess
 
 from agent_internet.publisher import build_agent_internet_peer_descriptor, build_agent_internet_wiki, probe_wiki_remote, publish_agent_internet_wiki
@@ -51,8 +52,84 @@ def test_publish_agent_internet_wiki_commits_without_push(tmp_path):
     )
     assert result["changed"] is True
     assert result["pushed"] is False
+    assert result["pruned"] == 0
     log = _git(tmp_path / "wiki-checkout", "log", "-1", "--pretty=%s").stdout.strip()
     assert log.startswith("agent-web: publish surfaces from ")
+    assert (tmp_path / "wiki-checkout" / ".wiki-generated-inventory.json").exists()
+
+
+def test_publish_agent_internet_wiki_prunes_only_stale_generated_pages(tmp_path):
+    work_root, wiki_remote = _init_git_workspace(tmp_path)
+    checkout = tmp_path / "wiki-checkout"
+    first = publish_agent_internet_wiki(
+        root=work_root,
+        state_path=tmp_path / "state.json",
+        wiki_path=checkout,
+        wiki_repo_url=str(wiki_remote),
+        push=False,
+        prune_generated=True,
+    )
+
+    assert first["pruned"] == 0
+    stale_generated = checkout / "Semantic-Contracts.md"
+    assert stale_generated.exists()
+    (checkout / "Welcome-to-the-Agent-Internet.md").write_text("# Manual page\n")
+    inventory = checkout / ".wiki-generated-inventory.json"
+    payload = json.loads(inventory.read_text())
+    payload["files"] = [path for path in payload["files"] if path != "Semantic-Contracts.md"]
+    inventory.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    _git(checkout, "add", ".")
+    _git(checkout, "commit", "-m", "mutate inventory without ownership")
+
+    result = publish_agent_internet_wiki(
+        root=work_root,
+        state_path=tmp_path / "state.json",
+        wiki_path=checkout,
+        wiki_repo_url=str(wiki_remote),
+        push=False,
+        prune_generated=True,
+    )
+
+    assert result["pruned"] == 0
+    assert stale_generated.exists()
+    assert (checkout / "Welcome-to-the-Agent-Internet.md").exists()
+
+
+def test_publish_agent_internet_wiki_prunes_stale_generated_from_previous_inventory(tmp_path):
+    work_root, wiki_remote = _init_git_workspace(tmp_path)
+    checkout = tmp_path / "wiki-checkout"
+    publish_agent_internet_wiki(
+        root=work_root,
+        state_path=tmp_path / "state.json",
+        wiki_path=checkout,
+        wiki_repo_url=str(wiki_remote),
+        push=False,
+        prune_generated=True,
+    )
+
+    stale_generated = checkout / "Legacy-Generated.md"
+    stale_generated.write_text("# Legacy\n")
+    inventory = checkout / ".wiki-generated-inventory.json"
+    payload = json.loads(inventory.read_text())
+    payload["files"].append("Legacy-Generated.md")
+    inventory.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    (checkout / "Welcome-to-the-Agent-Internet.md").write_text("# Manual page\n")
+    _git(checkout, "add", ".")
+    _git(checkout, "commit", "-m", "add stale generated and manual pages")
+
+    result = publish_agent_internet_wiki(
+        root=work_root,
+        state_path=tmp_path / "state.json",
+        wiki_path=checkout,
+        wiki_repo_url=str(wiki_remote),
+        push=False,
+        prune_generated=True,
+    )
+
+    assert result["pruned"] == 1
+    assert result["pruned_paths"] == ["Legacy-Generated.md"]
+    assert not stale_generated.exists()
+    assert (checkout / "Welcome-to-the-Agent-Internet.md").exists()
 
 
 def test_probe_wiki_remote_reports_missing_remote(tmp_path):

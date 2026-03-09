@@ -33,7 +33,25 @@ def ensure_git_checkout(repo_url: str, checkout_path: Path | str) -> Path:
         checkout.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(["git", "clone", repo_url, str(checkout)], check=True, capture_output=True, text=True)
     else:
-        subprocess.run(["git", "pull", "--rebase"], cwd=str(checkout), check=True, capture_output=True, text=True)
+        subprocess.run(["git", "fetch", "origin", "--prune"], cwd=str(checkout), check=True, capture_output=True, text=True)
+        current_branch = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=str(checkout), check=True, capture_output=True, text=True
+        ).stdout.strip()
+        remote_branches = subprocess.run(
+            ["git", "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin"],
+            cwd=str(checkout),
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+        if current_branch and f"origin/{current_branch}" in remote_branches:
+            subprocess.run(
+                ["git", "pull", "--rebase", "origin", current_branch],
+                cwd=str(checkout),
+                check=True,
+                capture_output=True,
+                text=True,
+            )
     return checkout
 
 

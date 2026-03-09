@@ -86,6 +86,7 @@ jobs:
         run: |
           python scripts/publish_agent_web_wiki.py \
             --wiki-url "$WIKI_URL" \
+            --prune-generated \
             --push \
             --result-path .agent_internet/wiki-publish-result.json
 
