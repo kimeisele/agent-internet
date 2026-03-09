@@ -3,7 +3,7 @@ import subprocess
 from dataclasses import replace
 from hashlib import sha256
 
-from agent_internet.control_plane import STEWARD_AUTHORITY_BUNDLE_FEED_ID, STEWARD_PROTOCOL_REPO_ID, STEWARD_PUBLIC_WIKI_BINDING_ID
+from agent_internet.control_plane import AGENT_WORLD_AUTHORITY_BUNDLE_FEED_ID, AGENT_WORLD_PUBLIC_WIKI_BINDING_ID, AGENT_WORLD_REPO_ID, STEWARD_AUTHORITY_BUNDLE_FEED_ID, STEWARD_PROTOCOL_REPO_ID, STEWARD_PUBLIC_WIKI_BINDING_ID
 from agent_internet.models import AuthorityExportKind, PublicationState
 from agent_internet.projection_reconciler import ProjectionReconcileDaemon, ProjectionReconciler
 from agent_internet.snapshot import ControlPlaneStateStore
@@ -70,12 +70,65 @@ def _write_steward_authority_bundle(tmp_path, *, version="v1", source_sha="bundl
     return bundle_path
 
 
+def _write_agent_world_authority_bundle(tmp_path, *, version="world-v1", source_sha="world-bundle-v1"):
+    bundle_dir = tmp_path / "world-bundle"
+    artifacts_dir = bundle_dir / ".authority-exports"
+    artifacts_dir.mkdir(parents=True)
+    canonical_payload = {"kind": "canonical_surface", "documents": [{"document_id": "world_constitution", "content": "Agent World content"}]}
+    relative_path = ".authority-exports/canonical-surface.json"
+    (bundle_dir / relative_path).write_text(json.dumps(canonical_payload, indent=2, sort_keys=True) + "\n")
+    digest = sha256(json.dumps(canonical_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    bundle = {
+        "kind": "source_authority_bundle",
+        "generated_at": 271.0,
+        "source_sha": source_sha,
+        "repo_role": {
+            "repo_id": AGENT_WORLD_REPO_ID,
+            "role": "normative_source",
+            "owner_boundary": "world_governance_surface",
+            "exports": [AuthorityExportKind.CANONICAL_SURFACE.value],
+            "consumes": [],
+            "publication_targets": [AGENT_WORLD_PUBLIC_WIKI_BINDING_ID],
+            "labels": {"public_surface_owner": "agent-internet"},
+        },
+        "authority_exports": [
+            {
+                "export_id": f"{AGENT_WORLD_REPO_ID}/canonical_surface",
+                "repo_id": AGENT_WORLD_REPO_ID,
+                "export_kind": AuthorityExportKind.CANONICAL_SURFACE.value,
+                "version": version,
+                "artifact_uri": relative_path,
+                "generated_at": 270.0,
+                "contract_version": 1,
+                "content_sha256": digest,
+                "labels": {"source_sha": source_sha},
+            },
+        ],
+        "artifact_paths": {AuthorityExportKind.CANONICAL_SURFACE.value: relative_path},
+    }
+    bundle_path = bundle_dir / ".authority-export-bundle.json"
+    bundle_path.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n")
+    return bundle_path
+
+
 def _bind_local_wiki(state_path, wiki_remote):
     store = ControlPlaneStateStore(path=state_path)
 
     def _update(plane):
         plane.bootstrap_steward_public_wiki_contract(now=100.0)
         binding = plane.registry.get_projection_binding(STEWARD_PUBLIC_WIKI_BINDING_ID)
+        plane.upsert_projection_binding(replace(binding, target_locator=str(wiki_remote)))
+
+    store.update(_update)
+    return store
+
+
+def _bind_local_world_wiki(state_path, wiki_remote):
+    store = ControlPlaneStateStore(path=state_path)
+
+    def _update(plane):
+        plane.bootstrap_agent_world_public_wiki_contract(now=100.0)
+        binding = plane.registry.get_projection_binding(AGENT_WORLD_PUBLIC_WIKI_BINDING_ID)
         plane.upsert_projection_binding(replace(binding, target_locator=str(wiki_remote)))
 
     store.update(_update)
@@ -124,6 +177,30 @@ def test_projection_reconciler_run_once_skips_publish_when_projection_current(tm
     assert second["reconcile_state"] == "success"
     assert second["publish_required"] is False
     assert second["published"] is False
+
+
+def test_projection_reconciler_infers_agent_world_feed_from_bundle_path(tmp_path):
+    repo_root, wiki_remote = _init_git_workspace(tmp_path)
+    state_path = tmp_path / "state.json"
+    store = _bind_local_world_wiki(state_path, wiki_remote)
+    bundle_path = _write_agent_world_authority_bundle(tmp_path)
+
+    result = ProjectionReconciler(root=repo_root, state_path=state_path).run_once(
+        bundle_path=bundle_path,
+        wiki_repo_url=str(wiki_remote),
+        wiki_path=tmp_path / "wiki-checkout-world",
+    )
+
+    feed = store.load().registry.get_source_authority_feed(AGENT_WORLD_AUTHORITY_BUNDLE_FEED_ID)
+    reconcile_status = store.load().registry.get_projection_reconcile_status(AGENT_WORLD_PUBLIC_WIKI_BINDING_ID)
+
+    assert result["reconcile_state"] == "success"
+    assert result["published"] is True
+    assert result["binding_id"] == AGENT_WORLD_PUBLIC_WIKI_BINDING_ID
+    assert feed is not None
+    assert feed.locator == str(bundle_path.resolve())
+    assert reconcile_status.last_imported_source_sha == "world-bundle-v1"
+    assert reconcile_status.last_imported_export_version == "world-v1"
 
 
 def test_projection_reconciler_respects_backoff_and_force(tmp_path):

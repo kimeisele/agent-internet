@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import json
 import time
 from pathlib import Path
 
-from .control_plane import STEWARD_AUTHORITY_BUNDLE_FEED_ID, AgentInternetControlPlane
+from .authority_contracts import (
+    default_public_authority_source_contract,
+    get_public_authority_source_contract_by_feed_id,
+    get_public_authority_source_contract_by_repo_id,
+)
+from .control_plane import AgentInternetControlPlane
 from .file_locking import locked_file
 from .models import ProjectionReconcileState, ProjectionReconcileStatusRecord, PublicationState, PublicationStatusRecord, SourceAuthorityFeedRecord
 from .publisher import publish_agent_internet_wiki
@@ -72,7 +78,7 @@ class ProjectionReconciler:
         self,
         *,
         bundle_path: Path | str | None = None,
-        feed_id: str = STEWARD_AUTHORITY_BUNDLE_FEED_ID,
+        feed_id: str | None = None,
         poll_interval_seconds: int = 300,
         wiki_repo_url: str | None = None,
         wiki_path: Path | None = None,
@@ -169,7 +175,7 @@ class ProjectionReconciler:
     ) -> dict[str, object]:
         target_feed_ids: list[str]
         if bundle_path is not None:
-            target_feed_ids = [str(feed_id or STEWARD_AUTHORITY_BUNDLE_FEED_ID)]
+            target_feed_ids = [self._default_feed_id(bundle_path=bundle_path, feed_id=feed_id)]
         elif feed_id is not None:
             target_feed_ids = [str(feed_id)]
         else:
@@ -348,22 +354,43 @@ class ProjectionReconciler:
         self,
         plane: AgentInternetControlPlane,
         *,
-        feed_id: str,
+        feed_id: str | None,
         bundle_path: Path | str | None,
         poll_interval_seconds: int,
         checked_at: float,
     ) -> SourceAuthorityFeedRecord:
         if bundle_path is not None:
-            return plane.bootstrap_steward_public_wiki_feed(
-                bundle_path=str(Path(bundle_path).resolve()),
-                feed_id=feed_id,
+            resolved_bundle_path = str(Path(bundle_path).resolve())
+            contract = self._resolve_contract(bundle_path=resolved_bundle_path, feed_id=feed_id)
+            return plane.bootstrap_public_wiki_feed_for_repo_id(
+                contract.source_repo_id,
+                bundle_path=resolved_bundle_path,
+                feed_id=contract.feed_id,
                 poll_interval_seconds=poll_interval_seconds,
                 now=checked_at,
             )
-        feed = plane.registry.get_source_authority_feed(feed_id)
+        resolved_feed_id = str(feed_id or default_public_authority_source_contract().feed_id)
+        feed = plane.registry.get_source_authority_feed(resolved_feed_id)
         if feed is None:
-            raise ValueError(f"unknown_source_authority_feed:{feed_id}")
+            raise ValueError(f"unknown_source_authority_feed:{resolved_feed_id}")
         return feed
+
+    def _default_feed_id(self, *, bundle_path: Path | str, feed_id: str | None) -> str:
+        return self._resolve_contract(bundle_path=bundle_path, feed_id=feed_id).feed_id
+
+    def _resolve_contract(self, *, bundle_path: Path | str, feed_id: str | None):
+        if feed_id:
+            contract = get_public_authority_source_contract_by_feed_id(str(feed_id))
+            if contract is None:
+                raise ValueError(f"unknown_public_authority_feed:{feed_id}")
+            return contract
+        try:
+            bundle = json.loads(Path(bundle_path).resolve().read_text())
+        except Exception:
+            return default_public_authority_source_contract()
+        repo_role = bundle.get("repo_role") if isinstance(bundle, dict) else None
+        repo_id = str(repo_role.get("repo_id", "")) if isinstance(repo_role, dict) else ""
+        return get_public_authority_source_contract_by_repo_id(repo_id) or default_public_authority_source_contract()
 
     def _record_status(
         self,

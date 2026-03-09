@@ -284,7 +284,7 @@ def _prepare_projection_publication(*, state_path: Path | str, wiki_repo_url: st
 
     def _update(plane):
         if not plane.registry.list_projection_bindings():
-            plane.bootstrap_steward_public_wiki_contract(now=checked_at)
+            plane.bootstrap_default_public_wiki_contracts(now=checked_at)
         binding = _matching_projection_binding(plane, wiki_repo_url=wiki_repo_url)
         if binding is None:
             return None
@@ -323,7 +323,7 @@ def _record_projection_publication_outcome(*, state_path: Path | str, wiki_repo_
 
     def _update(plane):
         if not plane.registry.list_projection_bindings():
-            plane.bootstrap_steward_public_wiki_contract(now=checked_at)
+            plane.bootstrap_default_public_wiki_contracts(now=checked_at)
         binding = _matching_projection_binding(plane, wiki_repo_url=wiki_repo_url)
         if binding is None:
             return None

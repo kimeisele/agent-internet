@@ -98,7 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     reconcile_once.add_argument("--root", required=True)
     reconcile_once.add_argument("--state-path", default="data/control_plane/state.json")
     reconcile_once.add_argument("--bundle-path")
-    reconcile_once.add_argument("--feed-id", default="steward-authority-bundle")
+    reconcile_once.add_argument("--feed-id")
     reconcile_once.add_argument("--poll-interval-seconds", type=int, default=300)
     reconcile_once.add_argument("--wiki-repo-url")
     reconcile_once.add_argument("--wiki-checkout-path")
@@ -1476,7 +1476,7 @@ def cmd_lotus_api_call(args: argparse.Namespace) -> int:
                 state_path=Path(args.state_path),
             ).run_once(
                 bundle_path=params.get("bundle_path"),
-                feed_id=str(params.get("feed_id", "steward-authority-bundle")),
+                feed_id=(None if params.get("feed_id") in (None, "") else str(params.get("feed_id"))),
                 poll_interval_seconds=int(params.get("poll_interval_seconds", 300)),
                 wiki_repo_url=params.get("wiki_repo_url"),
                 wiki_path=(
