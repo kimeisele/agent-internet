@@ -7,6 +7,13 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from .authority_contracts import (
+    AGENT_WORLD_PUBLIC_AUTHORITY_CONTRACT,
+    STEWARD_PUBLIC_AUTHORITY_CONTRACT,
+    default_public_authority_source_contract,
+    get_public_authority_source_contract_by_repo_id,
+    iter_public_authority_source_contracts,
+)
 from .agent_city_bridge import AgentCityBridge
 from .assistant_surface import assistant_social_slot_from_snapshot, assistant_space_from_snapshot
 from .memory_registry import InMemoryCityRegistry
@@ -50,10 +57,13 @@ from .transport import DeliveryEnvelope, DeliveryReceipt, RelayService, Transpor
 from .trust import InMemoryTrustEngine
 
 
-STEWARD_PROTOCOL_REPO_ID = "steward-protocol"
+STEWARD_PROTOCOL_REPO_ID = STEWARD_PUBLIC_AUTHORITY_CONTRACT.source_repo_id
+AGENT_WORLD_REPO_ID = AGENT_WORLD_PUBLIC_AUTHORITY_CONTRACT.source_repo_id
 AGENT_INTERNET_REPO_ID = "agent-internet"
-STEWARD_PUBLIC_WIKI_BINDING_ID = "steward-public-wiki"
-STEWARD_AUTHORITY_BUNDLE_FEED_ID = "steward-authority-bundle"
+STEWARD_PUBLIC_WIKI_BINDING_ID = STEWARD_PUBLIC_AUTHORITY_CONTRACT.binding_id
+STEWARD_AUTHORITY_BUNDLE_FEED_ID = STEWARD_PUBLIC_AUTHORITY_CONTRACT.feed_id
+AGENT_WORLD_PUBLIC_WIKI_BINDING_ID = AGENT_WORLD_PUBLIC_AUTHORITY_CONTRACT.binding_id
+AGENT_WORLD_AUTHORITY_BUNDLE_FEED_ID = AGENT_WORLD_PUBLIC_AUTHORITY_CONTRACT.feed_id
 
 
 def _json_sha256(payload: object) -> str:
@@ -75,6 +85,14 @@ def _resolve_bundle_artifact_path(bundle_dir: Path, relative_path: str) -> Path:
     except ValueError as exc:
         raise ValueError(f"unsafe_authority_artifact_path:{relative_path}") from exc
     return candidate
+
+
+def _merge_tuple(existing: tuple[str, ...], *values: str) -> tuple[str, ...]:
+    merged = list(existing)
+    for value in values:
+        if value and value not in merged:
+            merged.append(value)
+    return tuple(merged)
 
 
 @dataclass(slots=True)
@@ -293,7 +311,6 @@ class AgentInternetControlPlane:
 
     def ingest_authority_bundle(self, bundle: dict[str, Any], *, artifacts: dict[str, dict[str, Any]] | None = None, now: float | None = None) -> dict[str, object]:
         checked_at = float(time.time() if now is None else now)
-        self.bootstrap_steward_public_wiki_contract(now=checked_at)
         if str(bundle.get("kind", "")) != "source_authority_bundle":
             raise ValueError("invalid_authority_bundle_kind")
 
@@ -309,6 +326,9 @@ class AgentInternetControlPlane:
             publication_targets=tuple(str(item) for item in role_payload.get("publication_targets", ())),
             labels={str(key): str(value) for key, value in dict(role_payload.get("labels", {})).items()},
         )
+        contract = get_public_authority_source_contract_by_repo_id(repo_role.repo_id)
+        if contract is not None:
+            self._bootstrap_public_wiki_contract(contract=contract, now=checked_at)
         self.registry.upsert_repo_role(repo_role)
 
         artifact_payloads = {str(path): payload for path, payload in (artifacts or {}).items()}
@@ -422,22 +442,34 @@ class AgentInternetControlPlane:
         self.registry.upsert_publication_status(status)
         return status
 
-    def bootstrap_steward_public_wiki_contract(self, *, now: float | None = None) -> dict[str, object]:
+    def _bootstrap_public_wiki_contract(
+        self,
+        *,
+        contract,
+        now: float | None = None,
+    ) -> dict[str, object]:
         checked_at = float(time.time() if now is None else now)
-        steward_role = RepoRoleRecord(
-            repo_id=STEWARD_PROTOCOL_REPO_ID,
+        source_repo_id = contract.source_repo_id
+        binding_id = contract.binding_id
+        existing_source_role = self.registry.get_repo_role(source_repo_id)
+        source_role = RepoRoleRecord(
+            repo_id=source_repo_id,
             role=RepoRole.NORMATIVE_SOURCE,
-            owner_boundary="normative_protocol_surface",
-            exports=(
-                AuthorityExportKind.CANONICAL_SURFACE.value,
-                AuthorityExportKind.PUBLIC_SUMMARY_REGISTRY.value,
-                AuthorityExportKind.SOURCE_SURFACE_REGISTRY.value,
-                AuthorityExportKind.REPO_GRAPH.value,
-                AuthorityExportKind.SURFACE_METADATA.value,
-            ),
-            publication_targets=(STEWARD_PUBLIC_WIKI_BINDING_ID,),
-            labels={"public_surface_owner": AGENT_INTERNET_REPO_ID},
+            owner_boundary=contract.owner_boundary,
+            exports=tuple(contract.source_exports),
+            publication_targets=_merge_tuple(existing_source_role.publication_targets if existing_source_role is not None else (), binding_id),
+            labels={
+                **(dict(existing_source_role.labels) if existing_source_role is not None else {}),
+                "public_surface_owner": AGENT_INTERNET_REPO_ID,
+            },
         )
+        existing_operator_role = self.registry.get_repo_role(AGENT_INTERNET_REPO_ID)
+        existing_projects = {
+            item.strip()
+            for item in str((existing_operator_role.labels if existing_operator_role is not None else {}).get("projects", "")).split(",")
+            if item.strip()
+        }
+        existing_projects.add(source_repo_id)
         operator_role = RepoRoleRecord(
             repo_id=AGENT_INTERNET_REPO_ID,
             role=RepoRole.PUBLIC_MEMBRANE_OPERATOR,
@@ -450,24 +482,28 @@ class AgentInternetControlPlane:
             consumes=(
                 AuthorityExportKind.CANONICAL_SURFACE.value,
                 AuthorityExportKind.PUBLIC_SUMMARY_REGISTRY.value,
+                AuthorityExportKind.SOURCE_SURFACE_REGISTRY.value,
                 AuthorityExportKind.REPO_GRAPH.value,
                 AuthorityExportKind.SURFACE_METADATA.value,
             ),
-            publication_targets=(STEWARD_PUBLIC_WIKI_BINDING_ID,),
-            labels={"projects": STEWARD_PROTOCOL_REPO_ID},
+            publication_targets=_merge_tuple(existing_operator_role.publication_targets if existing_operator_role is not None else (), binding_id),
+            labels={
+                **(dict(existing_operator_role.labels) if existing_operator_role is not None else {}),
+                "projects": ",".join(sorted(existing_projects)),
+            },
         )
-        existing_binding = self.registry.get_projection_binding(STEWARD_PUBLIC_WIKI_BINDING_ID)
+        existing_binding = self.registry.get_projection_binding(binding_id)
         binding = existing_binding or ProjectionBindingRecord(
-            binding_id=STEWARD_PUBLIC_WIKI_BINDING_ID,
-            source_repo_id=STEWARD_PROTOCOL_REPO_ID,
+            binding_id=binding_id,
+            source_repo_id=source_repo_id,
             required_export_kind=AuthorityExportKind.CANONICAL_SURFACE,
             operator_repo_id=AGENT_INTERNET_REPO_ID,
             target_kind="github_wiki",
-            target_locator="github.com/kimeisele/steward-protocol.wiki.git",
+            target_locator=contract.target_locator,
             projection_mode=ProjectionMode.REQUIRED,
             failure_policy=ProjectionFailurePolicy.FAIL_CLOSED,
             freshness_sla_seconds=3600,
-            labels={"public_surface": "steward-wiki"},
+            labels={"public_surface": contract.public_surface_label},
         )
         export = self.registry.find_authority_export(binding.source_repo_id, binding.required_export_kind.value)
         existing_status = self.registry.get_publication_status(binding.binding_id)
@@ -486,17 +522,61 @@ class AgentInternetControlPlane:
             ),
         )
 
-        self.registry.upsert_repo_role(steward_role)
+        self.registry.upsert_repo_role(source_role)
         self.registry.upsert_repo_role(operator_role)
         self.registry.upsert_projection_binding(binding)
         if existing_status is None:
             self.registry.upsert_publication_status(status)
         return {
-            "source_repo_role": steward_role,
+            "source_repo_role": source_role,
             "operator_repo_role": operator_role,
             "binding": binding,
             "publication_status": self.registry.get_publication_status(binding.binding_id) or status,
         }
+
+    def bootstrap_steward_public_wiki_contract(self, *, now: float | None = None) -> dict[str, object]:
+        return self._bootstrap_public_wiki_contract(contract=STEWARD_PUBLIC_AUTHORITY_CONTRACT, now=now)
+
+    def bootstrap_agent_world_public_wiki_contract(self, *, now: float | None = None) -> dict[str, object]:
+        return self._bootstrap_public_wiki_contract(contract=AGENT_WORLD_PUBLIC_AUTHORITY_CONTRACT, now=now)
+
+    def bootstrap_public_wiki_contract_for_repo_id(self, source_repo_id: str, *, now: float | None = None) -> dict[str, object]:
+        contract = get_public_authority_source_contract_by_repo_id(source_repo_id)
+        if contract is None:
+            raise ValueError(f"unknown_public_authority_source:{source_repo_id}")
+        return self._bootstrap_public_wiki_contract(contract=contract, now=now)
+
+    def bootstrap_default_public_wiki_contracts(self, *, now: float | None = None) -> dict[str, object]:
+        return {contract.key: self._bootstrap_public_wiki_contract(contract=contract, now=now) for contract in iter_public_authority_source_contracts()}
+
+    def _bootstrap_public_wiki_feed(
+        self,
+        *,
+        contract,
+        bundle_path: str | Path,
+        feed_id: str,
+        poll_interval_seconds: int = 300,
+        now: float | None = None,
+    ) -> SourceAuthorityFeedRecord:
+        source_repo_id = contract.source_repo_id
+        self._bootstrap_public_wiki_contract(contract=contract, now=now)
+        existing = self.registry.get_source_authority_feed(feed_id)
+        record = SourceAuthorityFeedRecord(
+            feed_id=feed_id,
+            source_repo_id=source_repo_id,
+            transport=AuthorityFeedTransport.FILESYSTEM_BUNDLE,
+            locator=str(Path(bundle_path).resolve()),
+            binding_ids=(contract.binding_id,),
+            enabled=True if existing is None else existing.enabled,
+            poll_interval_seconds=max(int(poll_interval_seconds), 1),
+            labels={
+                "bundle_kind": "source_authority_bundle",
+                "source_repo_id": source_repo_id,
+                **(dict(existing.labels) if existing is not None else {}),
+            },
+        )
+        self.registry.upsert_source_authority_feed(record)
+        return record
 
     def bootstrap_steward_public_wiki_feed(
         self,
@@ -506,23 +586,51 @@ class AgentInternetControlPlane:
         poll_interval_seconds: int = 300,
         now: float | None = None,
     ) -> SourceAuthorityFeedRecord:
-        self.bootstrap_steward_public_wiki_contract(now=now)
-        existing = self.registry.get_source_authority_feed(feed_id)
-        record = SourceAuthorityFeedRecord(
+        return self._bootstrap_public_wiki_feed(
+            contract=STEWARD_PUBLIC_AUTHORITY_CONTRACT,
+            bundle_path=bundle_path,
             feed_id=feed_id,
-            source_repo_id=STEWARD_PROTOCOL_REPO_ID,
-            transport=AuthorityFeedTransport.FILESYSTEM_BUNDLE,
-            locator=str(Path(bundle_path).resolve()),
-            binding_ids=(STEWARD_PUBLIC_WIKI_BINDING_ID,),
-            enabled=True if existing is None else existing.enabled,
-            poll_interval_seconds=max(int(poll_interval_seconds), 1),
-            labels={
-                "bundle_kind": "source_authority_bundle",
-                **(dict(existing.labels) if existing is not None else {}),
-            },
+            poll_interval_seconds=poll_interval_seconds,
+            now=now,
         )
-        self.registry.upsert_source_authority_feed(record)
-        return record
+
+    def bootstrap_agent_world_public_wiki_feed(
+        self,
+        *,
+        bundle_path: str | Path,
+        feed_id: str = AGENT_WORLD_AUTHORITY_BUNDLE_FEED_ID,
+        poll_interval_seconds: int = 300,
+        now: float | None = None,
+    ) -> SourceAuthorityFeedRecord:
+        return self._bootstrap_public_wiki_feed(
+            contract=AGENT_WORLD_PUBLIC_AUTHORITY_CONTRACT,
+            bundle_path=bundle_path,
+            feed_id=feed_id,
+            poll_interval_seconds=poll_interval_seconds,
+            now=now,
+        )
+
+    def bootstrap_public_wiki_feed_for_repo_id(
+        self,
+        source_repo_id: str,
+        *,
+        bundle_path: str | Path,
+        feed_id: str | None = None,
+        poll_interval_seconds: int = 300,
+        now: float | None = None,
+    ) -> SourceAuthorityFeedRecord:
+        contract = get_public_authority_source_contract_by_repo_id(source_repo_id)
+        if contract is None:
+            contract = default_public_authority_source_contract()
+            if source_repo_id != contract.source_repo_id:
+                raise ValueError(f"unknown_public_authority_source:{source_repo_id}")
+        return self._bootstrap_public_wiki_feed(
+            contract=contract,
+            bundle_path=bundle_path,
+            feed_id=str(feed_id or contract.feed_id),
+            poll_interval_seconds=poll_interval_seconds,
+            now=now,
+        )
 
     def transition_intent(self, *, intent_id: str, status: IntentStatus, updated_at: float | None = None) -> IntentRecord:
         intent = self.registry.get_intent(intent_id)

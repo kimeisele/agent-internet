@@ -4,6 +4,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .agent_city_contract import AgentCityFilesystemContract
+from .authority_contracts import build_authority_document_specs
 from .agent_web_repo_graph_capabilities import build_agent_web_repo_graph_capability_manifest
 from .agent_web_repo_graph_contracts import build_agent_web_repo_graph_contract_manifest
 from .agent_web_semantic_capabilities import build_agent_web_semantic_capability_manifest
@@ -11,7 +12,7 @@ from .agent_web_semantic_contracts import build_agent_web_semantic_contract_mani
 from .file_locking import read_locked_json_value
 
 
-DOCUMENT_SPECS = (
+BASE_DOCUMENT_SPECS = (
     ("home", "wiki_home", "summary", "Home", "Home.md", True),
     ("node_health", "node_health", "node_health", "Node Health", "Node-Health.md", True),
     ("publication_status", "publication_status", "publication_status", "Publication Status", "Publication-Status.md", True),
@@ -20,15 +21,10 @@ DOCUMENT_SPECS = (
     ("repo_quality", "repo_quality", "repo_quality", "Repo Quality", "Repo-Quality.md", False),
     ("assistant_surface", "assistant_surface", "assistant_surface", "Assistant Surface", "Assistant-Surface.md", True),
     ("agent_web", "agent_web", "manifest", "Agent Web", "Agent-Web.md", True),
-    ("steward_authority", "steward_authority", "steward_authority", "Steward Authority", "Steward-Authority.md", True),
-    (
-        "steward_canonical_surface",
-        "steward_canonical_surface",
-        "steward_canonical_surface",
-        "Steward Canonical Surface",
-        "Steward-Canonical-Surface.md",
-        False,
-    ),
+)
+
+
+TAIL_DOCUMENT_SPECS = (
     ("git_federation", "git_federation", "federation_manifest", "Git Federation", "Git-Federation.md", False),
     ("semantic_capabilities", "semantic_capabilities", "semantic_capability_manifest", "Semantic Capabilities", "Semantic-Capabilities.md", True),
     ("semantic_contracts", "semantic_contracts", "semantic_contract_manifest", "Semantic Contracts", "Semantic-Contracts.md", True),
@@ -41,6 +37,9 @@ DOCUMENT_SPECS = (
     ("cities", "cities", "city_index", "Cities", "Cities.md", False),
     ("lineage", "lineage", "lineage", "Lineage", "Lineage.md", False),
 )
+
+
+DOCUMENT_SPECS = BASE_DOCUMENT_SPECS + build_authority_document_specs() + TAIL_DOCUMENT_SPECS
 
 
 def build_agent_web_manifest_from_repo_root(
@@ -191,32 +190,11 @@ def _build_links(documents: list[dict[str, object]], *, wiki_repo_url: str) -> l
 
 
 def _build_entrypoints() -> dict[str, dict[str, str]]:
-    return {
-        "default": {"document_id": "agent_web", "rel": "agent_web"},
-        "home": {"document_id": "home", "rel": "wiki_home"},
-        "node_health": {"document_id": "node_health", "rel": "node_health"},
-        "publication_status": {"document_id": "publication_status", "rel": "publication_status"},
-        "federation_status": {"document_id": "federation_status", "rel": "federation_status"},
-        "surface_integrity": {"document_id": "surface_integrity", "rel": "surface_integrity"},
-        "repo_quality": {"document_id": "repo_quality", "rel": "repo_quality"},
-        "assistant_surface": {"document_id": "assistant_surface", "rel": "assistant_surface"},
-        "steward_authority": {"document_id": "steward_authority", "rel": "steward_authority"},
-        "steward_canonical_surface": {
-            "document_id": "steward_canonical_surface",
-            "rel": "steward_canonical_surface",
-        },
-        "semantic_capabilities": {"document_id": "semantic_capabilities", "rel": "semantic_capabilities"},
-        "semantic_contracts": {"document_id": "semantic_contracts", "rel": "semantic_contracts"},
-        "repo_graph_capabilities": {"document_id": "repo_graph_capabilities", "rel": "repo_graph_capabilities"},
-        "repo_graph_contracts": {"document_id": "repo_graph_contracts", "rel": "repo_graph_contracts"},
-        "public_graph": {"document_id": "public_graph", "rel": "public_graph"},
-        "search_index": {"document_id": "search_index", "rel": "search_index"},
-        "git_federation": {"document_id": "git_federation", "rel": "git_federation"},
-        "services": {"document_id": "services", "rel": "services"},
-        "routes": {"document_id": "routes", "rel": "routes"},
-        "cities": {"document_id": "cities", "rel": "cities"},
-        "lineage": {"document_id": "lineage", "rel": "lineage"},
-    }
+    entrypoints = {"default": {"document_id": "agent_web", "rel": "agent_web"}}
+    for document_id, rel, _kind, _title, _href, entrypoint in DOCUMENT_SPECS:
+        if entrypoint and document_id != "agent_web":
+            entrypoints[document_id] = {"document_id": document_id, "rel": rel}
+    return entrypoints
 
 
 def _normalize_service_affordance(service: dict) -> dict[str, object]:

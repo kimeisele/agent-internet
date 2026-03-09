@@ -4,7 +4,7 @@ from hashlib import sha256
 
 import pytest
 
-from agent_internet.control_plane import STEWARD_PROTOCOL_REPO_ID, STEWARD_PUBLIC_WIKI_BINDING_ID
+from agent_internet.control_plane import AGENT_WORLD_PUBLIC_WIKI_BINDING_ID, AGENT_WORLD_REPO_ID, STEWARD_PROTOCOL_REPO_ID, STEWARD_PUBLIC_WIKI_BINDING_ID
 from agent_internet.models import AuthorityExportKind, AuthorityExportRecord, PublicationState
 from agent_internet.publication_status import sanitize_remote_url
 from agent_internet.publisher import build_agent_internet_peer_descriptor, build_agent_internet_wiki, probe_wiki_remote, publish_agent_internet_wiki
@@ -264,6 +264,105 @@ def _seed_steward_authority_artifacts(
     return store
 
 
+def _seed_agent_world_authority_artifacts(state_path, *, version: str = "world-source", source_sha: str = "world-bundle-source"):
+    store = ControlPlaneStateStore(path=state_path)
+    canonical_surface = {
+        "kind": "canonical_surface",
+        "documents": [
+            {
+                "document_id": "world_constitution",
+                "title": "World Constitution",
+                "wiki_name": "World-Constitution",
+                "source_path": "docs/WORLD_CONSTITUTION.md",
+                "public_summary": "The constitutional baseline for world-level governance and boundaries.",
+                "content": "# World Constitution\n\nWorld truth is separate from city truth.",
+            },
+        ],
+    }
+    public_summary_registry = {
+        "kind": "public_summary_registry",
+        "records": [{"id": "world_constitution", "title": "World Constitution", "wiki_name": "World-Constitution", "public_summary": "The constitutional baseline for world-level governance and boundaries."}],
+    }
+    source_surface_registry = {
+        "kind": "source_surface_registry",
+        "documents": [{"document_id": "world_constitution", "title": "World Constitution", "wiki_name": "World-Constitution", "section": "Foundations", "source_path": "docs/WORLD_CONSTITUTION.md"}],
+    }
+    surface_metadata = {"kind": "surface_metadata", "surface_registry": {"document_count": 1, "sections": ["Foundations"]}}
+    artifacts = {
+        ".authority-exports/canonical-surface.json": canonical_surface,
+        ".authority-exports/public-summary-registry.json": public_summary_registry,
+        ".authority-exports/source-surface-registry.json": source_surface_registry,
+        ".authority-exports/surface-metadata.json": surface_metadata,
+    }
+    bundle = {
+        "kind": "source_authority_bundle",
+        "generated_at": 250.0,
+        "source_sha": source_sha,
+        "repo_role": {
+            "repo_id": AGENT_WORLD_REPO_ID,
+            "role": "normative_source",
+            "owner_boundary": "world_governance_surface",
+            "exports": [
+                AuthorityExportKind.CANONICAL_SURFACE.value,
+                AuthorityExportKind.PUBLIC_SUMMARY_REGISTRY.value,
+                AuthorityExportKind.SOURCE_SURFACE_REGISTRY.value,
+                AuthorityExportKind.SURFACE_METADATA.value,
+            ],
+            "consumes": [],
+            "publication_targets": [AGENT_WORLD_PUBLIC_WIKI_BINDING_ID],
+            "labels": {"public_surface_owner": "agent-internet"},
+        },
+        "authority_exports": [
+            {
+                "export_id": f"{AGENT_WORLD_REPO_ID}/canonical_surface",
+                "repo_id": AGENT_WORLD_REPO_ID,
+                "export_kind": AuthorityExportKind.CANONICAL_SURFACE.value,
+                "version": version,
+                "artifact_uri": ".authority-exports/canonical-surface.json",
+                "generated_at": 251.0,
+                "contract_version": 1,
+                "content_sha256": sha256(json.dumps(canonical_surface, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+                "labels": {"source_sha": source_sha},
+            },
+            {
+                "export_id": f"{AGENT_WORLD_REPO_ID}/public_summary_registry",
+                "repo_id": AGENT_WORLD_REPO_ID,
+                "export_kind": AuthorityExportKind.PUBLIC_SUMMARY_REGISTRY.value,
+                "version": version,
+                "artifact_uri": ".authority-exports/public-summary-registry.json",
+                "generated_at": 251.0,
+                "contract_version": 1,
+                "content_sha256": sha256(json.dumps(public_summary_registry, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+                "labels": {"source_sha": source_sha},
+            },
+            {
+                "export_id": f"{AGENT_WORLD_REPO_ID}/source_surface_registry",
+                "repo_id": AGENT_WORLD_REPO_ID,
+                "export_kind": AuthorityExportKind.SOURCE_SURFACE_REGISTRY.value,
+                "version": version,
+                "artifact_uri": ".authority-exports/source-surface-registry.json",
+                "generated_at": 251.0,
+                "contract_version": 1,
+                "content_sha256": sha256(json.dumps(source_surface_registry, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+                "labels": {"source_sha": source_sha},
+            },
+            {
+                "export_id": f"{AGENT_WORLD_REPO_ID}/surface_metadata",
+                "repo_id": AGENT_WORLD_REPO_ID,
+                "export_kind": AuthorityExportKind.SURFACE_METADATA.value,
+                "version": version,
+                "artifact_uri": ".authority-exports/surface-metadata.json",
+                "generated_at": 251.0,
+                "contract_version": 1,
+                "content_sha256": sha256(json.dumps(surface_metadata, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+                "labels": {"source_sha": source_sha},
+            },
+        ],
+    }
+    store.update(lambda plane: plane.ingest_authority_bundle(bundle, artifacts=artifacts, now=252.0))
+    return store
+
+
 def test_build_agent_internet_peer_descriptor_detects_git_metadata(tmp_path):
     work_root, _wiki_remote = _init_git_workspace(tmp_path)
     payload = build_agent_internet_peer_descriptor(work_root)
@@ -282,6 +381,8 @@ def test_build_agent_internet_wiki_materializes_pages(tmp_path):
     built = build_agent_internet_wiki(root=work_root, output_dir=tmp_path / "wiki-build", state_path=tmp_path / "state.json")
     assert any(path.name == "Agent-Web.md" for path in built)
     assert any(path.name == "Assistant-Surface.md" for path in built)
+    assert any(path.name == "Agent-World-Authority.md" for path in built)
+    assert any(path.name == "Agent-World-Canonical-Surface.md" for path in built)
     assert any(path.name == "Steward-Authority.md" for path in built)
     assert any(path.name == "Steward-Canonical-Surface.md" for path in built)
     assert any(path.name == "Node-Health.md" for path in built)
@@ -301,8 +402,11 @@ def test_build_agent_internet_wiki_materializes_pages(tmp_path):
     assert "# Repo Quality" in (tmp_path / "wiki-build" / "Repo-Quality.md").read_text()
     assert "Tracked Files: `" in (tmp_path / "wiki-build" / "Repo-Quality.md").read_text()
     assert "Has tests: `" in (tmp_path / "wiki-build" / "Repo-Quality.md").read_text()
+    assert "No imported agent-world authority exports have been imported yet." in (tmp_path / "wiki-build" / "Agent-World-Authority.md").read_text()
+    assert "No imported agent-world canonical documents are available yet." in (tmp_path / "wiki-build" / "Agent-World-Canonical-Surface.md").read_text()
     assert "No steward authority exports have been imported yet." in (tmp_path / "wiki-build" / "Steward-Authority.md").read_text()
     assert "No imported steward canonical documents are available yet." in (tmp_path / "wiki-build" / "Steward-Canonical-Surface.md").read_text()
+    assert "[[Agent World Authority|Agent-World-Authority]]" in (tmp_path / "wiki-build" / "_Sidebar.md").read_text()
     assert "[[Steward Authority|Steward-Authority]]" in (tmp_path / "wiki-build" / "_Sidebar.md").read_text()
 
 
@@ -325,6 +429,23 @@ def test_build_agent_internet_wiki_renders_imported_steward_authority_artifacts(
     assert "The city stands on steward protocol." in canonical_page
     assert "Steward Source Export Version: `v-source`" in home_page
     assert "Steward Canonical Docs: `1`" in home_page
+
+
+def test_build_agent_internet_wiki_renders_imported_agent_world_authority_artifacts(tmp_path):
+    work_root, _wiki_remote = _init_git_workspace(tmp_path)
+    state_path = tmp_path / "state.json"
+    _seed_agent_world_authority_artifacts(state_path, version="world-source", source_sha="world-bundle-source")
+
+    build_agent_internet_wiki(root=work_root, output_dir=tmp_path / "wiki-build", state_path=state_path)
+
+    authority_page = (tmp_path / "wiki-build" / "Agent-World-Authority.md").read_text()
+    canonical_page = (tmp_path / "wiki-build" / "Agent-World-Canonical-Surface.md").read_text()
+    home_page = (tmp_path / "wiki-build" / "Home.md").read_text()
+
+    assert "The constitutional baseline for world-level governance and boundaries." in authority_page
+    assert "`World-Constitution` (`Foundations` / `Foundations`)" in authority_page
+    assert "World truth is separate from city truth." in canonical_page
+    assert "Agent World Source Export Version: `world-source`" in home_page
 
 
 def test_publish_agent_internet_wiki_commits_without_push(tmp_path):

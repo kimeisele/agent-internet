@@ -6,7 +6,7 @@ import pytest
 from agent_internet.agent_city_bridge import AgentCityBridge, city_presence_from_report
 from agent_internet.assistant_surface import assistant_social_slot_from_snapshot, assistant_space_from_snapshot
 from agent_internet.agent_city_contract import AgentCityFilesystemContract
-from agent_internet.control_plane import AGENT_INTERNET_REPO_ID, STEWARD_PROTOCOL_REPO_ID, STEWARD_PUBLIC_WIKI_BINDING_ID, AgentInternetControlPlane
+from agent_internet.control_plane import AGENT_INTERNET_REPO_ID, AGENT_WORLD_PUBLIC_WIKI_BINDING_ID, AGENT_WORLD_REPO_ID, STEWARD_PROTOCOL_REPO_ID, STEWARD_PUBLIC_WIKI_BINDING_ID, AgentInternetControlPlane
 from agent_internet.filesystem_transport import FilesystemFederationTransport
 from agent_internet.models import AssistantSurfaceSnapshot, AuthorityExportKind, AuthorityExportRecord, CityEndpoint, CityIdentity, EndpointVisibility, ForkLineageRecord, ForkMode, HealthStatus, IntentRecord, IntentStatus, IntentType, LotusApiScope, ProjectionFailurePolicy, ProjectionMode, PublicationState, RepoRole, SlotStatus, SpaceKind, TrustLevel, TrustRecord, UpstreamSyncPolicy
 from agent_internet.snapshot import restore_control_plane, snapshot_control_plane
@@ -467,3 +467,22 @@ def test_control_plane_ingest_authority_bundle_rejects_digest_mismatch(tmp_path)
         plane.ingest_authority_bundle(bundle, artifacts=bad_artifacts, now=220.0)
 
     assert bundle_path.exists()
+
+
+def test_control_plane_bootstraps_agent_world_public_wiki_contract():
+    plane = AgentInternetControlPlane()
+
+    result = plane.bootstrap_agent_world_public_wiki_contract(now=100.0)
+
+    binding = plane.registry.get_projection_binding(AGENT_WORLD_PUBLIC_WIKI_BINDING_ID)
+    role = plane.registry.get_repo_role(AGENT_WORLD_REPO_ID)
+    operator = plane.registry.get_repo_role(AGENT_INTERNET_REPO_ID)
+
+    assert result["binding"].binding_id == AGENT_WORLD_PUBLIC_WIKI_BINDING_ID
+    assert binding is not None
+    assert binding.target_locator == "github.com/kimeisele/agent-world.wiki.git"
+    assert role is not None
+    assert role.owner_boundary == "world_governance_surface"
+    assert operator is not None
+    assert AGENT_WORLD_PUBLIC_WIKI_BINDING_ID in operator.publication_targets
+    assert AGENT_WORLD_REPO_ID in operator.labels["projects"]
