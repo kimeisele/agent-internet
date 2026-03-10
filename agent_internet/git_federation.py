@@ -11,6 +11,7 @@ from .agent_web import build_agent_web_manifest
 from .authority_contracts import (
     AGENT_WORLD_PUBLIC_AUTHORITY_CONTRACT,
     STEWARD_PUBLIC_AUTHORITY_CONTRACT,
+    build_authority_projection_documents,
     iter_public_authority_source_contracts,
 )
 from .agent_web_graph import build_agent_web_public_graph
@@ -197,6 +198,8 @@ def render_wiki_projection(
     lineage_records = list(state_snapshot.get("fork_lineage", []))
     current_lineage = _resolve_current_lineage(identity=identity, git_manifest=git_manifest, lineage_records=lineage_records)
     authority_snapshots = _authority_projection_snapshots(state_snapshot)
+    authority_documents = build_authority_projection_documents(state_snapshot)
+    authority_snapshots_by_repo = {snapshot["contract"].source_repo_id: snapshot for snapshot in authority_snapshots}
     summary_lines = [
         f"## Connected City: {identity.get('city_id', 'unknown')}",
         f"- Repo: `{identity.get('repo', '')}`",
@@ -291,27 +294,45 @@ def render_wiki_projection(
         "Public-Graph.md": _render_public_graph_page(public_graph),
         "Search-Index.md": _render_search_index_page(search_index),
         "Lineage.md": _render_lineage_page(current_lineage=current_lineage, lineage_records=lineage_records),
-        "_Sidebar.md": _render_sidebar_page(),
+        "_Sidebar.md": _render_sidebar_page(authority_documents),
         "_Footer.md": _render_footer_page(),
     }
-    for authority_snapshot in authority_snapshots:
-        contract = authority_snapshot["contract"]
+    for authority_document in authority_documents:
+        authority_snapshot = authority_snapshots_by_repo.get(authority_document["source_repo_id"])
+        if authority_snapshot is None:
+            continue
         authority_view = authority_snapshot["view"]
-        pages[contract.authority_page.href] = _render_authority_page(
-            authority_view,
-            title=contract.authority_page.title,
-            label=contract.label,
-            source_repo_id=contract.source_repo_id,
-            binding_id=contract.binding_id,
-            empty_message=contract.authority_page.empty_message,
-        )
-        pages[contract.canonical_page.href] = _render_canonical_surface_page(
-            authority_view,
-            title=contract.canonical_page.title,
-            label=contract.label,
-            source_repo_id=contract.source_repo_id,
-            empty_message=contract.canonical_page.empty_message,
-        )
+        render_mode = authority_document.get("render_mode")
+        if render_mode == "overview":
+            pages[authority_document["href"]] = _render_authority_page(
+                authority_view,
+                title=authority_document["title"],
+                label=authority_document["source_label"],
+                source_repo_id=authority_document["source_repo_id"],
+                binding_id=authority_document["binding_id"],
+                empty_message=authority_document["empty_message"],
+            )
+        elif render_mode == "canonical_index":
+            pages[authority_document["href"]] = _render_canonical_surface_page(
+                authority_view,
+                title=authority_document["title"],
+                label=authority_document["source_label"],
+                source_repo_id=authority_document["source_repo_id"],
+                empty_message=authority_document["empty_message"],
+                projected_documents=[
+                    document
+                    for document in authority_documents
+                    if document.get("source_repo_id") == authority_document["source_repo_id"]
+                    and document.get("render_mode") == "canonical_document"
+                ],
+            )
+        elif render_mode == "canonical_document":
+            pages[authority_document["href"]] = _render_canonical_document_page(
+                authority_view,
+                title=authority_document["title"],
+                source_repo_id=authority_document["source_repo_id"],
+                source_document_id=str(authority_document.get("source_document_id", "")),
+            )
     node_surface = build_node_surface_snapshot(
         repo_root=repo_root,
         peer_descriptor=peer_descriptor,
@@ -518,8 +539,8 @@ def _render_authority_page(
         lines.extend(["", "## Source Surface Registry", ""])
         for record in source_records:
             title_value = record.get("wiki_name") or record.get("title") or record.get("document_id") or record.get("id", "")
-            category = record.get("page_class") or record.get("section") or ""
-            scope = record.get("section") or record.get("source_path") or ""
+            category = record.get("authority") or record.get("page_class") or record.get("section") or ""
+            scope = record.get("domain") or record.get("source_path") or record.get("section") or ""
             lines.append(f"- `{title_value}` (`{category}` / `{scope}`)")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -531,6 +552,7 @@ def _render_canonical_surface_page(
     label: str,
     source_repo_id: str,
     empty_message: str,
+    projected_documents: list[dict[str, Any]],
 ) -> str:
     publication_status = authority_view.get("publication_status") if isinstance(authority_view.get("publication_status"), dict) else None
     status_labels = dict(publication_status.get("labels", {})) if publication_status is not None else {}
@@ -549,23 +571,56 @@ def _render_canonical_surface_page(
         lines.extend([empty_message, ""])
         return "\n".join(lines).rstrip() + "\n"
     lines.extend([f"This page is rendered from imported {label.lower()} `canonical_surface` authority artifacts.", ""])
-    for document in documents:
-        title_value = document.get("title") or document.get("wiki_name") or document.get("document_id", "")
-        lines.extend(
-            [
-                f"## {title_value}",
-                "",
-                f"- Document ID: `{document.get('document_id', '')}`",
-                f"- Wiki Name: `{document.get('wiki_name', '')}`",
-                f"- Source Path: `{document.get('source_path', '')}`",
-            ],
+    lines.extend(["## Projected Canonical Documents", ""])
+    for document in projected_documents:
+        source_document = _canonical_document_by_id(authority_view, str(document.get("source_document_id", "")))
+        lines.append(
+            f"- [[{document.get('title', '')}|{str(document.get('href', '')).removesuffix('.md')}]]"
+            f" → `{source_document.get('source_path', '')}`"
         )
-        public_summary = str(document.get("public_summary", "")).strip()
+        public_summary = str(source_document.get("public_summary", "")).strip()
         if public_summary:
-            lines.append(f"- Public Summary: {public_summary}")
-        content = str(document.get("content", "")).strip()
-        lines.extend(["", content or "_No canonical content available._", ""])
+            lines.append(f"  - {public_summary}")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_canonical_document_page(
+    authority_view: dict[str, Any],
+    *,
+    title: str,
+    source_repo_id: str,
+    source_document_id: str,
+) -> str:
+    publication_status = authority_view.get("publication_status") if isinstance(authority_view.get("publication_status"), dict) else None
+    status_labels = dict(publication_status.get("labels", {})) if publication_status is not None else {}
+    document = _canonical_document_by_id(authority_view, source_document_id)
+    lines = [
+        f"# {title}",
+        "",
+        f"- Source Repo: `{source_repo_id}`",
+        f"- Source Document ID: `{source_document_id}`",
+        f"- Source Export Version: `{status_labels.get('source_export_version', '')}`",
+        f"- Source Bundle SHA: `{status_labels.get('authority_bundle_source_sha', '')}`",
+        f"- Source Path: `{document.get('source_path', '')}`",
+    ]
+    public_summary = str(document.get("public_summary", "")).strip()
+    if public_summary:
+        lines.append(f"- Public Summary: {public_summary}")
+    lines.extend(["", str(document.get("content", "")).strip() or "_No canonical content available._", ""])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _canonical_document_by_id(authority_view: dict[str, Any], source_document_id: str) -> dict[str, Any]:
+    artifacts_by_kind = dict(authority_view.get("artifacts_by_kind", {}))
+    canonical_payload = dict(artifacts_by_kind.get("canonical_surface", {}))
+    return next(
+        (
+            dict(record)
+            for record in list(canonical_payload.get("documents", []))
+            if isinstance(record, dict) and str(record.get("document_id", "")) == source_document_id
+        ),
+        {},
+    )
 
 
 def _render_agent_world_authority_page(authority_view: dict[str, Any]) -> str:
@@ -597,6 +652,7 @@ def _render_agent_world_canonical_surface_page(authority_view: dict[str, Any]) -
         label="Agent World",
         source_repo_id=AGENT_WORLD_REPO_ID,
         empty_message="No imported agent-world canonical documents are available yet.",
+        projected_documents=[],
     )
 
 
@@ -607,10 +663,11 @@ def _render_steward_canonical_surface_page(authority_view: dict[str, Any]) -> st
         label="Steward",
         source_repo_id=STEWARD_PROTOCOL_REPO_ID,
         empty_message="No imported steward canonical documents are available yet.",
+        projected_documents=[],
     )
 
 
-def _render_sidebar_page() -> str:
+def _render_sidebar_page(authority_documents: tuple[dict[str, Any], ...]) -> str:
     links = [
         ("Home", "Home"),
         ("Node Health", "Node-Health"),
@@ -632,14 +689,14 @@ def _render_sidebar_page() -> str:
         ("Lineage", "Lineage"),
         ("Git Federation", "Git-Federation"),
     ]
-    authority_links: list[tuple[str, str]] = []
-    for contract in iter_public_authority_source_contracts():
-        authority_links.extend(
-            [
-                (contract.authority_page.title, contract.authority_page.href.removesuffix(".md")),
-                (contract.canonical_page.title, contract.canonical_page.href.removesuffix(".md")),
-            ],
+    authority_links = [
+        (
+            str(document.get("sidebar_title") or document.get("title", "")),
+            str(document.get("href", "")).removesuffix(".md"),
         )
+        for document in authority_documents
+        if document.get("render_mode") in {"overview", "canonical_index"} or document.get("sidebar")
+    ]
     links = links[:8] + authority_links + links[8:]
     lines = ["## Agent Internet", ""]
     lines.extend(f"- [[{label}|{target}]]" for label, target in links)

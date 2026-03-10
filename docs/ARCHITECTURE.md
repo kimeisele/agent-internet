@@ -7,6 +7,20 @@
 - `agent-city` = local multi-agent city runtime
 - `agent-internet` = inter-city control plane
 
+### Source vs projection split
+
+`agent-internet` should not hardcode the full public meaning of other repos.
+
+- `steward-protocol` and `agent-world` act as **source authority repos**
+- those repos export authority bundles (`canonical_surface`, `public_summary_registry`, `source_surface_registry`, `surface_metadata`)
+- `agent-internet` consumes those exports and derives projected pages, navigation, entrypoints, and public membranes from them
+
+That means:
+
+- source repos own canonical document identity, summaries, labels, and public surface hints
+- `agent-internet` owns projection assembly, publication, and public operator views
+- local contracts in `agent-internet` remain about feeds, bindings, bootstrap, and publication plumbing rather than page meaning
+
 ### Boundary decisions
 
 `agent-internet` owns:
@@ -18,6 +32,7 @@
 - inter-city transport adapters
 - bootstrap, onboarding, and repo-to-city mapping
 - operator-facing projections through git, wiki, CLI, and HTTP
+- metadata-driven projection of imported authority bundles into public wiki/graph/search surfaces
 - future commons allocation concepts such as spaces, slots, claims, and leases
 
 `agent-internet` does **not** own:
@@ -28,6 +43,7 @@
 - redefinitions of `FederationMessage`, `CityReport`, `MahaHeader`, `NadiOp`
 - a second universal substrate beside `steward-protocol`
 - git-backed replicated truth for live runtime state
+- authorship of world constitutions, protocol constitutions, or other source-authority documents
 
 ### Commons shell rule
 

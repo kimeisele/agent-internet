@@ -123,6 +123,7 @@ def _seed_steward_authority_artifacts(
                 "wiki_name": "Constitution",
                 "source_path": "docs/CONSTITUTION.md",
                 "public_summary": "Normative steward summary",
+                "labels": {"source_role": "entrypoint", "include_in_sidebar": "true", "featured": "true", "nav_label": "Constitution"},
                 "content": "# Constitution\n\nThe city stands on steward protocol.",
             },
         ],
@@ -131,28 +132,39 @@ def _seed_steward_authority_artifacts(
         "kind": "public_summary_registry",
         "records": [
             {
-                "id": "constitution",
+                "document_id": "constitution",
                 "title": "Constitution",
                 "wiki_name": "Constitution",
                 "public_summary": "Normative steward summary",
+                "labels": {"source_role": "entrypoint", "include_in_sidebar": "true", "featured": "true", "nav_label": "Constitution"},
             },
         ],
     }
     source_surface_registry = {
         "kind": "source_surface_registry",
-        "pages": [
+        "documents": [
             {
-                "id": "constitution",
+                "document_id": "constitution",
                 "title": "Constitution",
                 "wiki_name": "Constitution",
-                "page_class": "canonical",
+                "authority": "binding",
+                "domain": "governance",
                 "section": "Foundations",
+                "source_path": "docs/CONSTITUTION.md",
+                "public_abstract": "Normative steward summary",
+                "labels": {"source_role": "entrypoint", "include_in_sidebar": "true", "featured": "true", "nav_label": "Constitution"},
             },
         ],
     }
     surface_metadata = {
         "kind": "surface_metadata",
-        "surface_registry": {"page_count": 1, "sections": ["Foundations"]},
+        "public_surface": {
+            "repo_label": "Steward",
+            "document_prefix": "steward",
+            "overview_page": {"document_id": "steward_authority", "wiki_name": "Steward-Authority", "entrypoint": True},
+            "canonical_index_page": {"document_id": "steward_canonical_surface", "wiki_name": "Steward-Canonical-Surface", "entrypoint": False},
+        },
+        "surface_registry": {"document_count": 1, "sections": ["Foundations"]},
     }
     repo_graph = {"kind": "repo_graph", "summary": {"node_count": 3}}
     artifacts = {
@@ -275,19 +287,20 @@ def _seed_agent_world_authority_artifacts(state_path, *, version: str = "world-s
                 "wiki_name": "World-Constitution",
                 "source_path": "docs/WORLD_CONSTITUTION.md",
                 "public_summary": "The constitutional baseline for world-level governance and boundaries.",
+                "labels": {"source_role": "entrypoint", "include_in_sidebar": "true", "featured": "true", "nav_label": "World Constitution"},
                 "content": "# World Constitution\n\nWorld truth is separate from city truth.",
             },
         ],
     }
     public_summary_registry = {
         "kind": "public_summary_registry",
-        "records": [{"id": "world_constitution", "title": "World Constitution", "wiki_name": "World-Constitution", "public_summary": "The constitutional baseline for world-level governance and boundaries."}],
+        "records": [{"document_id": "world_constitution", "title": "World Constitution", "wiki_name": "World-Constitution", "public_summary": "The constitutional baseline for world-level governance and boundaries.", "labels": {"source_role": "entrypoint", "include_in_sidebar": "true", "featured": "true", "nav_label": "World Constitution"}}],
     }
     source_surface_registry = {
         "kind": "source_surface_registry",
-        "documents": [{"document_id": "world_constitution", "title": "World Constitution", "wiki_name": "World-Constitution", "section": "Foundations", "source_path": "docs/WORLD_CONSTITUTION.md"}],
+        "documents": [{"document_id": "world_constitution", "title": "World Constitution", "wiki_name": "World-Constitution", "authority": "binding", "domain": "governance", "section": "Foundations", "source_path": "docs/WORLD_CONSTITUTION.md", "public_abstract": "The constitutional baseline for world-level governance and boundaries.", "labels": {"source_role": "entrypoint", "include_in_sidebar": "true", "featured": "true", "nav_label": "World Constitution"}}],
     }
-    surface_metadata = {"kind": "surface_metadata", "surface_registry": {"document_count": 1, "sections": ["Foundations"]}}
+    surface_metadata = {"kind": "surface_metadata", "public_surface": {"repo_label": "Agent World", "document_prefix": "agent_world", "overview_page": {"document_id": "agent_world_authority", "wiki_name": "Agent-World-Authority", "entrypoint": True}, "canonical_index_page": {"document_id": "agent_world_canonical_surface", "wiki_name": "Agent-World-Canonical-Surface", "entrypoint": False}}, "surface_registry": {"document_count": 1, "sections": ["Foundations"]}}
     artifacts = {
         ".authority-exports/canonical-surface.json": canonical_surface,
         ".authority-exports/public-summary-registry.json": public_summary_registry,
@@ -404,8 +417,8 @@ def test_build_agent_internet_wiki_materializes_pages(tmp_path):
     assert "Has tests: `" in (tmp_path / "wiki-build" / "Repo-Quality.md").read_text()
     assert "No imported agent-world authority exports have been imported yet." in (tmp_path / "wiki-build" / "Agent-World-Authority.md").read_text()
     assert "No imported agent-world canonical documents are available yet." in (tmp_path / "wiki-build" / "Agent-World-Canonical-Surface.md").read_text()
-    assert "No steward authority exports have been imported yet." in (tmp_path / "wiki-build" / "Steward-Authority.md").read_text()
-    assert "No imported steward canonical documents are available yet." in (tmp_path / "wiki-build" / "Steward-Canonical-Surface.md").read_text()
+    assert "No imported steward-protocol authority exports have been imported yet." in (tmp_path / "wiki-build" / "Steward-Authority.md").read_text()
+    assert "No imported steward-protocol canonical documents are available yet." in (tmp_path / "wiki-build" / "Steward-Canonical-Surface.md").read_text()
     assert "[[Agent World Authority|Agent-World-Authority]]" in (tmp_path / "wiki-build" / "_Sidebar.md").read_text()
     assert "[[Steward Authority|Steward-Authority]]" in (tmp_path / "wiki-build" / "_Sidebar.md").read_text()
 
@@ -419,14 +432,18 @@ def test_build_agent_internet_wiki_renders_imported_steward_authority_artifacts(
 
     authority_page = (tmp_path / "wiki-build" / "Steward-Authority.md").read_text()
     canonical_page = (tmp_path / "wiki-build" / "Steward-Canonical-Surface.md").read_text()
+    document_page = (tmp_path / "wiki-build" / "Constitution.md").read_text()
+    sidebar_page = (tmp_path / "wiki-build" / "_Sidebar.md").read_text()
     home_page = (tmp_path / "wiki-build" / "Home.md").read_text()
     artifact = store.load().registry.get_authority_artifact(f"{STEWARD_PROTOCOL_REPO_ID}/canonical_surface")
 
     assert artifact is not None
     assert artifact.payload["kind"] == "canonical_surface"
     assert "Normative steward summary" in authority_page
-    assert "`Constitution` (`canonical` / `Foundations`)" in authority_page
-    assert "The city stands on steward protocol." in canonical_page
+    assert "`Constitution` (`binding` / `governance`)" in authority_page
+    assert "[[Constitution|Constitution]]" in canonical_page
+    assert "The city stands on steward protocol." in document_page
+    assert "[[Constitution|Constitution]]" in sidebar_page
     assert "Steward Source Export Version: `v-source`" in home_page
     assert "Steward Canonical Docs: `1`" in home_page
 
@@ -440,11 +457,15 @@ def test_build_agent_internet_wiki_renders_imported_agent_world_authority_artifa
 
     authority_page = (tmp_path / "wiki-build" / "Agent-World-Authority.md").read_text()
     canonical_page = (tmp_path / "wiki-build" / "Agent-World-Canonical-Surface.md").read_text()
+    document_page = (tmp_path / "wiki-build" / "World-Constitution.md").read_text()
+    sidebar_page = (tmp_path / "wiki-build" / "_Sidebar.md").read_text()
     home_page = (tmp_path / "wiki-build" / "Home.md").read_text()
 
     assert "The constitutional baseline for world-level governance and boundaries." in authority_page
-    assert "`World-Constitution` (`Foundations` / `Foundations`)" in authority_page
-    assert "World truth is separate from city truth." in canonical_page
+    assert "`World-Constitution` (`binding` / `governance`)" in authority_page
+    assert "[[World Constitution|World-Constitution]]" in canonical_page
+    assert "World truth is separate from city truth." in document_page
+    assert "[[World Constitution|World-Constitution]]" in sidebar_page
     assert "Agent World Source Export Version: `world-source`" in home_page
 
 

@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .agent_web import DOCUMENT_SPECS
+from .agent_web import build_document_specs
 from .git_federation import detect_git_remote_metadata, ensure_git_checkout, render_wiki_projection
 from .models import PublicationState, PublicationStatusRecord
 from .publication_status import DEFAULT_PUBLICATION_WORKFLOW_NAME, build_publication_snapshot, sanitize_remote_url
@@ -48,7 +48,7 @@ def build_agent_internet_peer_descriptor(root: Path | str, *, city_id: str = "ag
             "repo_ref": remote.repo_ref,
             "wiki_repo_url": remote.wiki_repo_url,
             "city_id": city_id,
-            "shared_pages": [href for _document_id, _rel, _kind, _title, href, _entrypoint in DOCUMENT_SPECS],
+            "shared_pages": [href for _document_id, _rel, _kind, _title, href, _entrypoint in build_document_specs({})],
         },
     }
 

@@ -39,7 +39,8 @@ TAIL_DOCUMENT_SPECS = (
 )
 
 
-DOCUMENT_SPECS = BASE_DOCUMENT_SPECS + build_authority_document_specs() + TAIL_DOCUMENT_SPECS
+def build_document_specs(state_snapshot: dict) -> tuple[tuple[str, str, str, str, str, bool], ...]:
+    return BASE_DOCUMENT_SPECS + build_authority_document_specs(state_snapshot) + TAIL_DOCUMENT_SPECS
 
 
 def build_agent_web_manifest_from_repo_root(
@@ -105,7 +106,7 @@ def build_agent_web_manifest(*, peer_descriptor: dict, state_snapshot: dict, ass
     services = [item for item in state_snapshot.get("service_addresses", []) if str(item.get("owner_city_id", "")) == city_id]
     routes = [item for item in state_snapshot.get("routes", []) if str(item.get("owner_city_id", "")) == city_id]
     campaigns = list(assistant.get("active_campaigns", []))
-    documents = _build_documents()
+    documents = _build_documents(state_snapshot)
     wiki_repo_url = str(git_manifest.get("wiki_repo_url", ""))
     links = _build_links(documents, wiki_repo_url=wiki_repo_url)
     semantic_capabilities = build_agent_web_semantic_capability_manifest()
@@ -133,7 +134,7 @@ def build_agent_web_manifest(*, peer_descriptor: dict, state_snapshot: dict, ass
             "assistant": assistant_capabilities,
         },
         "documents": documents,
-        "entrypoints": _build_entrypoints(),
+        "entrypoints": _build_entrypoints(state_snapshot),
         "semantic_capabilities": semantic_capabilities,
         "semantic_contracts": semantic_contracts,
         "repo_graph_capabilities": repo_graph_capabilities,
@@ -156,7 +157,7 @@ def build_agent_web_manifest(*, peer_descriptor: dict, state_snapshot: dict, ass
     }
 
 
-def _build_documents() -> list[dict[str, object]]:
+def _build_documents(state_snapshot: dict) -> list[dict[str, object]]:
     return [
         {
             "document_id": document_id,
@@ -167,7 +168,7 @@ def _build_documents() -> list[dict[str, object]]:
             "media_type": "text/markdown",
             "entrypoint": entrypoint,
         }
-        for document_id, rel, kind, title, href, entrypoint in DOCUMENT_SPECS
+        for document_id, rel, kind, title, href, entrypoint in build_document_specs(state_snapshot)
     ]
 
 
@@ -189,9 +190,9 @@ def _build_links(documents: list[dict[str, object]], *, wiki_repo_url: str) -> l
     return links
 
 
-def _build_entrypoints() -> dict[str, dict[str, str]]:
+def _build_entrypoints(state_snapshot: dict) -> dict[str, dict[str, str]]:
     entrypoints = {"default": {"document_id": "agent_web", "rel": "agent_web"}}
-    for document_id, rel, _kind, _title, _href, entrypoint in DOCUMENT_SPECS:
+    for document_id, rel, _kind, _title, _href, entrypoint in build_document_specs(state_snapshot):
         if entrypoint and document_id != "agent_web":
             entrypoints[document_id] = {"document_id": document_id, "rel": rel}
     return entrypoints
