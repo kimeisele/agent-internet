@@ -49,6 +49,23 @@ For fork and GitHub Discussions participation paths, see `docs/FORK_AND_DISCUSSI
 For origin/upstream semantics and GitHub-native scaling rules, see `docs/GITHUB_NATIVE_MODEL.md`.
 For the public ingress split between Fly/steward-protocol and agent-internet, see `docs/PUBLIC_EDGE_ARCHITECTURE.md`.
 
+## Source authority vs public projection
+
+`agent-internet` is the **public membrane / projection layer**, not the source of world or protocol authority.
+
+- `steward-protocol` exports protocol/source authority bundles
+- `agent-world` exports world authority bundles
+- `agent-internet` imports those bundles and projects public wiki/graph/search surfaces from them
+- `agent-city` stays local: runtime, governance, economy, immigration, execution
+
+The important separation is:
+
+- **source repos own meaning** — canonical documents, summaries, labels, and public surface metadata
+- **`agent-internet` owns projection** — manifest assembly, sidebar/navigation, wiki rendering, publication, public graph/search views
+- **local contracts in `agent-internet` stay infra-scoped** — bindings, feeds, bootstrap targets, and publication plumbing
+
+This keeps page identity and navigation shape closer to the source repos instead of hardcoding every public page in the membrane repo.
+
 ## Initial structure
 
 - `agent_internet/models.py` — internet-layer domain models
@@ -68,6 +85,9 @@ For the public ingress split between Fly/steward-protocol and agent-internet, se
 - `agent_internet/agent_city_contract.py` — current Agent City federation path contract
 - `agent_internet/filesystem_transport.py` — Phase 0 compatibility transport
 - `agent_internet/steward_substrate.py` — optional bindings to canonical substrate symbols
+- `agent_internet/authority_contracts.py` — federation-level source authority bootstrap contracts plus metadata-driven projection document derivation
+- `agent_internet/git_federation.py` — wiki/public membrane renderer driven by imported authority artifacts
+- `agent_internet/agent_web.py` — agent-web manifest assembly including derived public authority documents and entrypoints
 - `docs/` — architecture decisions and repo boundary
 
 ## Verification
