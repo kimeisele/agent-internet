@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -16,6 +17,7 @@ from .authority_contracts import (
 )
 from .agent_city_bridge import AgentCityBridge
 from .assistant_surface import assistant_social_slot_from_snapshot, assistant_space_from_snapshot
+from .federation_descriptor import FederationDescriptor, FederationDescriptorStatus, FederationProjectionIntent
 from .memory_registry import InMemoryCityRegistry
 from .models import (
     AssistantSurfaceSnapshot,
@@ -64,6 +66,77 @@ STEWARD_PUBLIC_WIKI_BINDING_ID = STEWARD_PUBLIC_AUTHORITY_CONTRACT.binding_id
 STEWARD_AUTHORITY_BUNDLE_FEED_ID = STEWARD_PUBLIC_AUTHORITY_CONTRACT.feed_id
 AGENT_WORLD_PUBLIC_WIKI_BINDING_ID = AGENT_WORLD_PUBLIC_AUTHORITY_CONTRACT.binding_id
 AGENT_WORLD_AUTHORITY_BUNDLE_FEED_ID = AGENT_WORLD_PUBLIC_AUTHORITY_CONTRACT.feed_id
+DEFAULT_PUBLIC_AUTHORITY_SOURCE_EXPORTS = (
+    AuthorityExportKind.CANONICAL_SURFACE.value,
+    AuthorityExportKind.PUBLIC_SUMMARY_REGISTRY.value,
+    AuthorityExportKind.SOURCE_SURFACE_REGISTRY.value,
+    AuthorityExportKind.SURFACE_METADATA.value,
+)
+
+
+def _slugify_repo_id(value: str) -> str:
+    lowered = re.sub(r"[^a-z0-9]+", "-", str(value).strip().lower()).strip("-")
+    return lowered or "authority-source"
+
+
+def default_public_authority_binding_id(source_repo_id: str) -> str:
+    return f"{_slugify_repo_id(source_repo_id)}-public-wiki"
+
+
+def default_public_authority_feed_id(source_repo_id: str) -> str:
+    return f"{_slugify_repo_id(source_repo_id)}-authority-bundle"
+
+
+def default_public_authority_owner_boundary(source_repo_id: str) -> str:
+    return f"{_slugify_repo_id(source_repo_id).replace('-', '_')}_surface"
+
+
+def default_public_authority_display_name(source_repo_id: str) -> str:
+    return " ".join(word.capitalize() for word in _slugify_repo_id(source_repo_id).split("-")) or str(source_repo_id)
+
+
+def _binding_ids_for_source_repo(registry: InMemoryCityRegistry, source_repo_id: str) -> tuple[str, ...]:
+    return tuple(
+        binding.binding_id
+        for binding in sorted(registry.list_projection_bindings(), key=lambda item: item.binding_id)
+        if binding.source_repo_id == str(source_repo_id)
+    )
+
+
+def _public_authority_binding_labels(
+    *,
+    source_repo_id: str,
+    display_name: str,
+    owner_boundary: str,
+    public_surface_label: str,
+    descriptor_url: str = "",
+    descriptor_status: str = FederationDescriptorStatus.ACTIVE.value,
+    manifest_url: str = "",
+) -> dict[str, str]:
+    authority_key = _slugify_repo_id(source_repo_id).replace("-", "_")
+    return {
+        "authority_projection": FederationProjectionIntent.PUBLIC_AUTHORITY_PAGE.value,
+        "projection_intent": FederationProjectionIntent.PUBLIC_AUTHORITY_PAGE.value,
+        "authority_key": authority_key,
+        "display_name": str(display_name),
+        "owner_boundary": str(owner_boundary),
+        "public_surface": str(public_surface_label),
+        "descriptor_url": str(descriptor_url),
+        "descriptor_status": str(descriptor_status),
+        "authority_feed_manifest_url": str(manifest_url),
+        "source_repo_id": str(source_repo_id),
+        "auto_registered": "true",
+    }
+
+
+def _resolve_public_authority_target_locator(existing_binding: ProjectionBindingRecord | None, target_locator: str) -> str:
+    desired = str(target_locator or (existing_binding.target_locator if existing_binding is not None else ""))
+    if existing_binding is None:
+        return desired
+    existing_locator = str(existing_binding.target_locator)
+    if existing_locator and existing_locator != desired and "github.com/" not in existing_locator:
+        return existing_locator
+    return desired
 
 
 def _json_sha256(payload: object) -> str:
@@ -319,31 +392,112 @@ class AgentInternetControlPlane:
         now: float | None = None,
     ) -> SourceAuthorityFeedRecord:
         contract = get_public_authority_source_contract_by_repo_id(source_repo_id)
-        if contract is None:
-            contract = default_public_authority_source_contract()
-            if source_repo_id != contract.source_repo_id:
-                raise ValueError(f"unknown_public_authority_source:{source_repo_id}")
-        self._bootstrap_public_wiki_contract(contract=contract, now=now)
-        resolved_feed_id = str(feed_id or contract.feed_id)
+        resolved_source_repo_id = str(contract.source_repo_id if contract is not None else source_repo_id)
+        if contract is not None:
+            self._bootstrap_public_wiki_contract(contract=contract, now=now)
+        resolved_feed_id = str(feed_id or (contract.feed_id if contract is not None else default_public_authority_feed_id(resolved_source_repo_id)))
         existing = self.registry.get_source_authority_feed(resolved_feed_id)
         resolved_locator = str(Path(locator).resolve()) if transport == AuthorityFeedTransport.FILESYSTEM_BUNDLE else str(locator)
+        binding_ids = (
+            _binding_ids_for_source_repo(self.registry, resolved_source_repo_id)
+            or (existing.binding_ids if existing is not None else ())
+            or ((contract.binding_id,) if contract is not None else ())
+        )
         record = SourceAuthorityFeedRecord(
             feed_id=resolved_feed_id,
-            source_repo_id=contract.source_repo_id,
+            source_repo_id=resolved_source_repo_id,
             transport=transport,
             locator=resolved_locator,
-            binding_ids=(contract.binding_id,),
+            binding_ids=binding_ids,
             enabled=(True if existing is None else existing.enabled) if enabled is None else bool(enabled),
             poll_interval_seconds=max(int(poll_interval_seconds), 1),
             labels={
                 "bundle_kind": "source_authority_bundle",
-                "source_repo_id": contract.source_repo_id,
+                "source_repo_id": resolved_source_repo_id,
                 **(dict(existing.labels) if existing is not None else {}),
                 **{str(key): str(value) for key, value in dict(labels or {}).items()},
             },
         )
         self.registry.upsert_source_authority_feed(record)
         return record
+
+    def register_federation_descriptor(
+        self,
+        descriptor: FederationDescriptor,
+        *,
+        descriptor_url: str = "",
+        poll_interval_seconds: int = 300,
+        enabled: bool | None = None,
+        target_locator: str | None = None,
+        now: float | None = None,
+    ) -> dict[str, object]:
+        checked_at = float(time.time() if now is None else now)
+        binding = None
+        publication_status = None
+        feed_enabled = (descriptor.status == FederationDescriptorStatus.ACTIVE) if enabled is None else bool(enabled)
+        if FederationProjectionIntent.PUBLIC_AUTHORITY_PAGE in descriptor.projection_intents:
+            seeded = self._upsert_public_authority_registration(
+                source_repo_id=descriptor.repo_id,
+                binding_id=default_public_authority_binding_id(descriptor.repo_id),
+                display_name=descriptor.display_name,
+                owner_boundary=descriptor.owner_boundary or default_public_authority_owner_boundary(descriptor.repo_id),
+                source_exports=DEFAULT_PUBLIC_AUTHORITY_SOURCE_EXPORTS,
+                public_surface_label=f"{_slugify_repo_id(descriptor.repo_id)}-wiki",
+                target_locator=str(target_locator or STEWARD_PUBLIC_AUTHORITY_CONTRACT.target_locator),
+                binding_labels=_public_authority_binding_labels(
+                    source_repo_id=descriptor.repo_id,
+                    display_name=descriptor.display_name,
+                    owner_boundary=descriptor.owner_boundary or default_public_authority_owner_boundary(descriptor.repo_id),
+                    public_surface_label=f"{_slugify_repo_id(descriptor.repo_id)}-wiki",
+                    descriptor_url=descriptor_url,
+                    descriptor_status=descriptor.status.value,
+                    manifest_url=descriptor.authority_feed_manifest_url,
+                ),
+                now=checked_at,
+            )
+            binding = seeded["binding"]
+            publication_status = seeded["publication_status"]
+        else:
+            existing_source_role = self.registry.get_repo_role(descriptor.repo_id)
+            self.registry.upsert_repo_role(
+                RepoRoleRecord(
+                    repo_id=descriptor.repo_id,
+                    role=RepoRole.NORMATIVE_SOURCE,
+                    owner_boundary=descriptor.owner_boundary or (existing_source_role.owner_boundary if existing_source_role is not None else default_public_authority_owner_boundary(descriptor.repo_id)),
+                    exports=(existing_source_role.exports if existing_source_role is not None else ()),
+                    consumes=(existing_source_role.consumes if existing_source_role is not None else ()),
+                    publication_targets=(existing_source_role.publication_targets if existing_source_role is not None else ()),
+                    labels={
+                        **(dict(existing_source_role.labels) if existing_source_role is not None else {}),
+                        "display_name": descriptor.display_name,
+                        "descriptor_url": descriptor_url,
+                        "descriptor_status": descriptor.status.value,
+                    },
+                ),
+            )
+        feed = self.configure_source_authority_feed(
+            descriptor.repo_id,
+            transport=AuthorityFeedTransport.MANIFEST_URL,
+            locator=descriptor.authority_feed_manifest_url,
+            feed_id=default_public_authority_feed_id(descriptor.repo_id),
+            poll_interval_seconds=poll_interval_seconds,
+            enabled=feed_enabled,
+            labels={
+                "display_name": descriptor.display_name,
+                "descriptor_url": descriptor_url,
+                "descriptor_status": descriptor.status.value,
+                "projection_intents": ",".join(intent.value for intent in descriptor.projection_intents),
+                "authority_feed_manifest_url": descriptor.authority_feed_manifest_url,
+            },
+            now=checked_at,
+        )
+        return {
+            "descriptor": descriptor,
+            "descriptor_url": descriptor_url,
+            "binding": binding,
+            "feed": feed,
+            "publication_status": publication_status,
+        }
 
     def upsert_projection_reconcile_status(self, record: ProjectionReconcileStatusRecord) -> None:
         self.registry.upsert_projection_reconcile_status(record)
@@ -483,25 +637,32 @@ class AgentInternetControlPlane:
         self.registry.upsert_publication_status(status)
         return status
 
-    def _bootstrap_public_wiki_contract(
+    def _upsert_public_authority_registration(
         self,
         *,
-        contract,
+        source_repo_id: str,
+        binding_id: str,
+        display_name: str,
+        owner_boundary: str,
+        source_exports: tuple[str, ...],
+        public_surface_label: str,
+        target_locator: str,
+        binding_labels: dict[str, str] | None = None,
         now: float | None = None,
     ) -> dict[str, object]:
         checked_at = float(time.time() if now is None else now)
-        source_repo_id = contract.source_repo_id
-        binding_id = contract.binding_id
         existing_source_role = self.registry.get_repo_role(source_repo_id)
         source_role = RepoRoleRecord(
             repo_id=source_repo_id,
             role=RepoRole.NORMATIVE_SOURCE,
-            owner_boundary=contract.owner_boundary,
-            exports=tuple(contract.source_exports),
+            owner_boundary=str(owner_boundary or (existing_source_role.owner_boundary if existing_source_role is not None else "")),
+            exports=tuple(source_exports or existing_source_role.exports or DEFAULT_PUBLIC_AUTHORITY_SOURCE_EXPORTS),
+            consumes=(existing_source_role.consumes if existing_source_role is not None else ()),
             publication_targets=_merge_tuple(existing_source_role.publication_targets if existing_source_role is not None else (), binding_id),
             labels={
                 **(dict(existing_source_role.labels) if existing_source_role is not None else {}),
                 "public_surface_owner": AGENT_INTERNET_REPO_ID,
+                "display_name": str(display_name),
             },
         )
         existing_operator_role = self.registry.get_repo_role(AGENT_INTERNET_REPO_ID)
@@ -534,46 +695,74 @@ class AgentInternetControlPlane:
             },
         )
         existing_binding = self.registry.get_projection_binding(binding_id)
-        binding = existing_binding or ProjectionBindingRecord(
+        binding = ProjectionBindingRecord(
             binding_id=binding_id,
             source_repo_id=source_repo_id,
-            required_export_kind=AuthorityExportKind.CANONICAL_SURFACE,
+            required_export_kind=(existing_binding.required_export_kind if existing_binding is not None else AuthorityExportKind.CANONICAL_SURFACE),
             operator_repo_id=AGENT_INTERNET_REPO_ID,
-            target_kind="github_wiki",
-            target_locator=contract.target_locator,
-            projection_mode=ProjectionMode.REQUIRED,
-            failure_policy=ProjectionFailurePolicy.FAIL_CLOSED,
-            freshness_sla_seconds=3600,
-            labels={"public_surface": contract.public_surface_label},
+            target_kind=(existing_binding.target_kind if existing_binding is not None else "github_wiki"),
+            target_locator=_resolve_public_authority_target_locator(existing_binding, str(target_locator)),
+            projection_mode=(existing_binding.projection_mode if existing_binding is not None else ProjectionMode.REQUIRED),
+            failure_policy=(existing_binding.failure_policy if existing_binding is not None else ProjectionFailurePolicy.FAIL_CLOSED),
+            freshness_sla_seconds=(existing_binding.freshness_sla_seconds if existing_binding is not None else 3600),
+            labels={
+                **(dict(existing_binding.labels) if existing_binding is not None else {}),
+                **{str(key): str(value) for key, value in dict(binding_labels or {}).items()},
+            },
         )
         export = self.registry.find_authority_export(binding.source_repo_id, binding.required_export_kind.value)
         existing_status = self.registry.get_publication_status(binding.binding_id)
-        status = existing_status or PublicationStatusRecord(
-            binding_id=binding.binding_id,
-            status=PublicationState.BLOCKED if export is None else PublicationState.STALE,
-            projected_from_export_id="" if export is None else export.export_id,
-            target_kind=binding.target_kind,
-            target_locator=binding.target_locator,
-            checked_at=checked_at,
-            stale=export is not None,
-            failure_reason=(
-                f"missing_authority_export:{binding.source_repo_id}:{binding.required_export_kind.value}"
-                if export is None
-                else "projection_not_published"
-            ),
+        status = (
+            replace(existing_status, target_kind=binding.target_kind, target_locator=binding.target_locator, checked_at=checked_at)
+            if existing_status is not None
+            else PublicationStatusRecord(
+                binding_id=binding.binding_id,
+                status=PublicationState.BLOCKED if export is None else PublicationState.STALE,
+                projected_from_export_id="" if export is None else export.export_id,
+                target_kind=binding.target_kind,
+                target_locator=binding.target_locator,
+                checked_at=checked_at,
+                stale=export is not None,
+                failure_reason=(
+                    f"missing_authority_export:{binding.source_repo_id}:{binding.required_export_kind.value}"
+                    if export is None
+                    else "projection_not_published"
+                ),
+            )
         )
-
         self.registry.upsert_repo_role(source_role)
         self.registry.upsert_repo_role(operator_role)
         self.registry.upsert_projection_binding(binding)
-        if existing_status is None:
-            self.registry.upsert_publication_status(status)
+        self.registry.upsert_publication_status(status)
         return {
             "source_repo_role": source_role,
             "operator_repo_role": operator_role,
             "binding": binding,
             "publication_status": self.registry.get_publication_status(binding.binding_id) or status,
         }
+
+    def _bootstrap_public_wiki_contract(
+        self,
+        *,
+        contract,
+        now: float | None = None,
+    ) -> dict[str, object]:
+        return self._upsert_public_authority_registration(
+            source_repo_id=contract.source_repo_id,
+            binding_id=contract.binding_id,
+            display_name=contract.label,
+            owner_boundary=contract.owner_boundary,
+            source_exports=tuple(contract.source_exports),
+            public_surface_label=contract.public_surface_label,
+            target_locator=contract.target_locator,
+            binding_labels=_public_authority_binding_labels(
+                source_repo_id=contract.source_repo_id,
+                display_name=contract.label,
+                owner_boundary=contract.owner_boundary,
+                public_surface_label=contract.public_surface_label,
+            ),
+            now=now,
+        )
 
     def bootstrap_steward_public_wiki_contract(self, *, now: float | None = None) -> dict[str, object]:
         return self._bootstrap_public_wiki_contract(contract=STEWARD_PUBLIC_AUTHORITY_CONTRACT, now=now)
@@ -651,9 +840,14 @@ class AgentInternetControlPlane:
     ) -> SourceAuthorityFeedRecord:
         contract = get_public_authority_source_contract_by_repo_id(source_repo_id)
         if contract is None:
-            contract = default_public_authority_source_contract()
-            if source_repo_id != contract.source_repo_id:
-                raise ValueError(f"unknown_public_authority_source:{source_repo_id}")
+            return self.configure_source_authority_feed(
+                source_repo_id,
+                transport=AuthorityFeedTransport.FILESYSTEM_BUNDLE,
+                locator=str(bundle_path),
+                feed_id=(feed_id or default_public_authority_feed_id(source_repo_id)),
+                poll_interval_seconds=poll_interval_seconds,
+                now=now,
+            )
         return self._bootstrap_public_wiki_feed(
             contract=contract,
             bundle_path=bundle_path,

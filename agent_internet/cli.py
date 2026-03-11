@@ -24,6 +24,8 @@ from .agent_web_semantic_capabilities import build_agent_web_semantic_capability
 from .agent_web_semantic_consumer import bootstrap_agent_web_semantic_consumer, invoke_agent_web_semantic_consumer
 from .agent_web_semantic_contracts import build_agent_web_semantic_contract_manifest, read_agent_web_semantic_contract_descriptor
 from .authority_feed_sync import sync_source_authority_feed
+from .federation_descriptor import load_federation_descriptor, load_federation_descriptor_seed
+from .github_topic_discovery import discover_federation_descriptors_by_github_topic
 from .agent_web_source_registry import (
     DEFAULT_AGENT_WEB_SOURCE_REGISTRY_PATH,
     build_agent_web_crawl_bootstrap_from_registry,
@@ -158,6 +160,33 @@ def build_parser() -> argparse.ArgumentParser:
     sync_feed.add_argument("--feed-id")
     sync_feed.add_argument("--force", action="store_true")
     sync_feed.add_argument("--now", type=float)
+
+    register_descriptor = subparsers.add_parser(
+        "register-federation-descriptor",
+        help="Register a federation descriptor and create any declared authority feed/binding state",
+    )
+    register_descriptor.add_argument("--state-path", default="data/control_plane/state.json")
+    register_descriptor.add_argument("--descriptor-url", required=True)
+    register_descriptor.add_argument("--poll-interval-seconds", type=int, default=300)
+    register_descriptor.add_argument("--disabled", action="store_true")
+    register_descriptor.add_argument("--now", type=float)
+
+    sync_descriptors = subparsers.add_parser(
+        "sync-federation-descriptors",
+        help="Load federation descriptors from URLs and/or seed lists, register them, and optionally sync their feeds",
+    )
+    sync_descriptors.add_argument("--state-path", default="data/control_plane/state.json")
+    sync_descriptors.add_argument("--descriptor-url", action="append", default=[])
+    sync_descriptors.add_argument("--seed-path", action="append", default=[])
+    sync_descriptors.add_argument("--seed-url", action="append", default=[])
+    sync_descriptors.add_argument("--github-topic", action="append", default=[])
+    sync_descriptors.add_argument("--github-owner")
+    sync_descriptors.add_argument("--github-limit", type=int, default=30)
+    sync_descriptors.add_argument("--poll-interval-seconds", type=int, default=300)
+    sync_descriptors.add_argument("--disabled", action="store_true")
+    sync_descriptors.add_argument("--no-sync-feeds", action="store_true")
+    sync_descriptors.add_argument("--force", action="store_true")
+    sync_descriptors.add_argument("--now", type=float)
 
     feed_pause = subparsers.add_parser("projection-feed-pause", help="Pause a configured source authority feed")
     feed_pause.add_argument("--state-path", default="data/control_plane/state.json")
@@ -897,6 +926,112 @@ def cmd_sync_authority_feed(args: argparse.Namespace) -> int:
             },
         )
     print(json.dumps({"feeds": results}, indent=2))
+    return 0
+
+
+def _collect_federation_descriptor_locators(args: argparse.Namespace) -> list[str]:
+    locators = [str(item) for item in list(getattr(args, "descriptor_url", []) or []) if str(item).strip()]
+    for seed_path in list(getattr(args, "seed_path", []) or []):
+        locators.extend(load_federation_descriptor_seed(seed_path))
+    for seed_url in list(getattr(args, "seed_url", []) or []):
+        locators.extend(load_federation_descriptor_seed(seed_url))
+    for topic in list(getattr(args, "github_topic", []) or []):
+        locators.extend(
+            result.descriptor_url
+            for result in discover_federation_descriptors_by_github_topic(
+                topic=topic,
+                owner=getattr(args, "github_owner", None),
+                limit=getattr(args, "github_limit", 30),
+            )
+        )
+    deduped: list[str] = []
+    for locator in locators:
+        if locator not in deduped:
+            deduped.append(locator)
+    return deduped
+
+
+def _descriptor_registration_payload(result: dict[str, object]) -> dict[str, object]:
+    descriptor = result["descriptor"]
+    binding = result.get("binding")
+    feed = result["feed"]
+    publication_status = result.get("publication_status")
+    return {
+        "descriptor_url": result.get("descriptor_url", ""),
+        "repo_id": descriptor.repo_id,
+        "display_name": descriptor.display_name,
+        "status": descriptor.status.value,
+        "projection_intents": [item.value for item in descriptor.projection_intents],
+        "feed": asdict(feed),
+        "binding": (None if binding is None else asdict(binding)),
+        "publication_status": (None if publication_status is None else asdict(publication_status)),
+    }
+
+
+def _synced_feed_payload(synced) -> dict[str, object]:
+    return {
+        "feed_id": synced.feed.feed_id,
+        "source_repo_id": synced.feed.source_repo_id,
+        "transport": synced.feed.transport.value,
+        "manifest_url": synced.manifest_url,
+        "bundle_path": str(synced.bundle_path),
+        "source_sha": synced.source_sha,
+        "bundle_sha256": synced.bundle_sha256,
+        "changed": synced.changed,
+        "imported": synced.imported,
+    }
+
+
+def cmd_register_federation_descriptor(args: argparse.Namespace) -> int:
+    descriptor, descriptor_url = load_federation_descriptor(args.descriptor_url)
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    result = store.update(
+        lambda plane: plane.register_federation_descriptor(
+            descriptor,
+            descriptor_url=descriptor_url,
+            poll_interval_seconds=args.poll_interval_seconds,
+            enabled=not bool(args.disabled),
+            now=(None if args.now is None else float(args.now)),
+        ),
+    )
+    print(json.dumps(_descriptor_registration_payload(result), indent=2))
+    return 0
+
+
+def cmd_sync_federation_descriptors(args: argparse.Namespace) -> int:
+    locators = _collect_federation_descriptor_locators(args)
+    if not locators:
+        raise SystemExit("sync-federation-descriptors requires at least one --descriptor-url, --seed-path, or --seed-url")
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    registered: list[dict[str, object]] = []
+    feed_ids: list[str] = []
+    for locator in locators:
+        descriptor, descriptor_url = load_federation_descriptor(locator)
+        result = store.update(
+            lambda plane, descriptor=descriptor, descriptor_url=descriptor_url: plane.register_federation_descriptor(
+                descriptor,
+                descriptor_url=descriptor_url,
+                poll_interval_seconds=args.poll_interval_seconds,
+                enabled=not bool(args.disabled),
+                now=(None if args.now is None else float(args.now)),
+            ),
+        )
+        registered.append(_descriptor_registration_payload(result))
+        feed_ids.append(result["feed"].feed_id)
+    synced = []
+    if not args.no_sync_feeds:
+        for feed_id in dict.fromkeys(feed_ids):
+            synced.append(
+                _synced_feed_payload(
+                    sync_source_authority_feed(
+                        store,
+                        feed_id=feed_id,
+                        force=bool(args.force),
+                        now=(None if args.now is None else float(args.now)),
+                    ),
+                ),
+            )
+    print(json.dumps({"registered": registered, "synced": synced}, indent=2))
     return 0
 
 
@@ -2163,6 +2298,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_configure_authority_feed(args)
     if args.command == "sync-authority-feed":
         return cmd_sync_authority_feed(args)
+    if args.command == "register-federation-descriptor":
+        return cmd_register_federation_descriptor(args)
+    if args.command == "sync-federation-descriptors":
+        return cmd_sync_federation_descriptors(args)
     if args.command == "projection-feed-pause":
         return cmd_projection_feed_pause(args)
     if args.command == "projection-feed-resume":

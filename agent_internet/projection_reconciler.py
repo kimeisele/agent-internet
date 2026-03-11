@@ -11,9 +11,9 @@ from .authority_contracts import (
     get_public_authority_source_contract_by_repo_id,
 )
 from .authority_feed_sync import sync_source_authority_feed
-from .control_plane import AgentInternetControlPlane
+from .control_plane import AgentInternetControlPlane, default_public_authority_feed_id
 from .file_locking import locked_file
-from .models import ProjectionReconcileState, ProjectionReconcileStatusRecord, PublicationState, PublicationStatusRecord, SourceAuthorityFeedRecord
+from .models import AuthorityFeedTransport, ProjectionReconcileState, ProjectionReconcileStatusRecord, PublicationState, PublicationStatusRecord, SourceAuthorityFeedRecord
 from .publisher import publish_agent_internet_wiki
 from .snapshot import ControlPlaneStateStore
 
@@ -363,11 +363,27 @@ class ProjectionReconciler:
     ) -> SourceAuthorityFeedRecord:
         if bundle_path is not None:
             resolved_bundle_path = str(Path(bundle_path).resolve())
-            contract = self._resolve_contract(bundle_path=resolved_bundle_path, feed_id=feed_id)
-            return plane.bootstrap_public_wiki_feed_for_repo_id(
-                contract.source_repo_id,
-                bundle_path=resolved_bundle_path,
-                feed_id=contract.feed_id,
+            source_repo_id = self._source_repo_id_from_bundle_path(resolved_bundle_path)
+            if source_repo_id is None and feed_id is not None:
+                existing_feed = plane.registry.get_source_authority_feed(str(feed_id))
+                source_repo_id = None if existing_feed is None else existing_feed.source_repo_id
+            contract = None if source_repo_id is None else get_public_authority_source_contract_by_repo_id(source_repo_id)
+            if contract is not None:
+                return plane.bootstrap_public_wiki_feed_for_repo_id(
+                    contract.source_repo_id,
+                    bundle_path=resolved_bundle_path,
+                    feed_id=(feed_id or contract.feed_id),
+                    poll_interval_seconds=poll_interval_seconds,
+                    now=checked_at,
+                )
+            if source_repo_id is None:
+                contract = self._resolve_contract(bundle_path=resolved_bundle_path, feed_id=feed_id)
+                source_repo_id = contract.source_repo_id
+            return plane.configure_source_authority_feed(
+                source_repo_id,
+                transport=AuthorityFeedTransport.FILESYSTEM_BUNDLE,
+                locator=resolved_bundle_path,
+                feed_id=(str(feed_id) if feed_id is not None else default_public_authority_feed_id(source_repo_id)),
                 poll_interval_seconds=poll_interval_seconds,
                 now=checked_at,
             )
@@ -378,7 +394,21 @@ class ProjectionReconciler:
         return feed
 
     def _default_feed_id(self, *, bundle_path: Path | str, feed_id: str | None) -> str:
+        if feed_id is not None:
+            return str(feed_id)
+        source_repo_id = self._source_repo_id_from_bundle_path(bundle_path)
+        if source_repo_id:
+            return default_public_authority_feed_id(source_repo_id)
         return self._resolve_contract(bundle_path=bundle_path, feed_id=feed_id).feed_id
+
+    def _source_repo_id_from_bundle_path(self, bundle_path: Path | str) -> str | None:
+        try:
+            bundle = json.loads(Path(bundle_path).resolve().read_text())
+        except Exception:
+            return None
+        repo_role = bundle.get("repo_role") if isinstance(bundle, dict) else None
+        repo_id = str(repo_role.get("repo_id", "")) if isinstance(repo_role, dict) else ""
+        return repo_id or None
 
     def _resolve_contract(self, *, bundle_path: Path | str, feed_id: str | None):
         if feed_id:
