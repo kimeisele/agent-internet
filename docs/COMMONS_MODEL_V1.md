@@ -153,6 +153,7 @@ Current lifecycle rule:
 - it may later transition to `released` or `expired`
 - a newer active lease on the same `slot_id` may supersede the prior active lease
 - releasing or expiring a slot lease also degrades the live slot to `dormant` and makes it reclaimable
+- a periodic control-plane sweep may deterministically expire granted claims and active leases whose `expires_at` is in the past
 
 ### Heartbeat coupling
 

@@ -440,6 +440,34 @@ class AgentInternetControlPlane:
             )
         return updated
 
+    def sweep_expired_grants(self, current_time: float | None = None) -> dict[str, object]:
+        checked_at = float(time.time() if current_time is None else current_time)
+        expired_space_claim_ids: list[str] = []
+        for claim in sorted(self.registry.list_space_claims(), key=lambda current: current.claim_id):
+            if claim.status != ClaimStatus.GRANTED:
+                continue
+            if claim.expires_at is None or claim.expires_at >= checked_at:
+                continue
+            self.transition_space_claim(claim_id=claim.claim_id, status=ClaimStatus.EXPIRED, updated_at=checked_at)
+            expired_space_claim_ids.append(claim.claim_id)
+
+        expired_slot_lease_ids: list[str] = []
+        for lease in sorted(self.registry.list_slot_leases(), key=lambda current: current.lease_id):
+            if lease.status != LeaseStatus.ACTIVE:
+                continue
+            if lease.expires_at is None or lease.expires_at >= checked_at:
+                continue
+            self.transition_slot_lease(lease_id=lease.lease_id, status=LeaseStatus.EXPIRED, updated_at=checked_at)
+            expired_slot_lease_ids.append(lease.lease_id)
+
+        return {
+            "checked_at": checked_at,
+            "expired_space_claim_ids": tuple(expired_space_claim_ids),
+            "expired_slot_lease_ids": tuple(expired_slot_lease_ids),
+            "expired_space_claim_count": len(expired_space_claim_ids),
+            "expired_slot_lease_count": len(expired_slot_lease_ids),
+        }
+
     def find_reclaimable_slot(self, *, space_id: str, slot_kind: str = "", now: float | None = None) -> SlotDescriptor | None:
         current = float(time.time() if now is None else now)
         for slot in self.registry.list_slots():
