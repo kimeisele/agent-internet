@@ -1,5 +1,6 @@
 import json
 import subprocess
+import time
 from dataclasses import replace
 from hashlib import sha256
 from urllib.error import HTTPError
@@ -108,6 +109,15 @@ def _request_json(base_url: str, path: str, *, method: str = "GET", token: str =
         request.add_header("Authorization", f"Bearer {token}")
     with urlopen(request, timeout=5) as response:
         return response.status, json.loads(response.read().decode("utf-8"))
+
+
+def _wait_for(predicate, *, timeout: float = 3.0, interval: float = 0.02) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(interval)
+    raise AssertionError("condition_not_met_before_timeout")
 
 
 def test_lotus_daemon_serves_authenticated_http_api(tmp_path):
@@ -1270,6 +1280,104 @@ def test_lotus_daemon_sweeps_expired_grants_http_api(tmp_path):
         assert slots["slots"][0]["reclaimable_since_at"] == 50.0
     finally:
         daemon.shutdown()
+
+
+def test_lotus_daemon_periodic_grant_sweep_is_opt_in(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    overdue = time.time() - 10.0
+    store.update(
+        lambda plane: (
+            plane.upsert_space_claim(
+                SpaceClaimRecord(
+                    claim_id="claim-overdue",
+                    source_intent_id="intent-space-overdue",
+                    subject_id="operator-1",
+                    space_id="space-1",
+                    status=ClaimStatus.GRANTED,
+                    granted_at=overdue - 10.0,
+                    expires_at=overdue,
+                )
+            ),
+            plane.upsert_slot(SlotDescriptor(slot_id="slot-overdue", space_id="space-1", slot_kind="general", holder_subject_id="operator-1", status=SlotStatus.ACTIVE)),
+            plane.upsert_slot_lease(
+                SlotLeaseRecord(
+                    lease_id="lease-overdue",
+                    source_intent_id="intent-slot-overdue",
+                    holder_subject_id="operator-1",
+                    space_id="space-1",
+                    slot_id="slot-overdue",
+                    status=LeaseStatus.ACTIVE,
+                    granted_at=overdue - 9.0,
+                    expires_at=overdue,
+                )
+            ),
+        ),
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        time.sleep(0.15)
+        plane = store.load()
+        assert daemon._grant_sweep_thread is None
+        assert plane.registry.get_space_claim("claim-overdue").status == ClaimStatus.GRANTED
+        assert plane.registry.get_slot_lease("lease-overdue").status == LeaseStatus.ACTIVE
+        assert plane.registry.get_slot("slot-overdue").status == SlotStatus.ACTIVE
+    finally:
+        daemon.shutdown()
+
+
+def test_lotus_daemon_periodic_grant_sweep_expires_due_grants_and_stops_cleanly(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    overdue = time.time() - 10.0
+    store.update(
+        lambda plane: (
+            plane.upsert_space_claim(
+                SpaceClaimRecord(
+                    claim_id="claim-overdue",
+                    source_intent_id="intent-space-overdue",
+                    subject_id="operator-1",
+                    space_id="space-1",
+                    status=ClaimStatus.GRANTED,
+                    granted_at=overdue - 10.0,
+                    expires_at=overdue,
+                )
+            ),
+            plane.upsert_slot(SlotDescriptor(slot_id="slot-overdue", space_id="space-1", slot_kind="general", holder_subject_id="operator-1", status=SlotStatus.ACTIVE)),
+            plane.upsert_slot_lease(
+                SlotLeaseRecord(
+                    lease_id="lease-overdue",
+                    source_intent_id="intent-slot-overdue",
+                    holder_subject_id="operator-1",
+                    space_id="space-1",
+                    slot_id="slot-overdue",
+                    status=LeaseStatus.ACTIVE,
+                    granted_at=overdue - 9.0,
+                    expires_at=overdue,
+                )
+            ),
+        ),
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0, grant_sweep_interval_seconds=0.05)
+    daemon.start_in_thread()
+    sweep_thread = daemon._grant_sweep_thread
+
+    try:
+        assert sweep_thread is not None
+        _wait_for(lambda: store.load().registry.get_space_claim("claim-overdue").status == ClaimStatus.EXPIRED)
+        plane = store.load()
+        assert plane.registry.get_slot_lease("lease-overdue").status == LeaseStatus.EXPIRED
+        slot = plane.registry.get_slot("slot-overdue")
+        assert slot is not None
+        assert slot.status == SlotStatus.DORMANT
+        assert slot.reclaimable_since_at is not None
+    finally:
+        daemon.shutdown()
+
+    assert sweep_thread is not None
+    sweep_thread.join(timeout=1.0)
+    assert not sweep_thread.is_alive()
+    assert daemon._grant_sweep_thread is None
 
 
 def test_lotus_daemon_transitions_intents_http_api(tmp_path):

@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Thread
+from threading import Event, Thread
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from .lotus_api import LOTUS_MUTATING_ACTIONS, LotusApiScope, LotusControlPlaneAPI
 from .projection_reconciler import ProjectionReconciler
 from .snapshot import ControlPlaneStateStore
+
+
+logger = logging.getLogger(__name__)
 
 
 class _LotusThreadingHTTPServer(ThreadingHTTPServer):
@@ -51,15 +56,20 @@ class LotusApiDaemon:
     state_path: Path
     host: str = "127.0.0.1"
     port: int = 8788
+    grant_sweep_interval_seconds: float = 0.0
     _httpd: _LotusThreadingHTTPServer | None = field(default=None, init=False, repr=False)
     _thread: Thread | None = field(default=None, init=False, repr=False)
+    _grant_sweep_thread: Thread | None = field(default=None, init=False, repr=False)
+    _stop_event: Event = field(default_factory=Event, init=False, repr=False)
 
     def start(self) -> None:
         if self._httpd is not None:
             return
+        self._stop_event.clear()
         httpd = _LotusThreadingHTTPServer((self.host, self.port), _LotusRequestHandler)
         httpd.lotus_daemon = self  # type: ignore[attr-defined]
         self._httpd = httpd
+        self._start_background_workers()
 
     def serve_forever(self) -> None:
         self.start()
@@ -77,12 +87,16 @@ class LotusApiDaemon:
     def shutdown(self) -> None:
         if self._httpd is None:
             return
+        self._stop_event.set()
         self._httpd.shutdown()
         self._httpd.server_close()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
+        if self._grant_sweep_thread is not None:
+            self._grant_sweep_thread.join(timeout=2.0)
         self._httpd = None
         self._thread = None
+        self._grant_sweep_thread = None
 
     @property
     def address(self) -> tuple[str, int]:
@@ -95,6 +109,36 @@ class LotusApiDaemon:
     def base_url(self) -> str:
         host, port = self.address
         return f"http://{host}:{port}"
+
+    def _start_background_workers(self) -> None:
+        if self.grant_sweep_interval_seconds <= 0:
+            return
+        if self._grant_sweep_thread is None or not self._grant_sweep_thread.is_alive():
+            self._grant_sweep_thread = Thread(target=self._run_periodic_grant_sweep_loop, daemon=True)
+            self._grant_sweep_thread.start()
+
+    def _run_periodic_grant_sweep_once(self, current_time: float | None = None) -> dict[str, object]:
+        summary = ControlPlaneStateStore(path=self.state_path).update(
+            lambda plane: plane.sweep_expired_grants(current_time=current_time),
+        )
+        if summary["expired_space_claim_count"] or summary["expired_slot_lease_count"]:
+            logger.info(
+                "Lotus daemon expired grant sweep checked_at=%s claims=%s leases=%s",
+                summary["checked_at"],
+                summary["expired_space_claim_count"],
+                summary["expired_slot_lease_count"],
+            )
+        return summary
+
+    def _run_periodic_grant_sweep_loop(self) -> None:
+        interval = float(self.grant_sweep_interval_seconds)
+        while not self._stop_event.is_set():
+            try:
+                self._run_periodic_grant_sweep_once(current_time=time.time())
+            except Exception:
+                logger.exception("Lotus daemon periodic grant sweep failed")
+            if self._stop_event.wait(interval):
+                break
 
     def dispatch(self, *, method: str, raw_path: str, authorization: str, body: bytes) -> tuple[int, dict]:
         split = urlsplit(raw_path)
