@@ -116,6 +116,10 @@ class LotusApiDaemon:
                 return 200, self._call(token, "list_spaces", {})
             if method == "GET" and path == "/v1/lotus/slots":
                 return 200, self._call(token, "list_slots", {})
+            if method == "GET" and path == "/v1/lotus/space-claims":
+                return 200, self._call(token, "list_space_claims", {})
+            if method == "GET" and path == "/v1/lotus/slot-leases":
+                return 200, self._call(token, "list_slot_leases", {})
             if method == "GET" and path == "/v1/lotus/repo-roles":
                 return 200, self._call(token, "list_repo_roles", {})
             if method == "GET" and path == "/v1/lotus/authority-exports":

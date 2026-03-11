@@ -13,11 +13,17 @@ from enum import StrEnum
 from secrets import token_hex
 
 from .models import (
+    ClaimStatus,
     ForkLineageRecord,
     ForkMode,
     IntentRecord,
     IntentStatus,
     IntentType,
+    LeaseStatus,
+    SlotLeaseRecord,
+    SlotDescriptor,
+    SlotStatus,
+    SpaceClaimRecord,
     SpaceDescriptor,
     SpaceKind,
     UpstreamSyncPolicy,
@@ -85,6 +91,7 @@ class SpaceClaimActuator(IntentActuator):
             )
 
         plane = context.control_plane
+        now = float(intent.updated_at or intent.created_at or time.time())
         space_id = intent.space_id or f"space_{token_hex(6)}"
         space = SpaceDescriptor(
             space_id=space_id,
@@ -98,13 +105,27 @@ class SpaceClaimActuator(IntentActuator):
 
         if not context.dry_run:
             plane.upsert_space(space)
+            plane.upsert_space_claim(
+                SpaceClaimRecord(
+                    claim_id=f"claim:{intent.intent_id}",
+                    source_intent_id=intent.intent_id,
+                    subject_id=intent.requested_by_subject_id,
+                    space_id=space_id,
+                    claim_type=intent.labels.get("claim_type", "space_claim"),
+                    status=ClaimStatus.GRANTED,
+                    requested_at=intent.created_at,
+                    granted_at=now,
+                    expires_at=_float_label(intent.labels, "claim_expires_at"),
+                    labels=dict(intent.labels),
+                )
+            )
             logger.info("Claimed space %s for intent %s", space_id, intent.intent_id)
 
         return ActuationOutcome(
             intent_id=intent.intent_id,
             result=ActuatorResult.SUCCESS,
             detail=f"Space {space_id} claimed",
-            artifacts={"space_id": space_id},
+            artifacts={"space_id": space_id, "claim_id": f"claim:{intent.intent_id}"},
         )
 
 
@@ -273,8 +294,6 @@ class SlotRequestActuator(IntentActuator):
                 detail="No control plane in context",
             )
 
-        from .models import SlotDescriptor, SlotStatus
-
         plane = context.control_plane
         slot_kind = intent.labels.get("slot_kind", "general")
         now = float(intent.updated_at or intent.created_at or time.time())
@@ -310,14 +329,38 @@ class SlotRequestActuator(IntentActuator):
 
         if not context.dry_run:
             plane.upsert_slot(slot)
+            plane.upsert_slot_lease(
+                SlotLeaseRecord(
+                    lease_id=f"lease:{intent.intent_id}",
+                    source_intent_id=intent.intent_id,
+                    holder_subject_id=intent.requested_by_subject_id,
+                    space_id=intent.space_id,
+                    slot_id=slot_id,
+                    status=LeaseStatus.ACTIVE,
+                    granted_at=now,
+                    expires_at=_float_label(intent.labels, "lease_expires_at"),
+                    reclaimable_since_at=slot.reclaimable_since_at,
+                    labels={**dict(intent.labels), "reclaimed": str(artifacts["reclaimed"]).lower()},
+                )
+            )
             logger.info("%s for intent %s", detail, intent.intent_id)
 
         return ActuationOutcome(
             intent_id=intent.intent_id,
             result=ActuatorResult.SUCCESS,
             detail=detail,
-            artifacts=artifacts,
+            artifacts={**artifacts, "lease_id": f"lease:{intent.intent_id}"},
         )
+
+
+def _float_label(labels: dict[str, str], key: str) -> float | None:
+    raw = labels.get(key)
+    if raw in (None, ""):
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
 
 
 @dataclass(slots=True)

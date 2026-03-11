@@ -7,6 +7,7 @@ from .models import (
     AuthorityArtifactRecord,
     AuthorityExportRecord,
     SlotDescriptor,
+    SlotLeaseRecord,
     CityEndpoint,
     CityIdentity,
     CityPresence,
@@ -23,6 +24,7 @@ from .models import (
     PublicationStatusRecord,
     RepoRoleRecord,
     SourceAuthorityFeedRecord,
+    SpaceClaimRecord,
     SpaceDescriptor,
 )
 
@@ -71,6 +73,8 @@ class InMemoryCityRegistry:
     _api_token_hash_index: dict[str, str] = field(default_factory=dict)
     _spaces: dict[str, SpaceDescriptor] = field(default_factory=dict)
     _slots: dict[str, SlotDescriptor] = field(default_factory=dict)
+    _space_claims: dict[str, SpaceClaimRecord] = field(default_factory=dict)
+    _slot_leases: dict[str, SlotLeaseRecord] = field(default_factory=dict)
     _fork_lineage: dict[str, ForkLineageRecord] = field(default_factory=dict)
     _intents: dict[str, IntentRecord] = field(default_factory=dict)
     _repo_roles: dict[str, RepoRoleRecord] = field(default_factory=dict)
@@ -245,6 +249,24 @@ class InMemoryCityRegistry:
 
     def list_slots(self) -> list[SlotDescriptor]:
         return [self._slots[slot_id] for slot_id in sorted(self._slots)]
+
+    def upsert_space_claim(self, claim: SpaceClaimRecord) -> None:
+        self._space_claims[claim.claim_id] = claim
+
+    def get_space_claim(self, claim_id: str) -> SpaceClaimRecord | None:
+        return self._space_claims.get(claim_id)
+
+    def list_space_claims(self) -> list[SpaceClaimRecord]:
+        return [self._space_claims[claim_id] for claim_id in sorted(self._space_claims)]
+
+    def upsert_slot_lease(self, lease: SlotLeaseRecord) -> None:
+        self._slot_leases[lease.lease_id] = lease
+
+    def get_slot_lease(self, lease_id: str) -> SlotLeaseRecord | None:
+        return self._slot_leases.get(lease_id)
+
+    def list_slot_leases(self) -> list[SlotLeaseRecord]:
+        return [self._slot_leases[lease_id] for lease_id in sorted(self._slot_leases)]
 
     def upsert_fork_lineage(self, lineage: ForkLineageRecord) -> None:
         self._fork_lineage[lineage.lineage_id] = lineage

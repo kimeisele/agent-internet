@@ -4,6 +4,7 @@ import threading
 from pathlib import Path
 
 from agent_internet.models import (
+    ClaimStatus,
     CityEndpoint,
     CityIdentity,
     CityPresence,
@@ -14,11 +15,14 @@ from agent_internet.models import (
     IntentRecord,
     IntentStatus,
     IntentType,
+    LeaseStatus,
     LotusApiToken,
     LotusRoute,
     LotusServiceAddress,
     SlotDescriptor,
+    SlotLeaseRecord,
     SlotStatus,
+    SpaceClaimRecord,
     SpaceDescriptor,
     SpaceKind,
 )
@@ -184,6 +188,40 @@ def test_intent():
     reg.upsert_intent(intent)
     assert reg.get_intent("i-1") is not None
     assert len(reg.list_intents()) == 1
+
+
+def test_space_claim_and_slot_lease():
+    reg = SqliteCityRegistry()
+    claim = SpaceClaimRecord(
+        claim_id="claim-1",
+        source_intent_id="intent-1",
+        subject_id="operator-1",
+        space_id="space-1",
+        status=ClaimStatus.GRANTED,
+        granted_at=20.0,
+    )
+    reg.upsert_space_claim(claim)
+    stored_claim = reg.get_space_claim("claim-1")
+    assert stored_claim is not None
+    assert stored_claim.source_intent_id == "intent-1"
+    assert len(reg.list_space_claims()) == 1
+
+    lease = SlotLeaseRecord(
+        lease_id="lease-1",
+        source_intent_id="intent-2",
+        holder_subject_id="operator-1",
+        space_id="space-1",
+        slot_id="slot-1",
+        status=LeaseStatus.ACTIVE,
+        granted_at=21.0,
+        reclaimable_since_at=42.0,
+    )
+    reg.upsert_slot_lease(lease)
+    stored_lease = reg.get_slot_lease("lease-1")
+    assert stored_lease is not None
+    assert stored_lease.slot_id == "slot-1"
+    assert stored_lease.reclaimable_since_at == 42.0
+    assert len(reg.list_slot_leases()) == 1
 
 
 def test_presence():

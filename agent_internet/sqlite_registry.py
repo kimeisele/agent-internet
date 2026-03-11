@@ -16,6 +16,7 @@ import threading
 from dataclasses import dataclass, field
 
 from .models import (
+    ClaimStatus,
     CityEndpoint,
     CityIdentity,
     CityPresence,
@@ -27,13 +28,16 @@ from .models import (
     IntentRecord,
     IntentStatus,
     IntentType,
+    LeaseStatus,
     LotusApiToken,
     LotusLinkAddress,
     LotusNetworkAddress,
     LotusRoute,
     LotusServiceAddress,
     SlotDescriptor,
+    SlotLeaseRecord,
     SlotStatus,
+    SpaceClaimRecord,
     SpaceDescriptor,
     SpaceKind,
     UpstreamSyncPolicy,
@@ -161,6 +165,33 @@ CREATE TABLE IF NOT EXISTS slots (
     heartbeat INTEGER,
     last_seen_at REAL,
     lease_expires_at REAL,
+    reclaimable_since_at REAL,
+    labels TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS space_claims (
+    claim_id TEXT PRIMARY KEY,
+    source_intent_id TEXT NOT NULL DEFAULT '',
+    subject_id TEXT NOT NULL DEFAULT '',
+    space_id TEXT NOT NULL DEFAULT '',
+    slot_id TEXT NOT NULL DEFAULT '',
+    claim_type TEXT NOT NULL DEFAULT 'space_claim',
+    status TEXT NOT NULL DEFAULT 'granted',
+    requested_at REAL,
+    granted_at REAL,
+    expires_at REAL,
+    labels TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS slot_leases (
+    lease_id TEXT PRIMARY KEY,
+    source_intent_id TEXT NOT NULL DEFAULT '',
+    holder_subject_id TEXT NOT NULL DEFAULT '',
+    space_id TEXT NOT NULL DEFAULT '',
+    slot_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    granted_at REAL,
+    expires_at REAL,
     reclaimable_since_at REAL,
     labels TEXT NOT NULL DEFAULT '{}'
 );
@@ -570,6 +601,58 @@ class SqliteCityRegistry:
             holder_subject_id=row["holder_subject_id"], status=SlotStatus(row["status"]),
             capacity=row["capacity"], heartbeat_source=row["heartbeat_source"],
             heartbeat=row["heartbeat"], last_seen_at=row["last_seen_at"], lease_expires_at=row["lease_expires_at"], reclaimable_since_at=row["reclaimable_since_at"], labels=json.loads(row["labels"]),
+        )
+
+    # --- Space claims ---
+
+    def upsert_space_claim(self, claim: SpaceClaimRecord) -> None:
+        self._execute_write(
+            "INSERT OR REPLACE INTO space_claims (claim_id, source_intent_id, subject_id, space_id, slot_id, claim_type, status, requested_at, granted_at, expires_at, labels) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (claim.claim_id, claim.source_intent_id, claim.subject_id, claim.space_id, claim.slot_id, claim.claim_type, claim.status.value, claim.requested_at, claim.granted_at, claim.expires_at, json.dumps(claim.labels)),
+        )
+
+    def get_space_claim(self, claim_id: str) -> SpaceClaimRecord | None:
+        row = self._execute_read_one("SELECT * FROM space_claims WHERE claim_id = ?", (claim_id,))
+        if row is None:
+            return None
+        return self._row_to_space_claim(row)
+
+    def list_space_claims(self) -> list[SpaceClaimRecord]:
+        rows = self._execute_read("SELECT * FROM space_claims ORDER BY claim_id")
+        return [self._row_to_space_claim(r) for r in rows]
+
+    @staticmethod
+    def _row_to_space_claim(row: sqlite3.Row) -> SpaceClaimRecord:
+        return SpaceClaimRecord(
+            claim_id=row["claim_id"], source_intent_id=row["source_intent_id"], subject_id=row["subject_id"],
+            space_id=row["space_id"], slot_id=row["slot_id"], claim_type=row["claim_type"], status=ClaimStatus(row["status"]),
+            requested_at=row["requested_at"], granted_at=row["granted_at"], expires_at=row["expires_at"], labels=json.loads(row["labels"]),
+        )
+
+    # --- Slot leases ---
+
+    def upsert_slot_lease(self, lease: SlotLeaseRecord) -> None:
+        self._execute_write(
+            "INSERT OR REPLACE INTO slot_leases (lease_id, source_intent_id, holder_subject_id, space_id, slot_id, status, granted_at, expires_at, reclaimable_since_at, labels) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (lease.lease_id, lease.source_intent_id, lease.holder_subject_id, lease.space_id, lease.slot_id, lease.status.value, lease.granted_at, lease.expires_at, lease.reclaimable_since_at, json.dumps(lease.labels)),
+        )
+
+    def get_slot_lease(self, lease_id: str) -> SlotLeaseRecord | None:
+        row = self._execute_read_one("SELECT * FROM slot_leases WHERE lease_id = ?", (lease_id,))
+        if row is None:
+            return None
+        return self._row_to_slot_lease(row)
+
+    def list_slot_leases(self) -> list[SlotLeaseRecord]:
+        rows = self._execute_read("SELECT * FROM slot_leases ORDER BY lease_id")
+        return [self._row_to_slot_lease(r) for r in rows]
+
+    @staticmethod
+    def _row_to_slot_lease(row: sqlite3.Row) -> SlotLeaseRecord:
+        return SlotLeaseRecord(
+            lease_id=row["lease_id"], source_intent_id=row["source_intent_id"], holder_subject_id=row["holder_subject_id"],
+            space_id=row["space_id"], slot_id=row["slot_id"], status=LeaseStatus(row["status"]), granted_at=row["granted_at"],
+            expires_at=row["expires_at"], reclaimable_since_at=row["reclaimable_since_at"], labels=json.loads(row["labels"]),
         )
 
     # --- Fork lineage ---

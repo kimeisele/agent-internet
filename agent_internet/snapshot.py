@@ -11,7 +11,9 @@ from .models import (
     AuthorityArtifactRecord,
     AuthorityExportKind,
     AuthorityExportRecord,
+    ClaimStatus,
     SlotDescriptor,
+    SlotLeaseRecord,
     CityEndpoint,
     CityIdentity,
     CityPresence,
@@ -23,6 +25,7 @@ from .models import (
     IntentRecord,
     IntentStatus,
     IntentType,
+    LeaseStatus,
     LotusApiToken,
     LotusLinkAddress,
     LotusNetworkAddress,
@@ -38,6 +41,7 @@ from .models import (
     RepoRole,
     RepoRoleRecord,
     SourceAuthorityFeedRecord,
+    SpaceClaimRecord,
     SlotStatus,
     SpaceDescriptor,
     SpaceKind,
@@ -62,6 +66,8 @@ def snapshot_control_plane(plane: AgentInternetControlPlane) -> dict:
         "api_tokens": [asdict(token) for token in plane.registry.list_api_tokens()],
         "spaces": [asdict(space) for space in plane.registry.list_spaces()],
         "slots": [asdict(slot) for slot in plane.registry.list_slots()],
+        "space_claims": [asdict(claim) for claim in plane.registry.list_space_claims()],
+        "slot_leases": [asdict(lease) for lease in plane.registry.list_slot_leases()],
         "fork_lineage": [asdict(lineage) for lineage in plane.registry.list_fork_lineage()],
         "intents": [asdict(intent) for intent in plane.registry.list_intents()],
         "repo_roles": [asdict(record) for record in plane.registry.list_repo_roles()],
@@ -182,6 +188,37 @@ def restore_control_plane(payload: dict) -> AgentInternetControlPlane:
                 reclaimable_since_at=data.get("reclaimable_since_at"),
                 labels=dict(data.get("labels", {})),
             ),
+        )
+    for data in payload.get("space_claims", []):
+        plane.registry.upsert_space_claim(
+            SpaceClaimRecord(
+                claim_id=data["claim_id"],
+                source_intent_id=data.get("source_intent_id", ""),
+                subject_id=data.get("subject_id", ""),
+                space_id=data.get("space_id", ""),
+                slot_id=data.get("slot_id", ""),
+                claim_type=data.get("claim_type", "space_claim"),
+                status=ClaimStatus(data.get("status", ClaimStatus.GRANTED.value)),
+                requested_at=data.get("requested_at"),
+                granted_at=data.get("granted_at"),
+                expires_at=data.get("expires_at"),
+                labels=dict(data.get("labels", {})),
+            )
+        )
+    for data in payload.get("slot_leases", []):
+        plane.registry.upsert_slot_lease(
+            SlotLeaseRecord(
+                lease_id=data["lease_id"],
+                source_intent_id=data.get("source_intent_id", ""),
+                holder_subject_id=data.get("holder_subject_id", ""),
+                space_id=data.get("space_id", ""),
+                slot_id=data.get("slot_id", ""),
+                status=LeaseStatus(data.get("status", LeaseStatus.ACTIVE.value)),
+                granted_at=data.get("granted_at"),
+                expires_at=data.get("expires_at"),
+                reclaimable_since_at=data.get("reclaimable_since_at"),
+                labels=dict(data.get("labels", {})),
+            )
         )
     for data in payload.get("fork_lineage", []):
         plane.registry.upsert_fork_lineage(

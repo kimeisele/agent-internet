@@ -108,31 +108,35 @@ Fields:
 - `reclaimable_since_at`
 - `labels`
 
-#### `SpaceClaim`
-A request to occupy or control a space or slot.
+#### `SpaceClaimRecord`
+A typed granted claim trail derived from a fulfilled claim intent.
 
 Fields:
 - `claim_id`
+- `source_intent_id`
 - `subject_id`
 - `space_id`
 - `slot_id`
 - `claim_type`
-- `reason`
 - `status`
 - `requested_at`
+- `granted_at`
 - `expires_at`
+- `labels`
 
-#### `SlotLease`
-A time-bounded granted occupancy.
+#### `SlotLeaseRecord`
+A typed granted slot occupancy trail derived from a fulfilled slot intent.
 
 Fields:
 - `lease_id`
-- `holder_id`
+- `source_intent_id`
+- `holder_subject_id`
 - `space_id`
 - `slot_id`
+- `status`
 - `granted_at`
 - `expires_at`
-- `renewable`
+- `reclaimable_since_at`
 - `labels`
 
 ### Heartbeat coupling
@@ -190,9 +194,9 @@ surfaces. See `docs/FORK_AND_DISCUSSIONS_BOUNDARY.md`.
 
 The first code slice for this model should stay small:
 
-1. define dataclasses for `SpaceDescriptor`, `SlotDescriptor`, `SpaceClaim`,
-   and `SlotLease` in `agent-internet`
-2. add a registry surface for listing spaces and slots
-3. attach optional `heartbeat_source` metadata
+1. define dataclasses for `SpaceDescriptor`, `SlotDescriptor`, `SpaceClaimRecord`,
+   and `SlotLeaseRecord` in `agent-internet`
+2. persist them through the registry / snapshot / sqlite surfaces
+3. derive granted claim/lease records from fulfilled intents
 4. do **not** add automatic git import/export of live services or routes yet
 
