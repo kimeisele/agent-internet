@@ -566,9 +566,9 @@ class LotusApiDaemon:
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             message = str(exc)
-            return (404 if message.startswith("unknown_") else 400), _error_payload(
+            return (409 if message.startswith("idempotency_conflict:") else 404 if message.startswith("unknown_") else 400), _error_payload(
                 message,
-                error_kind=("not_found" if message.startswith("unknown_") else "input"),
+                error_kind=("conflict" if message.startswith("idempotency_conflict:") else "not_found" if message.startswith("unknown_") else "input"),
                 recoverable=True,
                 retryable=False,
             )

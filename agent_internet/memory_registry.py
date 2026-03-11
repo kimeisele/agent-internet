@@ -17,6 +17,7 @@ from .models import (
     LotusApiToken,
     LotusLinkAddress,
     LotusNetworkAddress,
+    OperationReceiptRecord,
     LotusRoute,
     LotusServiceAddress,
     ProjectionBindingRecord,
@@ -77,6 +78,8 @@ class InMemoryCityRegistry:
     _slot_leases: dict[str, SlotLeaseRecord] = field(default_factory=dict)
     _fork_lineage: dict[str, ForkLineageRecord] = field(default_factory=dict)
     _intents: dict[str, IntentRecord] = field(default_factory=dict)
+    _operation_receipts: dict[str, OperationReceiptRecord] = field(default_factory=dict)
+    _operation_receipt_request_index: dict[tuple[str, str, str], str] = field(default_factory=dict)
     _repo_roles: dict[str, RepoRoleRecord] = field(default_factory=dict)
     _authority_exports: dict[str, AuthorityExportRecord] = field(default_factory=dict)
     _authority_artifacts: dict[str, AuthorityArtifactRecord] = field(default_factory=dict)
@@ -285,6 +288,19 @@ class InMemoryCityRegistry:
 
     def list_intents(self) -> list[IntentRecord]:
         return [self._intents[intent_id] for intent_id in sorted(self._intents)]
+
+    def upsert_operation_receipt(self, receipt: OperationReceiptRecord) -> None:
+        self._operation_receipts[receipt.operation_id] = receipt
+        self._operation_receipt_request_index[(receipt.action, receipt.operator_subject, receipt.request_id)] = receipt.operation_id
+
+    def get_operation_receipt(self, *, action: str, operator_subject: str, request_id: str) -> OperationReceiptRecord | None:
+        operation_id = self._operation_receipt_request_index.get((action, operator_subject, request_id))
+        if operation_id is None:
+            return None
+        return self._operation_receipts.get(operation_id)
+
+    def list_operation_receipts(self) -> list[OperationReceiptRecord]:
+        return [self._operation_receipts[operation_id] for operation_id in sorted(self._operation_receipts)]
 
     def upsert_repo_role(self, record: RepoRoleRecord) -> None:
         self._repo_roles[record.repo_id] = record

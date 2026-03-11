@@ -32,6 +32,7 @@ from .models import (
     LotusApiToken,
     LotusLinkAddress,
     LotusNetworkAddress,
+    OperationReceiptRecord,
     LotusRoute,
     LotusServiceAddress,
     SlotDescriptor,
@@ -140,6 +141,20 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     revoked_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_token_hash ON api_tokens(token_sha256);
+
+CREATE TABLE IF NOT EXISTS operation_receipts (
+    operation_id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    operator_subject TEXT NOT NULL,
+    request_sha256 TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'applied',
+    response_payload TEXT NOT NULL DEFAULT '{}',
+    created_at REAL,
+    last_replayed_at REAL,
+    replay_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_operation_receipt_request ON operation_receipts(action, operator_subject, request_id);
 
 CREATE TABLE IF NOT EXISTS spaces (
     space_id TEXT PRIMARY KEY,
@@ -560,6 +575,53 @@ class SqliteCityRegistry:
             token_id=row["token_id"], subject=row["subject"], token_hint=row["token_hint"],
             token_sha256=row["token_sha256"], scopes=tuple(json.loads(row["scopes"])),
             issued_at=row["issued_at"], revoked_at=row["revoked_at"],
+        )
+
+    # --- Operation receipts ---
+
+    def upsert_operation_receipt(self, receipt: OperationReceiptRecord) -> None:
+        self._execute_write(
+            "INSERT OR REPLACE INTO operation_receipts (operation_id, request_id, action, operator_subject, request_sha256, status, response_payload, created_at, last_replayed_at, replay_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                receipt.operation_id,
+                receipt.request_id,
+                receipt.action,
+                receipt.operator_subject,
+                receipt.request_sha256,
+                receipt.status,
+                json.dumps(receipt.response_payload, sort_keys=True),
+                receipt.created_at,
+                receipt.last_replayed_at,
+                receipt.replay_count,
+            ),
+        )
+
+    def get_operation_receipt(self, *, action: str, operator_subject: str, request_id: str) -> OperationReceiptRecord | None:
+        row = self._execute_read_one(
+            "SELECT * FROM operation_receipts WHERE action = ? AND operator_subject = ? AND request_id = ?",
+            (action, operator_subject, request_id),
+        )
+        if row is None:
+            return None
+        return self._row_to_operation_receipt(row)
+
+    def list_operation_receipts(self) -> list[OperationReceiptRecord]:
+        rows = self._execute_read("SELECT * FROM operation_receipts ORDER BY operation_id")
+        return [self._row_to_operation_receipt(r) for r in rows]
+
+    @staticmethod
+    def _row_to_operation_receipt(row: sqlite3.Row) -> OperationReceiptRecord:
+        return OperationReceiptRecord(
+            operation_id=row["operation_id"],
+            request_id=row["request_id"],
+            action=row["action"],
+            operator_subject=row["operator_subject"],
+            request_sha256=row["request_sha256"],
+            status=row["status"],
+            response_payload=dict(json.loads(row["response_payload"])),
+            created_at=row["created_at"],
+            last_replayed_at=row["last_replayed_at"],
+            replay_count=row["replay_count"],
         )
 
     # --- Spaces ---

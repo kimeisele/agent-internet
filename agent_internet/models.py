@@ -255,6 +255,20 @@ class LotusApiToken:
 
 
 @dataclass(frozen=True, slots=True)
+class OperationReceiptRecord:
+    operation_id: str
+    request_id: str
+    action: str
+    operator_subject: str
+    request_sha256: str
+    status: str = "applied"
+    response_payload: dict[str, object] = field(default_factory=dict)
+    created_at: float | None = None
+    last_replayed_at: float | None = None
+    replay_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class CityPresence:
     city_id: str
     health: HealthStatus = HealthStatus.UNKNOWN

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 from .agent_web import build_agent_web_manifest_for_plane
 from .agent_web_crawl import build_agent_web_crawl_bootstrap_for_plane, search_agent_web_crawl_bootstrap
@@ -37,7 +38,7 @@ from .agent_web_wordnet_bridge import load_agent_web_wordnet_bridge
 from .assistant_surface import assistant_surface_snapshot_from_repo_root
 from .control_plane import AgentInternetControlPlane
 from .lotus_capabilities import build_lotus_capability_manifest
-from .models import ClaimStatus, EndpointVisibility, IntentRecord, IntentStatus, IntentType, LeaseStatus, LotusApiScope, LotusApiToken
+from .models import ClaimStatus, EndpointVisibility, IntentRecord, IntentStatus, IntentType, LeaseStatus, LotusApiScope, LotusApiToken, OperationReceiptRecord
 from .snapshot import snapshot_control_plane
 from .steward_protocol_compat import summarize_steward_protocol_bindings
 
@@ -67,6 +68,8 @@ LOTUS_MUTATING_ACTIONS = frozenset(
     },
 )
 
+_IDEMPOTENCY_EPHEMERAL_KEYS = frozenset({"request_id", "idempotency_key", "now"})
+
 
 def _serialize_lotus_route(route: dict) -> dict:
     payload = dict(route)
@@ -88,6 +91,67 @@ class IssuedLotusApiToken:
 @dataclass(slots=True)
 class LotusControlPlaneAPI:
     plane: AgentInternetControlPlane
+
+    def _with_operation_receipt(self, *, action: str, token: LotusApiToken, payload: dict, executor) -> dict:
+        request_id = self._request_id(payload)
+        if not request_id:
+            return executor()
+        request_sha256 = self._request_sha256(action=action, payload=payload)
+        existing = self.plane.registry.get_operation_receipt(
+            action=action,
+            operator_subject=token.subject,
+            request_id=request_id,
+        )
+        if existing is not None:
+            if existing.request_sha256 != request_sha256:
+                raise ValueError(f"idempotency_conflict:{action}:{request_id}")
+            replayed = replace(
+                existing,
+                last_replayed_at=float(time.time() if payload.get("now") is None else payload["now"]),
+                replay_count=existing.replay_count + 1,
+            )
+            self.plane.registry.upsert_operation_receipt(replayed)
+            response = dict(replayed.response_payload)
+            response["receipt"] = self._receipt_payload(replayed, replayed_request=True)
+            return response
+        applied = executor()
+        receipt = OperationReceiptRecord(
+            operation_id=f"op_{secrets.token_urlsafe(12)}",
+            request_id=request_id,
+            action=action,
+            operator_subject=token.subject,
+            request_sha256=request_sha256,
+            response_payload=dict(applied),
+            created_at=float(time.time() if payload.get("now") is None else payload["now"]),
+        )
+        self.plane.registry.upsert_operation_receipt(receipt)
+        response = dict(applied)
+        response["receipt"] = self._receipt_payload(receipt, replayed_request=False)
+        return response
+
+    @staticmethod
+    def _request_id(payload: dict) -> str:
+        return str(payload.get("request_id") or payload.get("idempotency_key") or "").strip()
+
+    @staticmethod
+    def _request_sha256(*, action: str, payload: dict) -> str:
+        normalized = {key: value for key, value in payload.items() if key not in _IDEMPOTENCY_EPHEMERAL_KEYS}
+        return _sha256_hex(json.dumps({"action": action, "payload": normalized}, sort_keys=True, separators=(",", ":"), ensure_ascii=True))
+
+    @staticmethod
+    def _receipt_payload(receipt: OperationReceiptRecord, *, replayed_request: bool) -> dict[str, object]:
+        return {
+            "operation_id": receipt.operation_id,
+            "request_id": receipt.request_id,
+            "action": receipt.action,
+            "operator_subject": receipt.operator_subject,
+            "status": receipt.status,
+            "applied": not replayed_request,
+            "replayed": replayed_request,
+            "created_at": receipt.created_at,
+            "last_replayed_at": receipt.last_replayed_at,
+            "replay_count": receipt.replay_count,
+        }
 
     def _transition_intent(self, *, bearer_token: str, payload: dict, status: IntentStatus) -> dict:
         token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.INTENT_REVIEW.value,))
@@ -121,8 +185,15 @@ class LotusControlPlaneAPI:
 
     def _sweep_expired_grants(self, *, bearer_token: str, payload: dict) -> dict:
         token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.CONTRACT_WRITE.value,))
-        summary = self.plane.sweep_expired_grants(current_time=(None if payload.get("now") is None else float(payload["now"])))
-        return {"token_id": token.token_id, "grant_sweep": summary}
+        return self._with_operation_receipt(
+            action="sweep_expired_grants",
+            token=token,
+            payload=payload,
+            executor=lambda: {
+                "token_id": token.token_id,
+                "grant_sweep": self.plane.sweep_expired_grants(current_time=(None if payload.get("now") is None else float(payload["now"]))),
+            },
+        )
 
     def issue_token(
         self,
@@ -481,8 +552,12 @@ class LotusControlPlaneAPI:
                 updated_at=created_at,
                 labels=dict(payload.get("labels", {})),
             )
-            self.plane.upsert_intent(intent)
-            return {"token_id": token.token_id, "intent": asdict(intent)}
+            return self._with_operation_receipt(
+                action="create_intent",
+                token=token,
+                payload=payload,
+                executor=lambda: _upsert_intent_and_build_response(self.plane, token.token_id, intent),
+            )
         if action == "accept_intent":
             return self._transition_intent(bearer_token=bearer_token, payload=payload, status=IntentStatus.ACCEPTED)
         if action == "reject_intent":
@@ -527,49 +602,28 @@ class LotusControlPlaneAPI:
             return {"token_id": token.token_id, "link_address": asdict(link), "network_address": asdict(network)}
         if action == "publish_endpoint":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.ENDPOINT_WRITE.value,))
-            endpoint = self.plane.publish_hosted_endpoint(
-                owner_city_id=payload["city_id"],
-                public_handle=payload["public_handle"],
-                transport=payload["transport"],
-                location=payload["location"],
-                visibility=EndpointVisibility(payload.get("visibility", EndpointVisibility.PUBLIC.value)),
-                ttl_s=payload.get("ttl_s"),
-                endpoint_id=payload.get("endpoint_id", ""),
-                labels=dict(payload.get("labels", {})),
+            return self._with_operation_receipt(
+                action="publish_endpoint",
+                token=token,
+                payload=payload,
+                executor=lambda: _publish_endpoint_response(self.plane, token.token_id, payload),
             )
-            return {"token_id": token.token_id, "hosted_endpoint": asdict(endpoint)}
         if action == "publish_service":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.SERVICE_WRITE.value,))
-            service = self.plane.publish_service_address(
-                owner_city_id=payload["city_id"],
-                service_name=payload["service_name"],
-                public_handle=payload["public_handle"],
-                transport=payload["transport"],
-                location=payload["location"],
-                visibility=EndpointVisibility(payload.get("visibility", EndpointVisibility.FEDERATED.value)),
-                auth_required=bool(payload.get("auth_required", True)),
-                required_scopes=tuple(payload.get("required_scopes", ())),
-                ttl_s=payload.get("ttl_s"),
-                service_id=payload.get("service_id", ""),
-                labels=dict(payload.get("labels", {})),
+            return self._with_operation_receipt(
+                action="publish_service",
+                token=token,
+                payload=payload,
+                executor=lambda: _publish_service_response(self.plane, token.token_id, payload),
             )
-            return {"token_id": token.token_id, "service_address": asdict(service)}
         if action == "publish_route":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.SERVICE_WRITE.value,))
-            route = self.plane.publish_route(
-                owner_city_id=payload["owner_city_id"],
-                destination_prefix=payload["destination_prefix"],
-                target_city_id=payload["target_city_id"],
-                next_hop_city_id=payload["next_hop_city_id"],
-                metric=int(payload.get("metric", 100)),
-                nadi_type=str(payload.get("nadi_type", "")),
-                priority=str(payload.get("nadi_priority", payload.get("priority", ""))),
-                ttl_ms=payload.get("ttl_ms"),
-                ttl_s=payload.get("ttl_s"),
-                route_id=payload.get("route_id", ""),
-                labels=dict(payload.get("labels", {})),
+            return self._with_operation_receipt(
+                action="publish_route",
+                token=token,
+                payload=payload,
+                executor=lambda: _publish_route_response(self.plane, token.token_id, payload),
             )
-            return {"token_id": token.token_id, "route": _serialize_lotus_route(asdict(route))}
         if action == "resolve_handle":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             endpoint = self.plane.resolve_public_handle(payload["public_handle"])
@@ -585,3 +639,59 @@ class LotusControlPlaneAPI:
             resolution = self.plane.resolve_next_hop(payload["source_city_id"], payload["destination"])
             return {"token_id": token.token_id, "resolved": None if resolution is None else _serialize_lotus_route(asdict(resolution))}
         raise ValueError(f"unknown_action:{action}")
+
+
+def _upsert_intent_and_build_response(plane: AgentInternetControlPlane, token_id: str, intent: IntentRecord) -> dict:
+    plane.upsert_intent(intent)
+    return {"token_id": token_id, "intent": asdict(intent)}
+
+
+def _publish_endpoint_response(plane: AgentInternetControlPlane, token_id: str, payload: dict) -> dict:
+    endpoint = plane.publish_hosted_endpoint(
+        owner_city_id=payload["city_id"],
+        public_handle=payload["public_handle"],
+        transport=payload["transport"],
+        location=payload["location"],
+        visibility=EndpointVisibility(payload.get("visibility", EndpointVisibility.PUBLIC.value)),
+        ttl_s=payload.get("ttl_s"),
+        endpoint_id=payload.get("endpoint_id", ""),
+        labels=dict(payload.get("labels", {})),
+        now=(None if payload.get("now") is None else float(payload["now"])),
+    )
+    return {"token_id": token_id, "hosted_endpoint": asdict(endpoint)}
+
+
+def _publish_service_response(plane: AgentInternetControlPlane, token_id: str, payload: dict) -> dict:
+    service = plane.publish_service_address(
+        owner_city_id=payload["city_id"],
+        service_name=payload["service_name"],
+        public_handle=payload["public_handle"],
+        transport=payload["transport"],
+        location=payload["location"],
+        visibility=EndpointVisibility(payload.get("visibility", EndpointVisibility.FEDERATED.value)),
+        auth_required=bool(payload.get("auth_required", True)),
+        required_scopes=tuple(payload.get("required_scopes", ())),
+        ttl_s=payload.get("ttl_s"),
+        service_id=payload.get("service_id", ""),
+        labels=dict(payload.get("labels", {})),
+        now=(None if payload.get("now") is None else float(payload["now"])),
+    )
+    return {"token_id": token_id, "service_address": asdict(service)}
+
+
+def _publish_route_response(plane: AgentInternetControlPlane, token_id: str, payload: dict) -> dict:
+    route = plane.publish_route(
+        owner_city_id=payload["owner_city_id"],
+        destination_prefix=payload["destination_prefix"],
+        target_city_id=payload["target_city_id"],
+        next_hop_city_id=payload["next_hop_city_id"],
+        metric=int(payload.get("metric", 100)),
+        nadi_type=str(payload.get("nadi_type", "")),
+        priority=str(payload.get("nadi_priority", payload.get("priority", ""))),
+        ttl_ms=payload.get("ttl_ms"),
+        ttl_s=payload.get("ttl_s"),
+        route_id=payload.get("route_id", ""),
+        labels=dict(payload.get("labels", {})),
+        now=(None if payload.get("now") is None else float(payload["now"])),
+    )
+    return {"token_id": token_id, "route": _serialize_lotus_route(asdict(route))}

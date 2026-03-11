@@ -19,6 +19,7 @@ from agent_internet.models import (
     LotusApiToken,
     LotusRoute,
     LotusServiceAddress,
+    OperationReceiptRecord,
     SlotDescriptor,
     SlotLeaseRecord,
     SlotStatus,
@@ -131,6 +132,26 @@ def test_api_token():
     reg.upsert_api_token(token)
     assert reg.get_api_token("t-1") is not None
     assert reg.get_api_token_by_sha256("deadbeef") is not None
+
+
+def test_operation_receipt_roundtrip():
+    reg = SqliteCityRegistry()
+    receipt = OperationReceiptRecord(
+        operation_id="op-1",
+        request_id="req-1",
+        action="create_intent",
+        operator_subject="human:ss",
+        request_sha256="cafebabe",
+        response_payload={"intent": {"intent_id": "intent:fork-city-b"}},
+        created_at=123.0,
+    )
+    reg.upsert_operation_receipt(receipt)
+    loaded = reg.get_operation_receipt(action="create_intent", operator_subject="human:ss", request_id="req-1")
+
+    assert loaded is not None
+    assert loaded.operation_id == "op-1"
+    assert loaded.response_payload["intent"]["intent_id"] == "intent:fork-city-b"
+    assert reg.list_operation_receipts()[0].request_id == "req-1"
 
 
 def test_space_and_slot():

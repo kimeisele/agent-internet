@@ -29,6 +29,7 @@ from .models import (
     LotusApiToken,
     LotusLinkAddress,
     LotusNetworkAddress,
+    OperationReceiptRecord,
     LotusRoute,
     LotusServiceAddress,
     ProjectionBindingRecord,
@@ -64,6 +65,7 @@ def snapshot_control_plane(plane: AgentInternetControlPlane) -> dict:
         "service_addresses": [asdict(service) for service in plane.registry.list_service_addresses()],
         "routes": [asdict(route) for route in plane.registry.list_routes()],
         "api_tokens": [asdict(token) for token in plane.registry.list_api_tokens()],
+        "operation_receipts": [asdict(receipt) for receipt in plane.registry.list_operation_receipts()],
         "spaces": [asdict(space) for space in plane.registry.list_spaces()],
         "slots": [asdict(slot) for slot in plane.registry.list_slots()],
         "space_claims": [asdict(claim) for claim in plane.registry.list_space_claims()],
@@ -155,6 +157,21 @@ def restore_control_plane(payload: dict) -> AgentInternetControlPlane:
                 scopes=tuple(data.get("scopes", ())),
                 issued_at=data.get("issued_at"),
                 revoked_at=data.get("revoked_at"),
+            ),
+        )
+    for data in payload.get("operation_receipts", []):
+        plane.registry.upsert_operation_receipt(
+            OperationReceiptRecord(
+                operation_id=data["operation_id"],
+                request_id=data["request_id"],
+                action=data["action"],
+                operator_subject=data.get("operator_subject", ""),
+                request_sha256=data.get("request_sha256", ""),
+                status=data.get("status", "applied"),
+                response_payload=dict(data.get("response_payload", {})),
+                created_at=data.get("created_at"),
+                last_replayed_at=data.get("last_replayed_at"),
+                replay_count=int(data.get("replay_count", 0)),
             ),
         )
     for data in payload.get("spaces", []):
