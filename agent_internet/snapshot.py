@@ -162,6 +162,7 @@ def restore_control_plane(payload: dict) -> AgentInternetControlPlane:
                 repo=data.get("repo", ""),
                 heartbeat_source=data.get("heartbeat_source", ""),
                 heartbeat=data.get("heartbeat"),
+                last_seen_at=data.get("last_seen_at"),
                 labels=dict(data.get("labels", {})),
             ),
         )
@@ -176,6 +177,8 @@ def restore_control_plane(payload: dict) -> AgentInternetControlPlane:
                 capacity=int(data.get("capacity", 1)),
                 heartbeat_source=data.get("heartbeat_source", ""),
                 heartbeat=data.get("heartbeat"),
+                last_seen_at=data.get("last_seen_at"),
+                lease_expires_at=data.get("lease_expires_at"),
                 labels=dict(data.get("labels", {})),
             ),
         )

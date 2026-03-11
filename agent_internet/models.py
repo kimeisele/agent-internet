@@ -374,6 +374,7 @@ class SpaceDescriptor:
     repo: str = ""
     heartbeat_source: str = ""
     heartbeat: int | None = None
+    last_seen_at: float | None = None
     labels: dict[str, str] = field(default_factory=dict)
 
 
@@ -387,6 +388,8 @@ class SlotDescriptor:
     capacity: int = 1
     heartbeat_source: str = ""
     heartbeat: int | None = None
+    last_seen_at: float | None = None
+    lease_expires_at: float | None = None
     labels: dict[str, str] = field(default_factory=dict)
 
 

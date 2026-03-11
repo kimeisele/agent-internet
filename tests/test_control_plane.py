@@ -278,8 +278,9 @@ def test_control_plane_publishes_steward_aligned_route_and_resolves_next_hop():
     assert resolution.next_hop_endpoint.location == "https://example/city-b.git"
 
 
-def test_control_plane_publishes_and_restores_assistant_space_and_slot():
+def test_control_plane_publishes_and_restores_assistant_space_and_slot(monkeypatch):
     plane = AgentInternetControlPlane()
+    monkeypatch.setattr("agent_internet.assistant_surface.time.time", lambda: 101.0)
     snapshot = AssistantSurfaceSnapshot(
         assistant_id="moltbook_assistant",
         assistant_kind="moltbook_assistant",
@@ -288,6 +289,7 @@ def test_control_plane_publishes_and_restores_assistant_space_and_slot():
         repo="org/city-a",
         heartbeat_source="steward-protocol/mahamantra",
         heartbeat=5,
+        last_seen_at=100.0,
         state_present=True,
         total_posts=2,
         following=3,
@@ -308,6 +310,9 @@ def test_control_plane_publishes_and_restores_assistant_space_and_slot():
 
     assert space.kind == SpaceKind.ASSISTANT
     assert slot.status == SlotStatus.ACTIVE
+    assert space.last_seen_at == 100.0
+    assert slot.last_seen_at == 100.0
+    assert slot.lease_expires_at == 7300.0
     assert space.labels["campaign_count"] == "1"
     assert slot.labels["campaign_focus"] == "Internet adaptation"
     assert restored.registry.get_space(space.space_id) == space

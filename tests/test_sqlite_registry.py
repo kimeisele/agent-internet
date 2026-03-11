@@ -136,9 +136,12 @@ def test_space_and_slot():
         kind=SpaceKind.CITY,
         owner_subject_id="operator",
         display_name="Main Space",
+        last_seen_at=100.0,
     )
     reg.upsert_space(space)
-    assert reg.get_space("sp-1") is not None
+    stored_space = reg.get_space("sp-1")
+    assert stored_space is not None
+    assert stored_space.last_seen_at == 100.0
 
     slot = SlotDescriptor(
         slot_id="sl-1",
@@ -146,9 +149,14 @@ def test_space_and_slot():
         slot_kind="general",
         holder_subject_id="agent-1",
         status=SlotStatus.ACTIVE,
+        last_seen_at=100.0,
+        lease_expires_at=200.0,
     )
     reg.upsert_slot(slot)
-    assert reg.get_slot("sl-1") is not None
+    stored_slot = reg.get_slot("sl-1")
+    assert stored_slot is not None
+    assert stored_slot.last_seen_at == 100.0
+    assert stored_slot.lease_expires_at == 200.0
 
 
 def test_fork_lineage():

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from .models import (
     HealthStatus,
     IntentStatus,
+    SlotStatus,
     TrustLevel,
 )
 
@@ -199,7 +200,7 @@ def build_operator_dashboard(plane: object) -> OperatorDashboard:
         total_trust_records=len(trust_records),
         pending_intents=pending_count,
         active_spaces=len(spaces),
-        active_slots=len(slots),
+        active_slots=sum(1 for slot in slots if slot.status == SlotStatus.ACTIVE),
         cities=tuple(city_entries),
         trust_edges=tuple(trust_edges),
         routes=tuple(route_entries),

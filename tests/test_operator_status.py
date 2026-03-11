@@ -9,6 +9,8 @@ from agent_internet.models import (
     IntentRecord,
     IntentStatus,
     IntentType,
+    SlotDescriptor,
+    SlotStatus,
     TrustLevel,
     TrustRecord,
 )
@@ -89,3 +91,13 @@ def test_format_dashboard_text():
     assert "AGENT INTERNET CONTROL PLANE STATUS" in text
     assert "alpha" in text
     assert "1 total" in text
+
+
+def test_dashboard_counts_only_active_slots():
+    plane = AgentInternetControlPlane()
+    plane.upsert_slot(SlotDescriptor(slot_id="slot-1", space_id="space-1", slot_kind="assistant", holder_subject_id="assistant-a", status=SlotStatus.ACTIVE))
+    plane.upsert_slot(SlotDescriptor(slot_id="slot-2", space_id="space-1", slot_kind="assistant", holder_subject_id="assistant-b", status=SlotStatus.DORMANT))
+
+    dashboard = build_operator_dashboard(plane)
+
+    assert dashboard.active_slots == 1
