@@ -2,9 +2,10 @@ import json
 import subprocess
 from dataclasses import replace
 from hashlib import sha256
+from pathlib import Path
 
 from agent_internet.control_plane import AGENT_WORLD_AUTHORITY_BUNDLE_FEED_ID, AGENT_WORLD_PUBLIC_WIKI_BINDING_ID, AGENT_WORLD_REPO_ID, STEWARD_AUTHORITY_BUNDLE_FEED_ID, STEWARD_PROTOCOL_REPO_ID, STEWARD_PUBLIC_WIKI_BINDING_ID
-from agent_internet.models import AuthorityExportKind, PublicationState
+from agent_internet.models import AuthorityExportKind, AuthorityFeedTransport, PublicationState
 from agent_internet.projection_reconciler import ProjectionReconcileDaemon, ProjectionReconciler
 from agent_internet.snapshot import ControlPlaneStateStore
 
@@ -111,6 +112,42 @@ def _write_agent_world_authority_bundle(tmp_path, *, version="world-v1", source_
     return bundle_path
 
 
+def _write_authority_feed_manifest(tmp_path, *, source_repo_id, bundle_path):
+    bundle_payload = json.loads(Path(bundle_path).read_text())
+    source_sha = str(bundle_payload["source_sha"])
+    feed_root = tmp_path / f"{source_repo_id}-feed"
+    version_root = feed_root / "bundles" / source_sha
+    version_root.mkdir(parents=True)
+    persisted_bundle_path = version_root / "source-authority-bundle.json"
+    persisted_bundle_path.write_text(Path(bundle_path).read_text())
+    artifacts = {}
+    for relative_path in bundle_payload["artifact_paths"].values():
+        source_artifact = Path(bundle_path).parent / relative_path
+        target_artifact = version_root / relative_path
+        target_artifact.parent.mkdir(parents=True, exist_ok=True)
+        target_artifact.write_text(source_artifact.read_text())
+        artifacts[relative_path] = {
+            "path": str(Path("bundles") / source_sha / relative_path),
+            "sha256": sha256(target_artifact.read_bytes()).hexdigest(),
+        }
+    manifest = {
+        "kind": "source_authority_feed_manifest",
+        "contract_version": 1,
+        "generated_at": bundle_payload["generated_at"],
+        "source_repo_id": source_repo_id,
+        "source_sha": source_sha,
+        "bundle": {
+            "kind": "source_authority_bundle",
+            "path": str(Path("bundles") / source_sha / "source-authority-bundle.json"),
+            "sha256": sha256(persisted_bundle_path.read_bytes()).hexdigest(),
+        },
+        "artifacts": artifacts,
+    }
+    manifest_path = feed_root / "latest-authority-manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    return manifest_path
+
+
 def _bind_local_wiki(state_path, wiki_remote):
     store = ControlPlaneStateStore(path=state_path)
 
@@ -201,6 +238,42 @@ def test_projection_reconciler_infers_agent_world_feed_from_bundle_path(tmp_path
     assert feed.locator == str(bundle_path.resolve())
     assert reconcile_status.last_imported_source_sha == "world-bundle-v1"
     assert reconcile_status.last_imported_export_version == "world-v1"
+
+
+def test_projection_reconciler_imports_manifest_feed_and_publishes(tmp_path):
+    repo_root, wiki_remote = _init_git_workspace(tmp_path)
+    state_path = tmp_path / "state.json"
+    store = _bind_local_wiki(state_path, wiki_remote)
+    bundle_path = _write_steward_authority_bundle(tmp_path, version="v-manifest", source_sha="manifest-bundle-v1")
+    manifest_path = _write_authority_feed_manifest(tmp_path, source_repo_id=STEWARD_PROTOCOL_REPO_ID, bundle_path=bundle_path)
+
+    store.update(
+        lambda plane: plane.configure_source_authority_feed(
+            STEWARD_PROTOCOL_REPO_ID,
+            transport=AuthorityFeedTransport.MANIFEST_URL,
+            locator=manifest_path.resolve().as_uri(),
+            feed_id=STEWARD_AUTHORITY_BUNDLE_FEED_ID,
+            now=100.0,
+        ),
+    )
+
+    result = ProjectionReconciler(root=repo_root, state_path=state_path).run_once(
+        feed_id=STEWARD_AUTHORITY_BUNDLE_FEED_ID,
+        wiki_repo_url=str(wiki_remote),
+        wiki_path=tmp_path / "wiki-checkout-manifest",
+    )
+
+    feed = store.load().registry.get_source_authority_feed(STEWARD_AUTHORITY_BUNDLE_FEED_ID)
+    publication_status = store.load().registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID)
+
+    assert result["reconcile_state"] == "success"
+    assert result["publication_state"] == PublicationState.SUCCESS.value
+    assert result["manifest_url"] == manifest_path.resolve().as_uri()
+    assert result["bundle_sha256"] == feed.labels["bundle_sha256"]
+    assert feed.transport == AuthorityFeedTransport.MANIFEST_URL
+    assert feed.labels["source_sha"] == "manifest-bundle-v1"
+    assert publication_status is not None
+    assert publication_status.labels["source_export_version"] == "v-manifest"
 
 
 def test_projection_reconciler_respects_backoff_and_force(tmp_path):

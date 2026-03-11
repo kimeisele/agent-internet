@@ -306,6 +306,45 @@ class AgentInternetControlPlane:
         self.registry.upsert_source_authority_feed(updated)
         return updated
 
+    def configure_source_authority_feed(
+        self,
+        source_repo_id: str,
+        *,
+        transport: AuthorityFeedTransport,
+        locator: str,
+        feed_id: str | None = None,
+        poll_interval_seconds: int = 300,
+        enabled: bool | None = None,
+        labels: dict[str, str] | None = None,
+        now: float | None = None,
+    ) -> SourceAuthorityFeedRecord:
+        contract = get_public_authority_source_contract_by_repo_id(source_repo_id)
+        if contract is None:
+            contract = default_public_authority_source_contract()
+            if source_repo_id != contract.source_repo_id:
+                raise ValueError(f"unknown_public_authority_source:{source_repo_id}")
+        self._bootstrap_public_wiki_contract(contract=contract, now=now)
+        resolved_feed_id = str(feed_id or contract.feed_id)
+        existing = self.registry.get_source_authority_feed(resolved_feed_id)
+        resolved_locator = str(Path(locator).resolve()) if transport == AuthorityFeedTransport.FILESYSTEM_BUNDLE else str(locator)
+        record = SourceAuthorityFeedRecord(
+            feed_id=resolved_feed_id,
+            source_repo_id=contract.source_repo_id,
+            transport=transport,
+            locator=resolved_locator,
+            binding_ids=(contract.binding_id,),
+            enabled=(True if existing is None else existing.enabled) if enabled is None else bool(enabled),
+            poll_interval_seconds=max(int(poll_interval_seconds), 1),
+            labels={
+                "bundle_kind": "source_authority_bundle",
+                "source_repo_id": contract.source_repo_id,
+                **(dict(existing.labels) if existing is not None else {}),
+                **{str(key): str(value) for key, value in dict(labels or {}).items()},
+            },
+        )
+        self.registry.upsert_source_authority_feed(record)
+        return record
+
     def upsert_projection_reconcile_status(self, record: ProjectionReconcileStatusRecord) -> None:
         self.registry.upsert_projection_reconcile_status(record)
 
@@ -558,25 +597,14 @@ class AgentInternetControlPlane:
         poll_interval_seconds: int = 300,
         now: float | None = None,
     ) -> SourceAuthorityFeedRecord:
-        source_repo_id = contract.source_repo_id
-        self._bootstrap_public_wiki_contract(contract=contract, now=now)
-        existing = self.registry.get_source_authority_feed(feed_id)
-        record = SourceAuthorityFeedRecord(
-            feed_id=feed_id,
-            source_repo_id=source_repo_id,
+        return self.configure_source_authority_feed(
+            contract.source_repo_id,
             transport=AuthorityFeedTransport.FILESYSTEM_BUNDLE,
-            locator=str(Path(bundle_path).resolve()),
-            binding_ids=(contract.binding_id,),
-            enabled=True if existing is None else existing.enabled,
-            poll_interval_seconds=max(int(poll_interval_seconds), 1),
-            labels={
-                "bundle_kind": "source_authority_bundle",
-                "source_repo_id": source_repo_id,
-                **(dict(existing.labels) if existing is not None else {}),
-            },
+            locator=str(bundle_path),
+            feed_id=feed_id,
+            poll_interval_seconds=poll_interval_seconds,
+            now=now,
         )
-        self.registry.upsert_source_authority_feed(record)
-        return record
 
     def bootstrap_steward_public_wiki_feed(
         self,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 import json
 import subprocess
 import time
@@ -111,11 +112,20 @@ def publish_agent_internet_wiki(
             prune_generated=prune_generated,
             commit_message=commit_message,
         )
+        success_status_preview = _preview_projection_publication_outcome(
+            state_path=state_path,
+            wiki_repo_url=effective_wiki_repo_url,
+            operator_source_sha=source_sha,
+            push_requested=push,
+            commit_message=commit_message,
+            status=PublicationState.SUCCESS,
+        )
         pages = _render_pages(
             root=repo_root,
             state_path=state_path,
             city_id=city_id,
             publication_snapshot=publication_snapshot,
+            publication_status_overrides=success_status_preview,
         )
         generated_paths = sorted(_normalize_relative_paths(pages) + [PUBLICATION_METADATA_PATH])
         for relative_path, content in pages.items():
@@ -127,7 +137,7 @@ def publish_agent_internet_wiki(
         _write_generated_inventory(checkout, generated_paths)
         changed = _git_commit_all(checkout, commit_message, push=push)
     except Exception as exc:
-        failure_status = _record_projection_publication_outcome(
+        failure_statuses = _record_projection_publication_outcome(
             state_path=state_path,
             wiki_repo_url=effective_wiki_repo_url,
             operator_source_sha=source_sha,
@@ -136,10 +146,10 @@ def publish_agent_internet_wiki(
             status=PublicationState.FAILED,
             failure_reason=f"projection_publish_failed:{type(exc).__name__}:{exc}",
         )
-        if failure_status is not None:
-            raise RuntimeError(f"{exc} [binding={failure_status.binding_id}]") from exc
+        if failure_statuses:
+            raise RuntimeError(f"{exc} [binding={failure_statuses[0].binding_id}]") from exc
         raise
-    success_status = _record_projection_publication_outcome(
+    success_statuses = _record_projection_publication_outcome(
         state_path=state_path,
         wiki_repo_url=effective_wiki_repo_url,
         operator_source_sha=source_sha,
@@ -161,9 +171,12 @@ def publish_agent_internet_wiki(
         "published_at_utc": publication_snapshot["published_at_utc"],
         "commit_message": commit_message,
     }
-    if success_status is not None:
-        result["binding_id"] = success_status.binding_id
-        result["publication_state"] = success_status.status.value
+    if success_statuses:
+        result["updated_binding_ids"] = [record.binding_id for record in success_statuses]
+        result["publication_states"] = {record.binding_id: record.status.value for record in success_statuses}
+        if len(success_statuses) == 1:
+            result["binding_id"] = success_statuses[0].binding_id
+            result["publication_state"] = success_statuses[0].status.value
     return result
 
 
@@ -174,7 +187,7 @@ def write_publication_result(path: Path | str, result: dict) -> Path:
     return target
 
 
-def _render_pages(*, root: Path | str, state_path: Path | str, city_id: str, publication_snapshot: dict | None) -> dict[str, str]:
+def _render_pages(*, root: Path | str, state_path: Path | str, city_id: str, publication_snapshot: dict | None, publication_status_overrides: list[PublicationStatusRecord] | None = None) -> dict[str, str]:
     repo_root = Path(root).resolve()
     store = ControlPlaneStateStore(path=Path(state_path))
     peer_descriptor = build_agent_internet_peer_descriptor(root, city_id=city_id)
@@ -187,9 +200,28 @@ def _render_pages(*, root: Path | str, state_path: Path | str, city_id: str, pub
         prune_generated=False,
         commit_message="agent-web: local build preview",
     )
+    state_snapshot = snapshot_control_plane(store.load())
+    if publication_status_overrides:
+        override_payloads = {record.binding_id: asdict(record) for record in publication_status_overrides}
+        merged_statuses: list[dict] = []
+        seen_binding_ids: set[str] = set()
+        for record in list(state_snapshot.get("publication_statuses", [])):
+            if not isinstance(record, dict):
+                continue
+            binding_id = str(record.get("binding_id", ""))
+            override = override_payloads.get(binding_id)
+            if override is not None:
+                merged_statuses.append(override)
+                seen_binding_ids.add(binding_id)
+            else:
+                merged_statuses.append(record)
+        for binding_id, override in override_payloads.items():
+            if binding_id not in seen_binding_ids:
+                merged_statuses.append(override)
+        state_snapshot["publication_statuses"] = merged_statuses
     return render_wiki_projection(
         peer_descriptor=peer_descriptor,
-        state_snapshot=snapshot_control_plane(store.load()),
+        state_snapshot=state_snapshot,
         assistant_snapshot=None,
         publication_snapshot=effective_publication_snapshot,
         repo_root=repo_root,
@@ -246,16 +278,17 @@ def _normalize_target_locator(locator: str | None) -> str:
     return value.strip("/")
 
 
-def _matching_projection_binding(plane, *, wiki_repo_url: str):
+def _matching_projection_bindings(plane, *, wiki_repo_url: str):
     normalized_target = _normalize_target_locator(wiki_repo_url)
     if not normalized_target:
-        return None
+        return []
+    matches = []
     for binding in plane.registry.list_projection_bindings():
         if binding.target_kind != "github_wiki":
             continue
         if _normalize_target_locator(binding.target_locator) == normalized_target:
-            return binding
-    return None
+            matches.append(binding)
+    return matches
 
 
 def _publication_status_labels(*, existing: PublicationStatusRecord | None, export, operator_source_sha: str, wiki_repo_url: str, push_requested: bool, commit_message: str) -> dict[str, str]:
@@ -285,48 +318,102 @@ def _prepare_projection_publication(*, state_path: Path | str, wiki_repo_url: st
     def _update(plane):
         if not plane.registry.list_projection_bindings():
             plane.bootstrap_default_public_wiki_contracts(now=checked_at)
-        binding = _matching_projection_binding(plane, wiki_repo_url=wiki_repo_url)
-        if binding is None:
+        bindings = _matching_projection_bindings(plane, wiki_repo_url=wiki_repo_url)
+        if not bindings:
             return None
-        export = plane.registry.find_authority_export(binding.source_repo_id, binding.required_export_kind.value)
-        existing = plane.registry.get_publication_status(binding.binding_id)
-        labels = _publication_status_labels(
-            existing=existing,
-            export=export,
-            operator_source_sha=operator_source_sha,
-            wiki_repo_url=wiki_repo_url,
-            push_requested=push_requested,
-            commit_message=commit_message,
-        )
-        if export is None:
-            status = PublicationStatusRecord(
-                binding_id=binding.binding_id,
-                status=PublicationState.BLOCKED,
-                projected_from_export_id="",
-                target_kind=binding.target_kind,
-                target_locator=binding.target_locator,
-                checked_at=checked_at,
-                stale=False,
-                failure_reason=f"missing_authority_export:{binding.source_repo_id}:{binding.required_export_kind.value}",
-                labels=labels,
+        stale_bindings: list[str] = []
+        blocked_bindings: list[str] = []
+        blocked_reasons: list[str] = []
+        for binding in bindings:
+            export = plane.registry.find_authority_export(binding.source_repo_id, binding.required_export_kind.value)
+            existing = plane.registry.get_publication_status(binding.binding_id)
+            labels = _publication_status_labels(
+                existing=existing,
+                export=export,
+                operator_source_sha=operator_source_sha,
+                wiki_repo_url=wiki_repo_url,
+                push_requested=push_requested,
+                commit_message=commit_message,
             )
-            plane.upsert_publication_status(status)
-            return {"binding_id": binding.binding_id, "status": status.status, "failure_reason": status.failure_reason}
-        return {"binding_id": binding.binding_id, "status": PublicationState.STALE, "export_id": export.export_id}
+            if export is None:
+                status = PublicationStatusRecord(
+                    binding_id=binding.binding_id,
+                    status=PublicationState.BLOCKED,
+                    projected_from_export_id="",
+                    target_kind=binding.target_kind,
+                    target_locator=binding.target_locator,
+                    checked_at=checked_at,
+                    stale=False,
+                    failure_reason=f"missing_authority_export:{binding.source_repo_id}:{binding.required_export_kind.value}",
+                    labels=labels,
+                )
+                plane.upsert_publication_status(status)
+                blocked_bindings.append(binding.binding_id)
+                blocked_reasons.append(status.failure_reason)
+            else:
+                stale_bindings.append(binding.binding_id)
+        if stale_bindings:
+            return {
+                "binding_ids": stale_bindings,
+                "blocked_binding_ids": blocked_bindings,
+                "status": PublicationState.STALE,
+            }
+        return {
+            "binding_ids": blocked_bindings,
+            "status": PublicationState.BLOCKED,
+            "failure_reason": ";".join(blocked_reasons),
+        }
 
     return store.update(_update)
 
 
-def _record_projection_publication_outcome(*, state_path: Path | str, wiki_repo_url: str, operator_source_sha: str, push_requested: bool, commit_message: str, status: PublicationState, failure_reason: str = "") -> PublicationStatusRecord | None:
+def _record_projection_publication_outcome(*, state_path: Path | str, wiki_repo_url: str, operator_source_sha: str, push_requested: bool, commit_message: str, status: PublicationState, failure_reason: str = "") -> list[PublicationStatusRecord]:
     store = ControlPlaneStateStore(path=Path(state_path))
     checked_at = time.time()
 
     def _update(plane):
         if not plane.registry.list_projection_bindings():
             plane.bootstrap_default_public_wiki_contracts(now=checked_at)
-        binding = _matching_projection_binding(plane, wiki_repo_url=wiki_repo_url)
-        if binding is None:
-            return None
+        records = _build_projection_publication_records(
+            plane,
+            wiki_repo_url=wiki_repo_url,
+            operator_source_sha=operator_source_sha,
+            push_requested=push_requested,
+            commit_message=commit_message,
+            status=status,
+            failure_reason=failure_reason,
+            checked_at=checked_at,
+        )
+        for record in records:
+            plane.upsert_publication_status(record)
+        return records
+
+    return store.update(_update)
+
+
+def _preview_projection_publication_outcome(*, state_path: Path | str, wiki_repo_url: str, operator_source_sha: str, push_requested: bool, commit_message: str, status: PublicationState, failure_reason: str = "") -> list[PublicationStatusRecord]:
+    plane = ControlPlaneStateStore(path=Path(state_path)).load()
+    checked_at = time.time()
+    if not plane.registry.list_projection_bindings():
+        plane.bootstrap_default_public_wiki_contracts(now=checked_at)
+    return _build_projection_publication_records(
+        plane,
+        wiki_repo_url=wiki_repo_url,
+        operator_source_sha=operator_source_sha,
+        push_requested=push_requested,
+        commit_message=commit_message,
+        status=status,
+        failure_reason=failure_reason,
+        checked_at=checked_at,
+    )
+
+
+def _build_projection_publication_records(plane, *, wiki_repo_url: str, operator_source_sha: str, push_requested: bool, commit_message: str, status: PublicationState, failure_reason: str, checked_at: float) -> list[PublicationStatusRecord]:
+    bindings = _matching_projection_bindings(plane, wiki_repo_url=wiki_repo_url)
+    if not bindings:
+        return []
+    records: list[PublicationStatusRecord] = []
+    for binding in bindings:
         export = plane.registry.find_authority_export(binding.source_repo_id, binding.required_export_kind.value)
         existing = plane.registry.get_publication_status(binding.binding_id)
         labels = _publication_status_labels(
@@ -338,29 +425,33 @@ def _record_projection_publication_outcome(*, state_path: Path | str, wiki_repo_
             commit_message=commit_message,
         )
         if export is None:
-            record = PublicationStatusRecord(
-                binding_id=binding.binding_id,
-                status=PublicationState.BLOCKED,
-                projected_from_export_id="",
-                target_kind=binding.target_kind,
-                target_locator=binding.target_locator,
-                checked_at=checked_at,
-                stale=False,
-                failure_reason=f"missing_authority_export:{binding.source_repo_id}:{binding.required_export_kind.value}",
-                labels=labels,
+            records.append(
+                PublicationStatusRecord(
+                    binding_id=binding.binding_id,
+                    status=PublicationState.BLOCKED,
+                    projected_from_export_id="",
+                    target_kind=binding.target_kind,
+                    target_locator=binding.target_locator,
+                    checked_at=checked_at,
+                    stale=False,
+                    failure_reason=f"missing_authority_export:{binding.source_repo_id}:{binding.required_export_kind.value}",
+                    labels=labels,
+                ),
             )
         elif status == PublicationState.SUCCESS:
-            record = PublicationStatusRecord(
-                binding_id=binding.binding_id,
-                status=PublicationState.SUCCESS,
-                projected_from_export_id=export.export_id,
-                target_kind=binding.target_kind,
-                target_locator=binding.target_locator,
-                published_at=checked_at,
-                checked_at=checked_at,
-                stale=False,
-                failure_reason="",
-                labels=labels,
+            records.append(
+                PublicationStatusRecord(
+                    binding_id=binding.binding_id,
+                    status=PublicationState.SUCCESS,
+                    projected_from_export_id=export.export_id,
+                    target_kind=binding.target_kind,
+                    target_locator=binding.target_locator,
+                    published_at=checked_at,
+                    checked_at=checked_at,
+                    stale=False,
+                    failure_reason="",
+                    labels=labels,
+                ),
             )
         else:
             membrane_current = bool(
@@ -370,22 +461,21 @@ def _record_projection_publication_outcome(*, state_path: Path | str, wiki_repo_
                 and existing.labels.get("source_export_version", "") == export.version
                 and existing.labels.get("source_export_sha256", "") == export.content_sha256
             )
-            record = PublicationStatusRecord(
-                binding_id=binding.binding_id,
-                status=PublicationState.FAILED,
-                projected_from_export_id=export.export_id,
-                target_kind=binding.target_kind,
-                target_locator=binding.target_locator,
-                published_at=(existing.published_at if existing is not None else None),
-                checked_at=checked_at,
-                stale=not membrane_current,
-                failure_reason=failure_reason,
-                labels=labels,
+            records.append(
+                PublicationStatusRecord(
+                    binding_id=binding.binding_id,
+                    status=PublicationState.FAILED,
+                    projected_from_export_id=export.export_id,
+                    target_kind=binding.target_kind,
+                    target_locator=binding.target_locator,
+                    published_at=(existing.published_at if existing is not None else None),
+                    checked_at=checked_at,
+                    stale=not membrane_current,
+                    failure_reason=failure_reason,
+                    labels=labels,
+                ),
             )
-        plane.upsert_publication_status(record)
-        return record
-
-    return store.update(_update)
+    return records
 
 
 def _normalize_relative_path(path: str) -> str:

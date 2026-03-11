@@ -10,6 +10,7 @@ from .authority_contracts import (
     get_public_authority_source_contract_by_feed_id,
     get_public_authority_source_contract_by_repo_id,
 )
+from .authority_feed_sync import sync_source_authority_feed
 from .control_plane import AgentInternetControlPlane
 from .file_locking import locked_file
 from .models import ProjectionReconcileState, ProjectionReconcileStatusRecord, PublicationState, PublicationStatusRecord, SourceAuthorityFeedRecord
@@ -246,7 +247,8 @@ class ProjectionReconciler:
         prune_generated: bool,
     ) -> dict[str, object]:
         try:
-            self.store.update(lambda plane: plane.ingest_authority_bundle_path(feed.locator, now=checked_at))
+            synced = sync_source_authority_feed(self.store, feed_id=feed.feed_id, now=checked_at)
+            feed = synced.feed
         except Exception as exc:
             record = self.store.update(
                 lambda plane: self._record_status(
@@ -419,6 +421,8 @@ class ProjectionReconciler:
             {
                 "source_repo_id": feed.source_repo_id,
                 "locator": feed.locator,
+                "manifest_url": feed.labels.get("manifest_url", ""),
+                "bundle_sha256": feed.labels.get("bundle_sha256", ""),
                 "publication_state": publication_status.status.value if publication_status is not None else "",
                 "target_locator": publication_status.target_locator if publication_status is not None else "",
             },
@@ -458,6 +462,8 @@ class ProjectionReconciler:
             "feed_id": feed.feed_id,
             "binding_id": reconcile_status.binding_id,
             "locator": feed.locator,
+            "manifest_url": feed.labels.get("manifest_url", ""),
+            "bundle_sha256": feed.labels.get("bundle_sha256", ""),
             "publish_required": publish_required,
             "published": publish_result is not None,
             "paused": not feed.enabled,

@@ -123,6 +123,7 @@ class PublicationState(StrEnum):
 
 class AuthorityFeedTransport(StrEnum):
     FILESYSTEM_BUNDLE = "filesystem_bundle"
+    MANIFEST_URL = "manifest_url"
 
 
 class ProjectionReconcileState(StrEnum):
