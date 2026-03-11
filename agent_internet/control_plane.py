@@ -48,6 +48,7 @@ from .models import (
     RepoRoleRecord,
     SourceAuthorityFeedRecord,
     SlotDescriptor,
+    SlotStatus,
     SpaceDescriptor,
     TrustLevel,
     TrustRecord,
@@ -346,6 +347,20 @@ class AgentInternetControlPlane:
 
     def upsert_slot(self, slot: SlotDescriptor) -> None:
         self.registry.upsert_slot(slot)
+
+    def find_reclaimable_slot(self, *, space_id: str, slot_kind: str = "", now: float | None = None) -> SlotDescriptor | None:
+        current = float(time.time() if now is None else now)
+        for slot in self.registry.list_slots():
+            if slot.space_id != space_id:
+                continue
+            if slot_kind and slot.slot_kind != slot_kind:
+                continue
+            if slot.status != SlotStatus.DORMANT:
+                continue
+            if slot.reclaimable_since_at is None or slot.reclaimable_since_at > current:
+                continue
+            return slot
+        return None
 
     def upsert_fork_lineage(self, lineage: ForkLineageRecord) -> None:
         self.registry.upsert_fork_lineage(lineage)

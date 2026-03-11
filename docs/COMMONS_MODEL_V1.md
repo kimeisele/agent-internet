@@ -105,6 +105,7 @@ Fields:
 - `heartbeat_epoch`
 - `last_seen_at`
 - `lease_expires_at`
+- `reclaimable_since_at`
 - `labels`
 
 #### `SpaceClaim`
@@ -147,7 +148,9 @@ Current consequence rule:
 - a commons slot may carry a **soft lease** derived from heartbeat freshness
 - while `now <= lease_expires_at`, a live slot may remain `active`
 - once freshness expires or the city is observed `offline`, the slot degrades to `dormant`
-- the slot is not automatically deleted; reclaim / reassignment policy remains a separate later step
+- expired dormant slots may advertise `reclaimable_since_at`
+- current first policy: `REQUEST_SLOT` may reuse a matching reclaimable slot in the same `space_id` / `slot_kind` before creating a new slot
+- the slot is not automatically deleted; broader reclaim / reassignment policy remains a separate later step
 
 For now the canonical heartbeat source is expected to come from
 `steward-protocol` / Mahamantra, even when execution is embodied inside

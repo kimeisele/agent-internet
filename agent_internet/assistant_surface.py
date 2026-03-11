@@ -121,6 +121,7 @@ def assistant_social_slot_from_snapshot(snapshot: AssistantSurfaceSnapshot) -> S
         heartbeat=snapshot.heartbeat,
         last_seen_at=snapshot.last_seen_at,
         lease_expires_at=lease_expires_at,
+        reclaimable_since_at=lease_expires_at,
         labels={
             "following": str(snapshot.following),
             "invited": str(snapshot.invited),

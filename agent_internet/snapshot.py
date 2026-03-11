@@ -179,6 +179,7 @@ def restore_control_plane(payload: dict) -> AgentInternetControlPlane:
                 heartbeat=data.get("heartbeat"),
                 last_seen_at=data.get("last_seen_at"),
                 lease_expires_at=data.get("lease_expires_at"),
+                reclaimable_since_at=data.get("reclaimable_since_at"),
                 labels=dict(data.get("labels", {})),
             ),
         )
