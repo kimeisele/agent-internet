@@ -163,25 +163,41 @@ class LotusControlPlaneAPI:
         )
         return {"token_id": token.token_id, "intent": asdict(intent)}
 
-    def _transition_space_claim(self, *, bearer_token: str, payload: dict, status: ClaimStatus) -> dict:
+    def _transition_space_claim(self, *, action: str, bearer_token: str, payload: dict, status: ClaimStatus) -> dict:
         token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.CONTRACT_WRITE.value,))
-        updated_at = float(time.time() if payload.get("now") is None else payload["now"])
-        claim = self.plane.transition_space_claim(
-            claim_id=str(payload["claim_id"]),
-            status=status,
-            updated_at=updated_at,
+        return self._with_operation_receipt(
+            action=action,
+            token=token,
+            payload=payload,
+            executor=lambda: {
+                "token_id": token.token_id,
+                "space_claim": asdict(
+                    self.plane.transition_space_claim(
+                        claim_id=str(payload["claim_id"]),
+                        status=status,
+                        updated_at=float(time.time() if payload.get("now") is None else payload["now"]),
+                    )
+                ),
+            },
         )
-        return {"token_id": token.token_id, "space_claim": asdict(claim)}
 
-    def _transition_slot_lease(self, *, bearer_token: str, payload: dict, status: LeaseStatus) -> dict:
+    def _transition_slot_lease(self, *, action: str, bearer_token: str, payload: dict, status: LeaseStatus) -> dict:
         token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.CONTRACT_WRITE.value,))
-        updated_at = float(time.time() if payload.get("now") is None else payload["now"])
-        lease = self.plane.transition_slot_lease(
-            lease_id=str(payload["lease_id"]),
-            status=status,
-            updated_at=updated_at,
+        return self._with_operation_receipt(
+            action=action,
+            token=token,
+            payload=payload,
+            executor=lambda: {
+                "token_id": token.token_id,
+                "slot_lease": asdict(
+                    self.plane.transition_slot_lease(
+                        lease_id=str(payload["lease_id"]),
+                        status=status,
+                        updated_at=float(time.time() if payload.get("now") is None else payload["now"]),
+                    )
+                ),
+            },
         )
-        return {"token_id": token.token_id, "slot_lease": asdict(lease)}
 
     def _sweep_expired_grants(self, *, bearer_token: str, payload: dict) -> dict:
         token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.CONTRACT_WRITE.value,))
@@ -253,13 +269,13 @@ class LotusControlPlaneAPI:
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "slot_leases": [asdict(lease) for lease in self.plane.registry.list_slot_leases()]}
         if action == "release_space_claim":
-            return self._transition_space_claim(bearer_token=bearer_token, payload=params, status=ClaimStatus.RELEASED)
+            return self._transition_space_claim(action=action, bearer_token=bearer_token, payload=params, status=ClaimStatus.RELEASED)
         if action == "expire_space_claim":
-            return self._transition_space_claim(bearer_token=bearer_token, payload=params, status=ClaimStatus.EXPIRED)
+            return self._transition_space_claim(action=action, bearer_token=bearer_token, payload=params, status=ClaimStatus.EXPIRED)
         if action == "release_slot_lease":
-            return self._transition_slot_lease(bearer_token=bearer_token, payload=params, status=LeaseStatus.RELEASED)
+            return self._transition_slot_lease(action=action, bearer_token=bearer_token, payload=params, status=LeaseStatus.RELEASED)
         if action == "expire_slot_lease":
-            return self._transition_slot_lease(bearer_token=bearer_token, payload=params, status=LeaseStatus.EXPIRED)
+            return self._transition_slot_lease(action=action, bearer_token=bearer_token, payload=params, status=LeaseStatus.EXPIRED)
         if action == "sweep_expired_grants":
             return self._sweep_expired_grants(bearer_token=bearer_token, payload=payload)
         if action == "list_repo_roles":

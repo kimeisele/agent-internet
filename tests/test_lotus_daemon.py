@@ -1382,6 +1382,104 @@ def test_lotus_daemon_transitions_claims_and_leases_http_api(tmp_path):
         daemon.shutdown()
 
 
+def test_lotus_daemon_replays_claim_lifecycle_request_id(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+
+    def _seed_claim(plane):
+        plane.upsert_space_claim(
+            SpaceClaimRecord(
+                claim_id="claim-1",
+                source_intent_id="intent-space-1",
+                subject_id="operator-1",
+                space_id="space-1",
+                granted_at=20.0,
+            )
+        )
+        return LotusControlPlaneAPI(plane).issue_token(
+            subject="governor",
+            scopes=(LotusApiScope.CONTRACT_WRITE.value, LotusApiScope.READ.value),
+            token_secret="claims-write-root",
+            token_id="tok-claims-write-root",
+        ).secret
+
+    root_secret = store.update(_seed_claim)
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        payload = {"request_id": "req-claim-1", "now": 30.0}
+        status, first = _request_json(
+            daemon.base_url,
+            "/v1/lotus/space-claims/claim-1/release",
+            method="POST",
+            token=root_secret,
+            payload=payload,
+        )
+        status2, second = _request_json(
+            daemon.base_url,
+            "/v1/lotus/space-claims/claim-1/release",
+            method="POST",
+            token=root_secret,
+            payload={**payload, "now": 45.0},
+        )
+        assert status == 200
+        assert status2 == 200
+        assert second["space_claim"] == first["space_claim"]
+        assert first["receipt"]["applied"] is True
+        assert second["receipt"]["replayed"] is True
+    finally:
+        daemon.shutdown()
+
+
+def test_lotus_daemon_returns_claim_lifecycle_idempotency_conflict(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+
+    def _seed_claim(plane):
+        plane.upsert_space_claim(
+            SpaceClaimRecord(
+                claim_id="claim-1",
+                source_intent_id="intent-space-1",
+                subject_id="operator-1",
+                space_id="space-1",
+                granted_at=20.0,
+            )
+        )
+        return LotusControlPlaneAPI(plane).issue_token(
+            subject="governor",
+            scopes=(LotusApiScope.CONTRACT_WRITE.value,),
+            token_secret="claims-write-root",
+            token_id="tok-claims-write-root",
+        ).secret
+
+    root_secret = store.update(_seed_claim)
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        _request_json(
+            daemon.base_url,
+            "/v1/lotus/space-claims/claim-1/release",
+            method="POST",
+            token=root_secret,
+            payload={"request_id": "req-claim-1", "now": 30.0},
+        )
+
+        with pytest.raises(HTTPError) as exc_info:
+            _request_json(
+                daemon.base_url,
+                "/v1/lotus/space-claims/claim-2/release",
+                method="POST",
+                token=root_secret,
+                payload={"request_id": "req-claim-1", "now": 30.0},
+            )
+        assert exc_info.value.code == 409
+        error = json.loads(exc_info.value.read().decode("utf-8"))
+        assert error["error"] == "idempotency_conflict:release_space_claim:req-claim-1"
+        assert error["error_kind"] == "conflict"
+    finally:
+        daemon.shutdown()
+
+
 def test_lotus_daemon_sweeps_expired_grants_http_api(tmp_path):
     store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
 
