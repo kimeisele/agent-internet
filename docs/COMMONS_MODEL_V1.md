@@ -121,6 +121,7 @@ Fields:
 - `status`
 - `requested_at`
 - `granted_at`
+- `released_at`
 - `expires_at`
 - `labels`
 
@@ -135,9 +136,17 @@ Fields:
 - `slot_id`
 - `status`
 - `granted_at`
+- `released_at`
 - `expires_at`
 - `reclaimable_since_at`
 - `labels`
+
+Current lifecycle rule:
+- `SpaceClaimRecord` starts `granted` when a `REQUEST_SPACE_CLAIM` intent is fulfilled
+- it may later transition to `released` or `expired`
+- `SlotLeaseRecord` starts `active` when a `REQUEST_SLOT` intent is fulfilled
+- it may later transition to `released` or `expired`
+- releasing or expiring a slot lease also degrades the live slot to `dormant` and makes it reclaimable
 
 ### Heartbeat coupling
 

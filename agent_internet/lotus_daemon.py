@@ -449,6 +449,34 @@ class LotusApiDaemon:
                 payload = _decode_json_object(body)
                 payload["intent_id"] = unquote(parts[0])
                 return 200, self._call(token, action, payload)
+            if method == "POST" and path.startswith("/v1/lotus/space-claims/"):
+                suffix = path.removeprefix("/v1/lotus/space-claims/")
+                parts = suffix.split("/", 1)
+                if len(parts) != 2 or not parts[0] or not parts[1]:
+                    raise ValueError("invalid_space_claim_path")
+                action = {
+                    "release": "release_space_claim",
+                    "expire": "expire_space_claim",
+                }.get(parts[1])
+                if action is None:
+                    raise ValueError("invalid_space_claim_action")
+                payload = _decode_json_object(body)
+                payload["claim_id"] = unquote(parts[0])
+                return 200, self._call(token, action, payload)
+            if method == "POST" and path.startswith("/v1/lotus/slot-leases/"):
+                suffix = path.removeprefix("/v1/lotus/slot-leases/")
+                parts = suffix.split("/", 1)
+                if len(parts) != 2 or not parts[0] or not parts[1]:
+                    raise ValueError("invalid_slot_lease_path")
+                action = {
+                    "release": "release_slot_lease",
+                    "expire": "expire_slot_lease",
+                }.get(parts[1])
+                if action is None:
+                    raise ValueError("invalid_slot_lease_action")
+                payload = _decode_json_object(body)
+                payload["lease_id"] = unquote(parts[0])
+                return 200, self._call(token, action, payload)
             if method == "POST" and path == "/v1/lotus/addresses/assign":
                 return 200, self._call(token, "assign_addresses", _decode_json_object(body))
             if method == "POST" and path == "/v1/lotus/endpoints":

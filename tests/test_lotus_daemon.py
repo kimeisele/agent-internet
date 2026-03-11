@@ -14,6 +14,7 @@ from agent_internet.models import (
     AssistantSurfaceSnapshot,
     AuthorityExportKind,
     AuthorityExportRecord,
+    ClaimStatus,
     CityEndpoint,
     CityIdentity,
     CityPresence,
@@ -25,7 +26,9 @@ from agent_internet.models import (
     LeaseStatus,
     LotusApiScope,
     PublicationState,
+    SlotDescriptor,
     SlotLeaseRecord,
+    SlotStatus,
     SpaceClaimRecord,
     TrustLevel,
     TrustRecord,
@@ -1195,6 +1198,31 @@ def test_lotus_daemon_lists_claims_and_leases_http_api(tmp_path):
         status, leases = _request_json(daemon.base_url, "/v1/lotus/slot-leases", token=root_secret)
         assert status == 200
         assert leases["slot_leases"][0]["lease_id"] == "lease-1"
+    finally:
+        daemon.shutdown()
+
+
+def test_lotus_daemon_transitions_claims_and_leases_http_api(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+
+    def _seed_transitions(plane):
+        plane.upsert_slot(SlotDescriptor(slot_id="slot-1", space_id="space-1", slot_kind="general", holder_subject_id="operator-1", status=SlotStatus.ACTIVE))
+        plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-1", source_intent_id="intent-space-1", subject_id="operator-1", space_id="space-1", granted_at=20.0))
+        plane.upsert_slot_lease(SlotLeaseRecord(lease_id="lease-1", source_intent_id="intent-slot-1", holder_subject_id="operator-1", space_id="space-1", slot_id="slot-1", status=LeaseStatus.ACTIVE, granted_at=21.0))
+        return LotusControlPlaneAPI(plane).issue_token(subject="governor", scopes=(LotusApiScope.CONTRACT_WRITE.value,), token_secret="claims-write-root", token_id="tok-claims-write-root").secret
+
+    root_secret = store.update(_seed_transitions)
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        status, claim = _request_json(daemon.base_url, "/v1/lotus/space-claims/claim-1/release", method="POST", token=root_secret, payload={"now": 30.0})
+        assert status == 200
+        assert claim["space_claim"]["status"] == ClaimStatus.RELEASED.value
+
+        status, lease = _request_json(daemon.base_url, "/v1/lotus/slot-leases/lease-1/expire", method="POST", token=root_secret, payload={"now": 40.0})
+        assert status == 200
+        assert lease["slot_lease"]["status"] == LeaseStatus.EXPIRED.value
     finally:
         daemon.shutdown()
 

@@ -36,7 +36,7 @@ from .agent_web_semantic_graph import read_agent_web_semantic_neighbors
 from .agent_web_wordnet_bridge import load_agent_web_wordnet_bridge
 from .assistant_surface import assistant_surface_snapshot_from_repo_root
 from .control_plane import AgentInternetControlPlane
-from .models import EndpointVisibility, IntentRecord, IntentStatus, IntentType, LotusApiScope, LotusApiToken
+from .models import ClaimStatus, EndpointVisibility, IntentRecord, IntentStatus, IntentType, LeaseStatus, LotusApiScope, LotusApiToken
 from .snapshot import snapshot_control_plane
 from .steward_protocol_compat import summarize_steward_protocol_bindings
 
@@ -47,10 +47,14 @@ LOTUS_MUTATING_ACTIONS = frozenset(
         "accept_intent",
         "cancel_intent",
         "create_intent",
+        "expire_slot_lease",
+        "expire_space_claim",
         "fulfill_intent",
         "import_authority_bundle",
         "issue_token",
         "run_projection_reconcile_once",
+        "release_slot_lease",
+        "release_space_claim",
         "set_source_authority_feed_enabled",
         "publish_endpoint",
         "publish_route",
@@ -92,6 +96,26 @@ class LotusControlPlaneAPI:
             updated_at=updated_at,
         )
         return {"token_id": token.token_id, "intent": asdict(intent)}
+
+    def _transition_space_claim(self, *, bearer_token: str, payload: dict, status: ClaimStatus) -> dict:
+        token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.CONTRACT_WRITE.value,))
+        updated_at = float(time.time() if payload.get("now") is None else payload["now"])
+        claim = self.plane.transition_space_claim(
+            claim_id=str(payload["claim_id"]),
+            status=status,
+            updated_at=updated_at,
+        )
+        return {"token_id": token.token_id, "space_claim": asdict(claim)}
+
+    def _transition_slot_lease(self, *, bearer_token: str, payload: dict, status: LeaseStatus) -> dict:
+        token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.CONTRACT_WRITE.value,))
+        updated_at = float(time.time() if payload.get("now") is None else payload["now"])
+        lease = self.plane.transition_slot_lease(
+            lease_id=str(payload["lease_id"]),
+            status=status,
+            updated_at=updated_at,
+        )
+        return {"token_id": token.token_id, "slot_lease": asdict(lease)}
 
     def issue_token(
         self,
@@ -144,6 +168,14 @@ class LotusControlPlaneAPI:
         if action == "list_slot_leases":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "slot_leases": [asdict(lease) for lease in self.plane.registry.list_slot_leases()]}
+        if action == "release_space_claim":
+            return self._transition_space_claim(bearer_token=bearer_token, payload=params, status=ClaimStatus.RELEASED)
+        if action == "expire_space_claim":
+            return self._transition_space_claim(bearer_token=bearer_token, payload=params, status=ClaimStatus.EXPIRED)
+        if action == "release_slot_lease":
+            return self._transition_slot_lease(bearer_token=bearer_token, payload=params, status=LeaseStatus.RELEASED)
+        if action == "expire_slot_lease":
+            return self._transition_slot_lease(bearer_token=bearer_token, payload=params, status=LeaseStatus.EXPIRED)
         if action == "list_repo_roles":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "repo_roles": [asdict(record) for record in self.plane.registry.list_repo_roles()]}
