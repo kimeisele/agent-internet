@@ -10,6 +10,8 @@ from agent_internet.models import (
     IntentRecord,
     IntentStatus,
     IntentType,
+    SlotDescriptor,
+    SlotStatus,
 )
 
 
@@ -85,6 +87,39 @@ def test_slot_request_actuator():
     outcome = registry.actuate(intent, context)
     assert outcome.result == ActuatorResult.SUCCESS
     assert len(plane.registry.list_slots()) == 1
+    assert outcome.artifacts["reclaimed"] is False
+
+
+def test_slot_request_actuator_reclaims_matching_dormant_slot():
+    plane = AgentInternetControlPlane()
+    plane.upsert_slot(
+        SlotDescriptor(
+            slot_id="slot-reclaim",
+            space_id="space-1",
+            slot_kind="general",
+            holder_subject_id="old-holder",
+            status=SlotStatus.DORMANT,
+            reclaimable_since_at=10.0,
+            lease_expires_at=10.0,
+            heartbeat_source="steward-protocol/mahamantra",
+            heartbeat=2,
+        )
+    )
+    registry = IntentActuatorRegistry.with_defaults()
+    intent = _make_intent(IntentType.REQUEST_SLOT, space_id="space-1", created_at=20.0, labels={"slot_kind": "general"})
+    context = ActuationContext(control_plane=plane)
+
+    outcome = registry.actuate(intent, context)
+
+    assert outcome.result == ActuatorResult.SUCCESS
+    assert outcome.artifacts == {"slot_id": "slot-reclaim", "reclaimed": True}
+    stored = plane.registry.get_slot("slot-reclaim")
+    assert stored is not None
+    assert stored.holder_subject_id == "operator-1"
+    assert stored.status == SlotStatus.ACTIVE
+    assert stored.last_seen_at == 20.0
+    assert stored.lease_expires_at is None
+    assert stored.reclaimable_since_at is None
 
 
 def test_actuate_pending_skips_non_accepted():

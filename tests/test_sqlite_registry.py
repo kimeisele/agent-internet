@@ -151,12 +151,14 @@ def test_space_and_slot():
         status=SlotStatus.ACTIVE,
         last_seen_at=100.0,
         lease_expires_at=200.0,
+        reclaimable_since_at=200.0,
     )
     reg.upsert_slot(slot)
     stored_slot = reg.get_slot("sl-1")
     assert stored_slot is not None
     assert stored_slot.last_seen_at == 100.0
     assert stored_slot.lease_expires_at == 200.0
+    assert stored_slot.reclaimable_since_at == 200.0
 
 
 def test_fork_lineage():

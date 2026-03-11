@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from secrets import token_hex
 
@@ -276,25 +276,47 @@ class SlotRequestActuator(IntentActuator):
         from .models import SlotDescriptor, SlotStatus
 
         plane = context.control_plane
-        slot_id = intent.slot_id or f"slot_{token_hex(6)}"
-        slot = SlotDescriptor(
-            slot_id=slot_id,
-            space_id=intent.space_id,
-            slot_kind=intent.labels.get("slot_kind", "general"),
-            holder_subject_id=intent.requested_by_subject_id,
-            status=SlotStatus.ACTIVE,
-            labels=dict(intent.labels),
-        )
+        slot_kind = intent.labels.get("slot_kind", "general")
+        now = float(intent.updated_at or intent.created_at or time.time())
+        reclaimed = plane.find_reclaimable_slot(space_id=intent.space_id, slot_kind=slot_kind, now=now)
+        if reclaimed is not None:
+            slot_id = reclaimed.slot_id
+            slot = replace(
+                reclaimed,
+                holder_subject_id=intent.requested_by_subject_id,
+                status=SlotStatus.ACTIVE,
+                heartbeat_source="",
+                heartbeat=None,
+                last_seen_at=now,
+                lease_expires_at=None,
+                reclaimable_since_at=None,
+                labels=dict(intent.labels),
+            )
+            detail = f"Slot {slot_id} reclaimed"
+            artifacts = {"slot_id": slot_id, "reclaimed": True}
+        else:
+            slot_id = intent.slot_id or f"slot_{token_hex(6)}"
+            slot = SlotDescriptor(
+                slot_id=slot_id,
+                space_id=intent.space_id,
+                slot_kind=slot_kind,
+                holder_subject_id=intent.requested_by_subject_id,
+                status=SlotStatus.ACTIVE,
+                last_seen_at=now,
+                labels=dict(intent.labels),
+            )
+            detail = f"Slot {slot_id} allocated"
+            artifacts = {"slot_id": slot_id, "reclaimed": False}
 
         if not context.dry_run:
             plane.upsert_slot(slot)
-            logger.info("Allocated slot %s for intent %s", slot_id, intent.intent_id)
+            logger.info("%s for intent %s", detail, intent.intent_id)
 
         return ActuationOutcome(
             intent_id=intent.intent_id,
             result=ActuatorResult.SUCCESS,
-            detail=f"Slot {slot_id} allocated",
-            artifacts={"slot_id": slot_id},
+            detail=detail,
+            artifacts=artifacts,
         )
 
 

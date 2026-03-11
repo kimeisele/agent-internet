@@ -8,7 +8,7 @@ from agent_internet.assistant_surface import assistant_social_slot_from_snapshot
 from agent_internet.agent_city_contract import AgentCityFilesystemContract
 from agent_internet.control_plane import AGENT_INTERNET_REPO_ID, AGENT_WORLD_PUBLIC_WIKI_BINDING_ID, AGENT_WORLD_REPO_ID, STEWARD_PROTOCOL_REPO_ID, STEWARD_PUBLIC_WIKI_BINDING_ID, AgentInternetControlPlane
 from agent_internet.filesystem_transport import FilesystemFederationTransport
-from agent_internet.models import AssistantSurfaceSnapshot, AuthorityExportKind, AuthorityExportRecord, CityEndpoint, CityIdentity, EndpointVisibility, ForkLineageRecord, ForkMode, HealthStatus, IntentRecord, IntentStatus, IntentType, LotusApiScope, ProjectionFailurePolicy, ProjectionMode, PublicationState, RepoRole, SlotStatus, SpaceKind, TrustLevel, TrustRecord, UpstreamSyncPolicy
+from agent_internet.models import AssistantSurfaceSnapshot, AuthorityExportKind, AuthorityExportRecord, CityEndpoint, CityIdentity, EndpointVisibility, ForkLineageRecord, ForkMode, HealthStatus, IntentRecord, IntentStatus, IntentType, LotusApiScope, ProjectionFailurePolicy, ProjectionMode, PublicationState, RepoRole, SlotDescriptor, SlotStatus, SpaceKind, TrustLevel, TrustRecord, UpstreamSyncPolicy
 from agent_internet.snapshot import restore_control_plane, snapshot_control_plane
 
 
@@ -313,10 +313,40 @@ def test_control_plane_publishes_and_restores_assistant_space_and_slot(monkeypat
     assert space.last_seen_at == 100.0
     assert slot.last_seen_at == 100.0
     assert slot.lease_expires_at == 7300.0
+    assert slot.reclaimable_since_at == 7300.0
     assert space.labels["campaign_count"] == "1"
     assert slot.labels["campaign_focus"] == "Internet adaptation"
     assert restored.registry.get_space(space.space_id) == space
     assert restored.registry.get_slot(slot.slot_id) == slot
+
+
+def test_find_reclaimable_slot_filters_by_space_kind_and_time():
+    plane = AgentInternetControlPlane()
+    plane.upsert_slot(
+        SlotDescriptor(
+            slot_id="slot-a",
+            space_id="space-1",
+            slot_kind="general",
+            holder_subject_id="old-a",
+            status=SlotStatus.DORMANT,
+            reclaimable_since_at=50.0,
+        )
+    )
+    plane.upsert_slot(
+        SlotDescriptor(
+            slot_id="slot-b",
+            space_id="space-1",
+            slot_kind="assistant_social",
+            holder_subject_id="old-b",
+            status=SlotStatus.DORMANT,
+            reclaimable_since_at=40.0,
+        )
+    )
+
+    found = plane.find_reclaimable_slot(space_id="space-1", slot_kind="general", now=60.0)
+
+    assert found is not None
+    assert found.slot_id == "slot-a"
 
 
 def test_control_plane_publishes_and_restores_fork_lineage():

@@ -161,6 +161,7 @@ CREATE TABLE IF NOT EXISTS slots (
     heartbeat INTEGER,
     last_seen_at REAL,
     lease_expires_at REAL,
+    reclaimable_since_at REAL,
     labels TEXT NOT NULL DEFAULT '{}'
 );
 
@@ -247,6 +248,7 @@ class SqliteCityRegistry:
         _ensure_column(conn, "spaces", "last_seen_at", "REAL")
         _ensure_column(conn, "slots", "last_seen_at", "REAL")
         _ensure_column(conn, "slots", "lease_expires_at", "REAL")
+        _ensure_column(conn, "slots", "reclaimable_since_at", "REAL")
         conn.execute("INSERT OR IGNORE INTO allocator (key, value) VALUES ('next_link_id', 1)")
         conn.execute("INSERT OR IGNORE INTO allocator (key, value) VALUES ('next_network_id', 1)")
         conn.commit()
@@ -547,8 +549,8 @@ class SqliteCityRegistry:
 
     def upsert_slot(self, slot: SlotDescriptor) -> None:
         self._execute_write(
-            "INSERT OR REPLACE INTO slots (slot_id, space_id, slot_kind, holder_subject_id, status, capacity, heartbeat_source, heartbeat, last_seen_at, lease_expires_at, labels) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (slot.slot_id, slot.space_id, slot.slot_kind, slot.holder_subject_id, slot.status.value, slot.capacity, slot.heartbeat_source, slot.heartbeat, slot.last_seen_at, slot.lease_expires_at, json.dumps(slot.labels)),
+            "INSERT OR REPLACE INTO slots (slot_id, space_id, slot_kind, holder_subject_id, status, capacity, heartbeat_source, heartbeat, last_seen_at, lease_expires_at, reclaimable_since_at, labels) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (slot.slot_id, slot.space_id, slot.slot_kind, slot.holder_subject_id, slot.status.value, slot.capacity, slot.heartbeat_source, slot.heartbeat, slot.last_seen_at, slot.lease_expires_at, slot.reclaimable_since_at, json.dumps(slot.labels)),
         )
 
     def get_slot(self, slot_id: str) -> SlotDescriptor | None:
@@ -567,7 +569,7 @@ class SqliteCityRegistry:
             slot_id=row["slot_id"], space_id=row["space_id"], slot_kind=row["slot_kind"],
             holder_subject_id=row["holder_subject_id"], status=SlotStatus(row["status"]),
             capacity=row["capacity"], heartbeat_source=row["heartbeat_source"],
-            heartbeat=row["heartbeat"], last_seen_at=row["last_seen_at"], lease_expires_at=row["lease_expires_at"], labels=json.loads(row["labels"]),
+            heartbeat=row["heartbeat"], last_seen_at=row["last_seen_at"], lease_expires_at=row["lease_expires_at"], reclaimable_since_at=row["reclaimable_since_at"], labels=json.loads(row["labels"]),
         )
 
     # --- Fork lineage ---

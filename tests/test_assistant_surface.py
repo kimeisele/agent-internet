@@ -106,6 +106,7 @@ def test_assistant_surface_snapshot_projects_space_and_slot(tmp_path, monkeypatc
     assert space.last_seen_at == 30.0
     assert slot.last_seen_at == 30.0
     assert slot.lease_expires_at == 7230.0
+    assert slot.reclaimable_since_at == 7230.0
     assert slot.labels["total_posts"] == "2"
     assert space.labels["campaign_count"] == "0"
     assert slot.labels["campaign_count"] == "0"
@@ -127,6 +128,7 @@ def test_assistant_surface_projects_stale_slot_as_dormant(tmp_path, monkeypatch)
 
     assert slot.status == SlotStatus.DORMANT
     assert slot.lease_expires_at == 7230.0
+    assert slot.reclaimable_since_at == 7230.0
 
 
 def test_assistant_surface_projects_campaign_focus_labels(tmp_path):
