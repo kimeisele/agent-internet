@@ -61,6 +61,8 @@ class LotusApiDaemon:
     _thread: Thread | None = field(default=None, init=False, repr=False)
     _grant_sweep_thread: Thread | None = field(default=None, init=False, repr=False)
     _stop_event: Event = field(default_factory=Event, init=False, repr=False)
+    _last_grant_sweep_summary: dict[str, object] | None = field(default=None, init=False, repr=False)
+    _last_grant_sweep_error: dict[str, object] | None = field(default=None, init=False, repr=False)
 
     def start(self) -> None:
         if self._httpd is not None:
@@ -121,6 +123,8 @@ class LotusApiDaemon:
         summary = ControlPlaneStateStore(path=self.state_path).update(
             lambda plane: plane.sweep_expired_grants(current_time=current_time),
         )
+        self._last_grant_sweep_summary = dict(summary)
+        self._last_grant_sweep_error = None
         if summary["expired_space_claim_count"] or summary["expired_slot_lease_count"]:
             logger.info(
                 "Lotus daemon expired grant sweep checked_at=%s claims=%s leases=%s",
@@ -136,6 +140,7 @@ class LotusApiDaemon:
             try:
                 self._run_periodic_grant_sweep_once(current_time=time.time())
             except Exception:
+                self._last_grant_sweep_error = {"error": "periodic_grant_sweep_failed", "at": time.time()}
                 logger.exception("Lotus daemon periodic grant sweep failed")
             if self._stop_event.wait(interval):
                 break
@@ -145,17 +150,32 @@ class LotusApiDaemon:
         path = split.path
         query = parse_qs(split.query, keep_blank_values=False)
         if method == "GET" and path == "/healthz":
-            return 200, {"status": "ok", "state_path": str(self.state_path)}
+            return 200, {
+                "status": "ok",
+                "state_path": str(self.state_path),
+                "lotus_capabilities_path": "/v1/lotus/capabilities",
+                "daemon": {
+                    "grant_sweep": {
+                        "enabled": self.grant_sweep_interval_seconds > 0,
+                        "interval_seconds": self.grant_sweep_interval_seconds,
+                        "worker_alive": bool(self._grant_sweep_thread and self._grant_sweep_thread.is_alive()),
+                        "last_summary": self._last_grant_sweep_summary,
+                        "last_error": self._last_grant_sweep_error,
+                    },
+                },
+            }
 
         token = _extract_bearer_token(authorization)
         if not token:
-            return 401, {"error": "missing_bearer_token"}
+            return 401, _error_payload("missing_bearer_token", error_kind="auth", recoverable=True, retryable=False)
 
         try:
             if method == "GET" and path == "/v1/lotus/state":
                 return 200, self._call(token, "show_state", {})
             if method == "GET" and path == "/v1/lotus/steward-protocol":
                 return 200, self._call(token, "show_steward_protocol", {})
+            if method == "GET" and path == "/v1/lotus/capabilities":
+                return 200, self._call(token, "lotus_capabilities", {"base_url": self.base_url})
             if method == "GET" and path == "/v1/lotus/spaces":
                 return 200, self._call(token, "list_spaces", {})
             if method == "GET" and path == "/v1/lotus/slots":
@@ -535,13 +555,26 @@ class LotusApiDaemon:
                 return 200, self._call(token, "refresh_agent_web_federated_index", _decode_json_object(body))
             if method == "POST" and path == "/v1/lotus/agent-web-semantic-overlay/refresh":
                 return 200, self._call(token, "refresh_agent_web_semantic_overlay", _decode_json_object(body))
-            return 404, {"error": "not_found", "path": path}
+            return 404, _error_payload("not_found", error_kind="routing", recoverable=True, retryable=False, context={"path": path})
         except PermissionError as exc:
             message = str(exc)
-            return (401 if message == "invalid_token" else 403), {"error": message}
+            return (401 if message == "invalid_token" else 403), _error_payload(
+                message,
+                error_kind=("auth" if message == "invalid_token" else "authorization"),
+                recoverable=True,
+                retryable=False,
+            )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             message = str(exc)
-            return (404 if message.startswith("unknown_intent:") else 400), {"error": message}
+            return (404 if message.startswith("unknown_") else 400), _error_payload(
+                message,
+                error_kind=("not_found" if message.startswith("unknown_") else "input"),
+                recoverable=True,
+                retryable=False,
+            )
+        except Exception:
+            logger.exception("Lotus daemon request failed")
+            return 500, _error_payload("internal_error", error_kind="internal", recoverable=False, retryable=True)
 
     def _call(self, bearer_token: str, action: str, params: dict) -> dict:
         store = ControlPlaneStateStore(path=self.state_path)
@@ -587,6 +620,24 @@ def _decode_json_object(body: bytes) -> dict:
 def _extract_bearer_token(authorization: str) -> str:
     prefix = "Bearer "
     return authorization[len(prefix) :].strip() if authorization.startswith(prefix) else ""
+
+
+def _error_payload(
+    error_code: str,
+    *,
+    error_kind: str,
+    recoverable: bool,
+    retryable: bool,
+    context: dict[str, object] | None = None,
+) -> dict[str, object]:
+    return {
+        "error": error_code,
+        "error_code": error_code,
+        "error_kind": error_kind,
+        "recoverable": recoverable,
+        "retryable": retryable,
+        "context": dict(context or {}),
+    }
 
 
 def _query_param(query: dict[str, list[str]], name: str) -> str | None:

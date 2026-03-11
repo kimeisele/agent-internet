@@ -137,6 +137,9 @@ def test_lotus_daemon_serves_authenticated_http_api(tmp_path):
         status, health = _request_json(daemon.base_url, "/healthz")
         assert status == 200
         assert health["status"] == "ok"
+        assert health["lotus_capabilities_path"] == "/v1/lotus/capabilities"
+        assert health["daemon"]["grant_sweep"]["enabled"] is False
+        assert health["daemon"]["grant_sweep"]["worker_alive"] is False
 
         status, issued = _request_json(
             daemon.base_url,
@@ -176,6 +179,15 @@ def test_lotus_daemon_serves_authenticated_http_api(tmp_path):
         )
         assert status == 200
         assert resolved["resolved"]["location"] == "https://forum.city-a.example/api"
+
+        status, capabilities = _request_json(
+            daemon.base_url,
+            "/v1/lotus/capabilities",
+            token=operator_secret,
+        )
+        assert status == 200
+        assert capabilities["lotus_capabilities"]["kind"] == "lotus_capability_manifest"
+        assert capabilities["lotus_capabilities"]["discovery"]["manifest_http_path"] == f"{daemon.base_url}/v1/lotus/capabilities"
     finally:
         daemon.shutdown()
 
@@ -190,6 +202,36 @@ def test_lotus_daemon_rejects_missing_auth(tmp_path):
         assert exc_info.value.code == 401
         payload = json.loads(exc_info.value.read().decode("utf-8"))
         assert payload["error"] == "missing_bearer_token"
+        assert payload["error_code"] == "missing_bearer_token"
+        assert payload["error_kind"] == "auth"
+        assert payload["recoverable"] is True
+        assert payload["retryable"] is False
+        assert payload["context"] == {}
+    finally:
+        daemon.shutdown()
+
+
+def test_lotus_daemon_returns_structured_not_found_error(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    root_secret = store.update(
+        lambda plane: LotusControlPlaneAPI(plane).issue_token(
+            subject="root",
+            scopes=(LotusApiScope.READ.value,),
+            token_secret="root-secret",
+            token_id="tok-root",
+        ).secret,
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        with pytest.raises(HTTPError) as exc_info:
+            _request_json(daemon.base_url, "/v1/lotus/not-real", token=root_secret)
+        assert exc_info.value.code == 404
+        payload = json.loads(exc_info.value.read().decode("utf-8"))
+        assert payload["error"] == "not_found"
+        assert payload["error_kind"] == "routing"
+        assert payload["context"]["path"] == "/v1/lotus/not-real"
     finally:
         daemon.shutdown()
 
@@ -1371,6 +1413,11 @@ def test_lotus_daemon_periodic_grant_sweep_expires_due_grants_and_stops_cleanly(
         assert slot is not None
         assert slot.status == SlotStatus.DORMANT
         assert slot.reclaimable_since_at is not None
+        status, health = _request_json(daemon.base_url, "/healthz")
+        assert status == 200
+        assert health["daemon"]["grant_sweep"]["enabled"] is True
+        assert health["daemon"]["grant_sweep"]["worker_alive"] is True
+        assert health["daemon"]["grant_sweep"]["last_summary"]["expired_space_claim_count"] >= 1
     finally:
         daemon.shutdown()
 

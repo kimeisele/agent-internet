@@ -130,6 +130,31 @@ def test_lotus_api_rejects_missing_scope():
         )
 
 
+def test_lotus_api_describes_capabilities_manifest():
+    plane = AgentInternetControlPlane()
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="observer",
+        scopes=(LotusApiScope.READ.value,),
+        token_secret="caps-token",
+        token_id="tok-caps",
+        now=10.0,
+    )
+
+    manifest = api.call(
+        bearer_token=issued.secret,
+        action="lotus_capabilities",
+        params={"base_url": "https://lotus.example"},
+    )
+
+    payload = manifest["lotus_capabilities"]
+    assert payload["kind"] == "lotus_capability_manifest"
+    assert payload["discovery"]["manifest_http_path"] == "https://lotus.example/v1/lotus/capabilities"
+    assert payload["recoverability"]["manual_sweep_action"] == "sweep_expired_grants"
+    assert payload["parseability"]["http_error_envelope_fields"] == ["error", "error_code", "error_kind", "recoverable", "retryable", "context"]
+    assert any(item["lotus_action"] == "create_intent" for item in payload["capabilities"])
+
+
 def test_lotus_api_generates_cli_safe_secret_prefix():
     plane = AgentInternetControlPlane()
     api = LotusControlPlaneAPI(plane)

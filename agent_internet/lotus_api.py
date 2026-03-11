@@ -36,6 +36,7 @@ from .agent_web_semantic_graph import read_agent_web_semantic_neighbors
 from .agent_web_wordnet_bridge import load_agent_web_wordnet_bridge
 from .assistant_surface import assistant_surface_snapshot_from_repo_root
 from .control_plane import AgentInternetControlPlane
+from .lotus_capabilities import build_lotus_capability_manifest
 from .models import ClaimStatus, EndpointVisibility, IntentRecord, IntentStatus, IntentType, LeaseStatus, LotusApiScope, LotusApiToken
 from .snapshot import snapshot_control_plane
 from .steward_protocol_compat import summarize_steward_protocol_bindings
@@ -162,6 +163,12 @@ class LotusControlPlaneAPI:
         if action == "show_steward_protocol":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "bindings": summarize_steward_protocol_bindings()}
+        if action == "lotus_capabilities":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            return {
+                "token_id": token.token_id,
+                "lotus_capabilities": build_lotus_capability_manifest(base_url=(None if payload.get("base_url") in (None, "") else str(payload.get("base_url")))),
+            }
         if action == "list_spaces":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "spaces": [asdict(space) for space in self.plane.registry.list_spaces()]}
