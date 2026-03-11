@@ -56,11 +56,13 @@ class ClaimStatus(StrEnum):
     PENDING = "pending"
     GRANTED = "granted"
     RELEASED = "released"
+    EXPIRED = "expired"
 
 
 class LeaseStatus(StrEnum):
     ACTIVE = "active"
     RELEASED = "released"
+    EXPIRED = "expired"
 
 
 class ForkMode(StrEnum):
@@ -416,6 +418,7 @@ class SpaceClaimRecord:
     status: ClaimStatus = ClaimStatus.GRANTED
     requested_at: float | None = None
     granted_at: float | None = None
+    released_at: float | None = None
     expires_at: float | None = None
     labels: dict[str, str] = field(default_factory=dict)
 
@@ -429,6 +432,7 @@ class SlotLeaseRecord:
     slot_id: str
     status: LeaseStatus = LeaseStatus.ACTIVE
     granted_at: float | None = None
+    released_at: float | None = None
     expires_at: float | None = None
     reclaimable_since_at: float | None = None
     labels: dict[str, str] = field(default_factory=dict)

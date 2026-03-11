@@ -179,6 +179,7 @@ CREATE TABLE IF NOT EXISTS space_claims (
     status TEXT NOT NULL DEFAULT 'granted',
     requested_at REAL,
     granted_at REAL,
+    released_at REAL,
     expires_at REAL,
     labels TEXT NOT NULL DEFAULT '{}'
 );
@@ -191,6 +192,7 @@ CREATE TABLE IF NOT EXISTS slot_leases (
     slot_id TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'active',
     granted_at REAL,
+    released_at REAL,
     expires_at REAL,
     reclaimable_since_at REAL,
     labels TEXT NOT NULL DEFAULT '{}'
@@ -280,6 +282,8 @@ class SqliteCityRegistry:
         _ensure_column(conn, "slots", "last_seen_at", "REAL")
         _ensure_column(conn, "slots", "lease_expires_at", "REAL")
         _ensure_column(conn, "slots", "reclaimable_since_at", "REAL")
+        _ensure_column(conn, "space_claims", "released_at", "REAL")
+        _ensure_column(conn, "slot_leases", "released_at", "REAL")
         conn.execute("INSERT OR IGNORE INTO allocator (key, value) VALUES ('next_link_id', 1)")
         conn.execute("INSERT OR IGNORE INTO allocator (key, value) VALUES ('next_network_id', 1)")
         conn.commit()
@@ -607,8 +611,8 @@ class SqliteCityRegistry:
 
     def upsert_space_claim(self, claim: SpaceClaimRecord) -> None:
         self._execute_write(
-            "INSERT OR REPLACE INTO space_claims (claim_id, source_intent_id, subject_id, space_id, slot_id, claim_type, status, requested_at, granted_at, expires_at, labels) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (claim.claim_id, claim.source_intent_id, claim.subject_id, claim.space_id, claim.slot_id, claim.claim_type, claim.status.value, claim.requested_at, claim.granted_at, claim.expires_at, json.dumps(claim.labels)),
+            "INSERT OR REPLACE INTO space_claims (claim_id, source_intent_id, subject_id, space_id, slot_id, claim_type, status, requested_at, granted_at, released_at, expires_at, labels) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (claim.claim_id, claim.source_intent_id, claim.subject_id, claim.space_id, claim.slot_id, claim.claim_type, claim.status.value, claim.requested_at, claim.granted_at, claim.released_at, claim.expires_at, json.dumps(claim.labels)),
         )
 
     def get_space_claim(self, claim_id: str) -> SpaceClaimRecord | None:
@@ -626,15 +630,15 @@ class SqliteCityRegistry:
         return SpaceClaimRecord(
             claim_id=row["claim_id"], source_intent_id=row["source_intent_id"], subject_id=row["subject_id"],
             space_id=row["space_id"], slot_id=row["slot_id"], claim_type=row["claim_type"], status=ClaimStatus(row["status"]),
-            requested_at=row["requested_at"], granted_at=row["granted_at"], expires_at=row["expires_at"], labels=json.loads(row["labels"]),
+            requested_at=row["requested_at"], granted_at=row["granted_at"], released_at=row["released_at"], expires_at=row["expires_at"], labels=json.loads(row["labels"]),
         )
 
     # --- Slot leases ---
 
     def upsert_slot_lease(self, lease: SlotLeaseRecord) -> None:
         self._execute_write(
-            "INSERT OR REPLACE INTO slot_leases (lease_id, source_intent_id, holder_subject_id, space_id, slot_id, status, granted_at, expires_at, reclaimable_since_at, labels) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (lease.lease_id, lease.source_intent_id, lease.holder_subject_id, lease.space_id, lease.slot_id, lease.status.value, lease.granted_at, lease.expires_at, lease.reclaimable_since_at, json.dumps(lease.labels)),
+            "INSERT OR REPLACE INTO slot_leases (lease_id, source_intent_id, holder_subject_id, space_id, slot_id, status, granted_at, released_at, expires_at, reclaimable_since_at, labels) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (lease.lease_id, lease.source_intent_id, lease.holder_subject_id, lease.space_id, lease.slot_id, lease.status.value, lease.granted_at, lease.released_at, lease.expires_at, lease.reclaimable_since_at, json.dumps(lease.labels)),
         )
 
     def get_slot_lease(self, lease_id: str) -> SlotLeaseRecord | None:
@@ -652,7 +656,7 @@ class SqliteCityRegistry:
         return SlotLeaseRecord(
             lease_id=row["lease_id"], source_intent_id=row["source_intent_id"], holder_subject_id=row["holder_subject_id"],
             space_id=row["space_id"], slot_id=row["slot_id"], status=LeaseStatus(row["status"]), granted_at=row["granted_at"],
-            expires_at=row["expires_at"], reclaimable_since_at=row["reclaimable_since_at"], labels=json.loads(row["labels"]),
+            released_at=row["released_at"], expires_at=row["expires_at"], reclaimable_since_at=row["reclaimable_since_at"], labels=json.loads(row["labels"]),
         )
 
     # --- Fork lineage ---

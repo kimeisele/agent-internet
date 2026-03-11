@@ -24,6 +24,7 @@ from .models import (
     AuthorityArtifactRecord,
     AuthorityExportKind,
     AuthorityExportRecord,
+    ClaimStatus,
     CityEndpoint,
     CityIdentity,
     CityPresence,
@@ -32,6 +33,7 @@ from .models import (
     HostedEndpoint,
     IntentRecord,
     IntentStatus,
+    LeaseStatus,
     LotusApiToken,
     LotusLinkAddress,
     LotusNetworkAddress,
@@ -355,6 +357,55 @@ class AgentInternetControlPlane:
 
     def upsert_slot_lease(self, lease: SlotLeaseRecord) -> None:
         self.registry.upsert_slot_lease(lease)
+
+    def transition_space_claim(self, *, claim_id: str, status: ClaimStatus, updated_at: float | None = None) -> SpaceClaimRecord:
+        claim = self.registry.get_space_claim(claim_id)
+        if claim is None:
+            raise ValueError(f"unknown_space_claim:{claim_id}")
+        allowed_transitions = {
+            ClaimStatus.GRANTED: {ClaimStatus.RELEASED, ClaimStatus.EXPIRED},
+        }
+        if status not in allowed_transitions.get(claim.status, set()):
+            raise ValueError(f"invalid_space_claim_transition:{claim.status.value}->{status.value}")
+        transitioned_at = float(time.time() if updated_at is None else updated_at)
+        updated = replace(
+            claim,
+            status=status,
+            released_at=(transitioned_at if status == ClaimStatus.RELEASED else claim.released_at),
+            expires_at=(transitioned_at if status == ClaimStatus.EXPIRED and claim.expires_at is None else claim.expires_at),
+        )
+        self.registry.upsert_space_claim(updated)
+        return updated
+
+    def transition_slot_lease(self, *, lease_id: str, status: LeaseStatus, updated_at: float | None = None) -> SlotLeaseRecord:
+        lease = self.registry.get_slot_lease(lease_id)
+        if lease is None:
+            raise ValueError(f"unknown_slot_lease:{lease_id}")
+        allowed_transitions = {
+            LeaseStatus.ACTIVE: {LeaseStatus.RELEASED, LeaseStatus.EXPIRED},
+        }
+        if status not in allowed_transitions.get(lease.status, set()):
+            raise ValueError(f"invalid_slot_lease_transition:{lease.status.value}->{status.value}")
+        transitioned_at = float(time.time() if updated_at is None else updated_at)
+        updated = replace(
+            lease,
+            status=status,
+            released_at=(transitioned_at if status == LeaseStatus.RELEASED else lease.released_at),
+            expires_at=(transitioned_at if status == LeaseStatus.EXPIRED and lease.expires_at is None else lease.expires_at),
+            reclaimable_since_at=transitioned_at,
+        )
+        self.registry.upsert_slot_lease(updated)
+        slot = self.registry.get_slot(updated.slot_id)
+        if slot is not None:
+            self.registry.upsert_slot(
+                replace(
+                    slot,
+                    status=SlotStatus.DORMANT,
+                    lease_expires_at=transitioned_at,
+                    reclaimable_since_at=transitioned_at,
+                )
+            )
+        return updated
 
     def find_reclaimable_slot(self, *, space_id: str, slot_kind: str = "", now: float | None = None) -> SlotDescriptor | None:
         current = float(time.time() if now is None else now)

@@ -9,6 +9,7 @@ from agent_internet.models import (
     AssistantSurfaceSnapshot,
     AuthorityExportKind,
     AuthorityExportRecord,
+    ClaimStatus,
     CityEndpoint,
     CityIdentity,
     ForkLineageRecord,
@@ -20,7 +21,9 @@ from agent_internet.models import (
     PublicationState,
     ProjectionReconcileState,
     ProjectionReconcileStatusRecord,
+    SlotDescriptor,
     SlotLeaseRecord,
+    SlotStatus,
     SpaceClaimRecord,
     TrustLevel,
     TrustRecord,
@@ -841,6 +844,24 @@ def test_lotus_api_lists_space_claims_and_slot_leases():
 
     assert claims["space_claims"][0]["claim_id"] == "claim-1"
     assert leases["slot_leases"][0]["lease_id"] == "lease-1"
+
+
+def test_lotus_api_transitions_claims_and_leases():
+    plane = AgentInternetControlPlane()
+    plane.upsert_slot(SlotDescriptor(slot_id="slot-1", space_id="space-1", slot_kind="general", holder_subject_id="operator-1", status=SlotStatus.ACTIVE))
+    plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-1", source_intent_id="intent-space-1", subject_id="operator-1", space_id="space-1", granted_at=20.0))
+    plane.upsert_slot_lease(SlotLeaseRecord(lease_id="lease-1", source_intent_id="intent-slot-1", holder_subject_id="operator-1", space_id="space-1", slot_id="slot-1", status=LeaseStatus.ACTIVE, granted_at=21.0))
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(subject="governor", scopes=(LotusApiScope.CONTRACT_WRITE.value,), token_secret="claims-write-token", now=10.0)
+
+    claim = api.call(bearer_token=issued.secret, action="release_space_claim", params={"claim_id": "claim-1", "now": 30.0})
+    lease = api.call(bearer_token=issued.secret, action="expire_slot_lease", params={"lease_id": "lease-1", "now": 40.0})
+
+    assert claim["space_claim"]["status"] == ClaimStatus.RELEASED.value
+    assert claim["space_claim"]["released_at"] == 30.0
+    assert lease["slot_lease"]["status"] == LeaseStatus.EXPIRED.value
+    assert lease["slot_lease"]["expires_at"] == 40.0
+    assert plane.registry.get_slot("slot-1").status == SlotStatus.DORMANT
 
 
 def test_lotus_api_lists_federation_contract_records():

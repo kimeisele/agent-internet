@@ -204,6 +204,7 @@ def test_space_claim_and_slot_lease():
     stored_claim = reg.get_space_claim("claim-1")
     assert stored_claim is not None
     assert stored_claim.source_intent_id == "intent-1"
+    assert stored_claim.released_at is None
     assert len(reg.list_space_claims()) == 1
 
     lease = SlotLeaseRecord(
@@ -220,8 +221,44 @@ def test_space_claim_and_slot_lease():
     stored_lease = reg.get_slot_lease("lease-1")
     assert stored_lease is not None
     assert stored_lease.slot_id == "slot-1"
+    assert stored_lease.released_at is None
     assert stored_lease.reclaimable_since_at == 42.0
     assert len(reg.list_slot_leases()) == 1
+
+
+def test_space_claim_and_slot_lease_transition_fields_roundtrip():
+    reg = SqliteCityRegistry()
+    reg.upsert_space_claim(
+        SpaceClaimRecord(
+            claim_id="claim-2",
+            source_intent_id="intent-3",
+            subject_id="operator-2",
+            space_id="space-2",
+            status=ClaimStatus.RELEASED,
+            granted_at=20.0,
+            released_at=25.0,
+        )
+    )
+    reg.upsert_slot_lease(
+        SlotLeaseRecord(
+            lease_id="lease-2",
+            source_intent_id="intent-4",
+            holder_subject_id="operator-2",
+            space_id="space-2",
+            slot_id="slot-2",
+            status=LeaseStatus.EXPIRED,
+            granted_at=21.0,
+            released_at=22.0,
+            expires_at=30.0,
+            reclaimable_since_at=30.0,
+        )
+    )
+
+    assert reg.get_space_claim("claim-2").released_at == 25.0
+    stored_lease = reg.get_slot_lease("lease-2")
+    assert stored_lease is not None
+    assert stored_lease.status == LeaseStatus.EXPIRED
+    assert stored_lease.released_at == 22.0
 
 
 def test_presence():
