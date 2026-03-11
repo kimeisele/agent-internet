@@ -3,9 +3,14 @@
 ### Role in the stack
 
 - `steward-protocol` = substrate and canonical protocol primitives
-- `steward` = single superagent runtime
+- `agent-world` = world authority and governance source
 - `agent-city` = local multi-agent city runtime
-- `agent-internet` = inter-city control plane
+- `agent-internet` = public membrane, discovery, routing, and projection operator
+
+Supporting surfaces that are **not** additional world layers:
+
+- `agent-template` = onboarding/tooling surface for new federation nodes
+- `steward-agent` and similar repos = participant/service layers unless a separate boundary doc promotes them
 
 ### Source vs projection split
 
