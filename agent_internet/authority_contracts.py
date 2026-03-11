@@ -25,7 +25,7 @@ STEWARD_PUBLIC_AUTHORITY_CONTRACT = PublicAuthoritySourceContract(
     source_repo_id="steward-protocol",
     binding_id="steward-public-wiki",
     feed_id="steward-authority-bundle",
-    target_locator="github.com/kimeisele/steward-protocol.wiki.git",
+    target_locator="github.com/kimeisele/agent-internet.wiki.git",
     owner_boundary="normative_protocol_surface",
     source_exports=(
         AuthorityExportKind.CANONICAL_SURFACE.value,
@@ -43,7 +43,7 @@ AGENT_WORLD_PUBLIC_AUTHORITY_CONTRACT = PublicAuthoritySourceContract(
     source_repo_id="agent-world",
     binding_id="agent-world-public-wiki",
     feed_id="agent-world-authority-bundle",
-    target_locator="github.com/kimeisele/agent-world.wiki.git",
+    target_locator="github.com/kimeisele/agent-internet.wiki.git",
     owner_boundary="world_governance_surface",
     source_exports=(
         AuthorityExportKind.CANONICAL_SURFACE.value,

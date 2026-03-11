@@ -354,6 +354,7 @@ def test_control_plane_bootstraps_explicit_steward_public_wiki_contract():
     assert binding.required_export_kind == AuthorityExportKind.CANONICAL_SURFACE
     assert binding.projection_mode == ProjectionMode.REQUIRED
     assert binding.failure_policy == ProjectionFailurePolicy.FAIL_CLOSED
+    assert binding.target_locator == "github.com/kimeisele/agent-internet.wiki.git"
     assert status.status == PublicationState.BLOCKED
     assert status.failure_reason == "missing_authority_export:steward-protocol:canonical_surface"
 
@@ -480,7 +481,7 @@ def test_control_plane_bootstraps_agent_world_public_wiki_contract():
 
     assert result["binding"].binding_id == AGENT_WORLD_PUBLIC_WIKI_BINDING_ID
     assert binding is not None
-    assert binding.target_locator == "github.com/kimeisele/agent-world.wiki.git"
+    assert binding.target_locator == "github.com/kimeisele/agent-internet.wiki.git"
     assert role is not None
     assert role.owner_boundary == "world_governance_surface"
     assert operator is not None

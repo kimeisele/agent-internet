@@ -4,10 +4,10 @@ from hashlib import sha256
 
 import pytest
 
-from agent_internet.control_plane import AGENT_WORLD_PUBLIC_WIKI_BINDING_ID, AGENT_WORLD_REPO_ID, STEWARD_PROTOCOL_REPO_ID, STEWARD_PUBLIC_WIKI_BINDING_ID
+from agent_internet.control_plane import AGENT_WORLD_PUBLIC_WIKI_BINDING_ID, AGENT_WORLD_REPO_ID, STEWARD_PROTOCOL_REPO_ID, STEWARD_PUBLIC_WIKI_BINDING_ID, AgentInternetControlPlane
 from agent_internet.models import AuthorityExportKind, AuthorityExportRecord, PublicationState
 from agent_internet.publication_status import sanitize_remote_url
-from agent_internet.publisher import build_agent_internet_peer_descriptor, build_agent_internet_wiki, probe_wiki_remote, publish_agent_internet_wiki
+from agent_internet.publisher import _matching_projection_bindings, build_agent_internet_peer_descriptor, build_agent_internet_wiki, probe_wiki_remote, publish_agent_internet_wiki
 from agent_internet.snapshot import ControlPlaneStateStore
 
 
@@ -387,6 +387,15 @@ def test_sanitize_remote_url_removes_embedded_credentials():
     sanitized = sanitize_remote_url("https://x-access-token:secret-token@github.com/org/agent-internet.wiki.git")
 
     assert sanitized == "https://github.com/org/agent-internet.wiki.git"
+
+
+def test_matching_projection_bindings_matches_bootstrapped_authority_contracts_for_agent_internet_wiki():
+    plane = AgentInternetControlPlane()
+    plane.bootstrap_default_public_wiki_contracts(now=100.0)
+
+    matches = _matching_projection_bindings(plane, wiki_repo_url="https://github.com/kimeisele/agent-internet.wiki.git")
+
+    assert {binding.binding_id for binding in matches} == {STEWARD_PUBLIC_WIKI_BINDING_ID, AGENT_WORLD_PUBLIC_WIKI_BINDING_ID}
 
 
 def test_build_agent_internet_wiki_materializes_pages(tmp_path):
