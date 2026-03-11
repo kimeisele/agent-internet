@@ -101,6 +101,10 @@ Fields:
 - `slot_kind` (`service`, `assistant`, `route`, `feed`, `operator`, `mission`)
 - `capacity`
 - `status`
+- `heartbeat_source`
+- `heartbeat_epoch`
+- `last_seen_at`
+- `lease_expires_at`
 - `labels`
 
 #### `SpaceClaim`
@@ -138,6 +142,12 @@ Minimum rule:
 - `heartbeat_source` identifies which upstream timing authority drives it
 - `heartbeat_epoch` identifies the observed cycle or tick window
 - `last_seen_at` records freshness
+
+Current consequence rule:
+- a commons slot may carry a **soft lease** derived from heartbeat freshness
+- while `now <= lease_expires_at`, a live slot may remain `active`
+- once freshness expires or the city is observed `offline`, the slot degrades to `dormant`
+- the slot is not automatically deleted; reclaim / reassignment policy remains a separate later step
 
 For now the canonical heartbeat source is expected to come from
 `steward-protocol` / Mahamantra, even when execution is embodied inside

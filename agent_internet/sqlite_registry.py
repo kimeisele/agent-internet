@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS spaces (
     repo TEXT NOT NULL DEFAULT '',
     heartbeat_source TEXT NOT NULL DEFAULT '',
     heartbeat INTEGER,
+    last_seen_at REAL,
     labels TEXT NOT NULL DEFAULT '{}'
 );
 
@@ -158,6 +159,8 @@ CREATE TABLE IF NOT EXISTS slots (
     capacity INTEGER NOT NULL DEFAULT 1,
     heartbeat_source TEXT NOT NULL DEFAULT '',
     heartbeat INTEGER,
+    last_seen_at REAL,
+    lease_expires_at REAL,
     labels TEXT NOT NULL DEFAULT '{}'
 );
 
@@ -202,6 +205,13 @@ CREATE TABLE IF NOT EXISTS allocator (
 """
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, column_sql: str) -> None:
+    existing = {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column in existing:
+        return
+    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_sql}")
+
+
 def _lease_active(expires_at: float | None, now: float | None) -> bool:
     current = time.time() if now is None else now
     return expires_at is None or expires_at > current
@@ -234,6 +244,9 @@ class SqliteCityRegistry:
             self._shared_conn.row_factory = sqlite3.Row
         conn = self._conn()
         conn.executescript(_SCHEMA)
+        _ensure_column(conn, "spaces", "last_seen_at", "REAL")
+        _ensure_column(conn, "slots", "last_seen_at", "REAL")
+        _ensure_column(conn, "slots", "lease_expires_at", "REAL")
         conn.execute("INSERT OR IGNORE INTO allocator (key, value) VALUES ('next_link_id', 1)")
         conn.execute("INSERT OR IGNORE INTO allocator (key, value) VALUES ('next_network_id', 1)")
         conn.commit()
@@ -508,8 +521,8 @@ class SqliteCityRegistry:
 
     def upsert_space(self, space: SpaceDescriptor) -> None:
         self._execute_write(
-            "INSERT OR REPLACE INTO spaces (space_id, kind, owner_subject_id, display_name, city_id, repo, heartbeat_source, heartbeat, labels) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (space.space_id, space.kind.value, space.owner_subject_id, space.display_name, space.city_id, space.repo, space.heartbeat_source, space.heartbeat, json.dumps(space.labels)),
+            "INSERT OR REPLACE INTO spaces (space_id, kind, owner_subject_id, display_name, city_id, repo, heartbeat_source, heartbeat, last_seen_at, labels) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (space.space_id, space.kind.value, space.owner_subject_id, space.display_name, space.city_id, space.repo, space.heartbeat_source, space.heartbeat, space.last_seen_at, json.dumps(space.labels)),
         )
 
     def get_space(self, space_id: str) -> SpaceDescriptor | None:
@@ -527,15 +540,15 @@ class SqliteCityRegistry:
         return SpaceDescriptor(
             space_id=row["space_id"], kind=SpaceKind(row["kind"]), owner_subject_id=row["owner_subject_id"],
             display_name=row["display_name"], city_id=row["city_id"], repo=row["repo"],
-            heartbeat_source=row["heartbeat_source"], heartbeat=row["heartbeat"], labels=json.loads(row["labels"]),
+            heartbeat_source=row["heartbeat_source"], heartbeat=row["heartbeat"], last_seen_at=row["last_seen_at"], labels=json.loads(row["labels"]),
         )
 
     # --- Slots ---
 
     def upsert_slot(self, slot: SlotDescriptor) -> None:
         self._execute_write(
-            "INSERT OR REPLACE INTO slots (slot_id, space_id, slot_kind, holder_subject_id, status, capacity, heartbeat_source, heartbeat, labels) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (slot.slot_id, slot.space_id, slot.slot_kind, slot.holder_subject_id, slot.status.value, slot.capacity, slot.heartbeat_source, slot.heartbeat, json.dumps(slot.labels)),
+            "INSERT OR REPLACE INTO slots (slot_id, space_id, slot_kind, holder_subject_id, status, capacity, heartbeat_source, heartbeat, last_seen_at, lease_expires_at, labels) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (slot.slot_id, slot.space_id, slot.slot_kind, slot.holder_subject_id, slot.status.value, slot.capacity, slot.heartbeat_source, slot.heartbeat, slot.last_seen_at, slot.lease_expires_at, json.dumps(slot.labels)),
         )
 
     def get_slot(self, slot_id: str) -> SlotDescriptor | None:
@@ -554,7 +567,7 @@ class SqliteCityRegistry:
             slot_id=row["slot_id"], space_id=row["space_id"], slot_kind=row["slot_kind"],
             holder_subject_id=row["holder_subject_id"], status=SlotStatus(row["status"]),
             capacity=row["capacity"], heartbeat_source=row["heartbeat_source"],
-            heartbeat=row["heartbeat"], labels=json.loads(row["labels"]),
+            heartbeat=row["heartbeat"], last_seen_at=row["last_seen_at"], lease_expires_at=row["lease_expires_at"], labels=json.loads(row["labels"]),
         )
 
     # --- Fork lineage ---

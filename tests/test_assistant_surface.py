@@ -82,7 +82,7 @@ def test_assistant_surface_snapshot_accepts_city_id_without_peer_descriptor(tmp_
     assert snapshot.city_health == HealthStatus.UNKNOWN
 
 
-def test_assistant_surface_snapshot_projects_space_and_slot(tmp_path):
+def test_assistant_surface_snapshot_projects_space_and_slot(tmp_path, monkeypatch):
     repo_root = tmp_path / "city"
     reports_dir = repo_root / "data" / "federation" / "reports"
     reports_dir.mkdir(parents=True)
@@ -91,6 +91,7 @@ def test_assistant_surface_snapshot_projects_space_and_slot(tmp_path):
     )
     (repo_root / "data" / "assistant_state.json").write_text(json.dumps({"followed": ["alice"], "ops": {"posts": 2}}))
     AgentCityPeer.from_repo_root(repo_root, city_id="city-space", slug="space", repo="org/city-space").publish_self_description()
+    monkeypatch.setattr("agent_internet.assistant_surface.time.time", lambda: 60.0)
 
     snapshot = assistant_surface_snapshot_from_repo_root(repo_root)
     space = assistant_space_from_snapshot(snapshot)
@@ -102,9 +103,30 @@ def test_assistant_surface_snapshot_projects_space_and_slot(tmp_path):
     assert slot.space_id == space.space_id
     assert slot.slot_kind == "assistant_social"
     assert slot.status == SlotStatus.ACTIVE
+    assert space.last_seen_at == 30.0
+    assert slot.last_seen_at == 30.0
+    assert slot.lease_expires_at == 7230.0
     assert slot.labels["total_posts"] == "2"
     assert space.labels["campaign_count"] == "0"
     assert slot.labels["campaign_count"] == "0"
+
+
+def test_assistant_surface_projects_stale_slot_as_dormant(tmp_path, monkeypatch):
+    repo_root = tmp_path / "city"
+    reports_dir = repo_root / "data" / "federation" / "reports"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "report_3.json").write_text(
+        json.dumps({"heartbeat": 3, "timestamp": 30.0, "population": 1, "alive": 1, "dead": 0, "chain_valid": True}),
+    )
+    (repo_root / "data" / "assistant_state.json").write_text(json.dumps({"followed": ["alice"], "ops": {"posts": 2}}))
+    AgentCityPeer.from_repo_root(repo_root, city_id="city-space", slug="space", repo="org/city-space").publish_self_description()
+    monkeypatch.setattr("agent_internet.assistant_surface.time.time", lambda: 9000.0)
+
+    snapshot = assistant_surface_snapshot_from_repo_root(repo_root)
+    slot = assistant_social_slot_from_snapshot(snapshot)
+
+    assert slot.status == SlotStatus.DORMANT
+    assert slot.lease_expires_at == 7230.0
 
 
 def test_assistant_surface_projects_campaign_focus_labels(tmp_path):

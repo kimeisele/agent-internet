@@ -11,6 +11,9 @@ from .git_federation import detect_git_remote_metadata
 from .models import AssistantSurfaceSnapshot, HealthStatus, SlotDescriptor, SlotStatus, SpaceDescriptor, SpaceKind
 
 
+DEFAULT_COMMONS_HEARTBEAT_STALE_AFTER_SECONDS = 7200
+
+
 def assistant_surface_snapshot_from_repo_root(
     root: Path | str,
     *,
@@ -92,27 +95,32 @@ def assistant_space_from_snapshot(snapshot: AssistantSurfaceSnapshot) -> SpaceDe
         repo=snapshot.repo,
         heartbeat_source=snapshot.heartbeat_source,
         heartbeat=snapshot.heartbeat,
+        last_seen_at=snapshot.last_seen_at,
         labels={
             "assistant_id": snapshot.assistant_id,
             "assistant_kind": snapshot.assistant_kind,
             "city_slug": snapshot.city_slug,
             "campaign_count": str(len(snapshot.active_campaigns)),
             "campaign_focus": str(primary_campaign.get("title") or primary_campaign.get("id") or ""),
+            "stale_after_seconds": str(DEFAULT_COMMONS_HEARTBEAT_STALE_AFTER_SECONDS),
         },
     )
 
 
 def assistant_social_slot_from_snapshot(snapshot: AssistantSurfaceSnapshot) -> SlotDescriptor:
     primary_campaign = snapshot.active_campaigns[0] if snapshot.active_campaigns else {}
+    lease_expires_at = _soft_lease_expires_at(snapshot.last_seen_at)
     return SlotDescriptor(
         slot_id=f"slot:{snapshot.city_id}:assistant-social",
         space_id=_assistant_space_id(snapshot),
         slot_kind="assistant_social",
         holder_subject_id=snapshot.assistant_id,
-        status=SlotStatus.ACTIVE if snapshot.state_present or snapshot.heartbeat is not None else SlotStatus.DORMANT,
+        status=_slot_status_from_snapshot(snapshot, lease_expires_at=lease_expires_at),
         capacity=1,
         heartbeat_source=snapshot.heartbeat_source,
         heartbeat=snapshot.heartbeat,
+        last_seen_at=snapshot.last_seen_at,
+        lease_expires_at=lease_expires_at,
         labels={
             "following": str(snapshot.following),
             "invited": str(snapshot.invited),
@@ -120,8 +128,27 @@ def assistant_social_slot_from_snapshot(snapshot: AssistantSurfaceSnapshot) -> S
             "total_posts": str(snapshot.total_posts),
             "campaign_count": str(len(snapshot.active_campaigns)),
             "campaign_focus": str(primary_campaign.get("title") or primary_campaign.get("id") or ""),
+            "stale_after_seconds": str(DEFAULT_COMMONS_HEARTBEAT_STALE_AFTER_SECONDS),
         },
     )
+
+
+def _soft_lease_expires_at(last_seen_at: float | None, *, stale_after_seconds: int = DEFAULT_COMMONS_HEARTBEAT_STALE_AFTER_SECONDS) -> float | None:
+    if last_seen_at is None:
+        return None
+    return float(last_seen_at) + max(int(stale_after_seconds), 0)
+
+
+def _slot_status_from_snapshot(snapshot: AssistantSurfaceSnapshot, *, lease_expires_at: float | None, now: float | None = None) -> SlotStatus:
+    has_surface = snapshot.state_present or snapshot.heartbeat is not None or snapshot.last_seen_at is not None
+    if not has_surface:
+        return SlotStatus.DORMANT
+    if snapshot.city_health == HealthStatus.OFFLINE:
+        return SlotStatus.DORMANT
+    if lease_expires_at is None:
+        return SlotStatus.ACTIVE if snapshot.heartbeat is not None else SlotStatus.DORMANT
+    current = float(time.time() if now is None else now)
+    return SlotStatus.ACTIVE if lease_expires_at > current else SlotStatus.DORMANT
 
 
 def _assistant_space_id(snapshot: AssistantSurfaceSnapshot) -> str:
