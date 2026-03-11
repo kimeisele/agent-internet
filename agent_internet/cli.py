@@ -23,6 +23,7 @@ from .agent_web_repo_graph_contracts import build_agent_web_repo_graph_contract_
 from .agent_web_semantic_capabilities import build_agent_web_semantic_capability_manifest
 from .agent_web_semantic_consumer import bootstrap_agent_web_semantic_consumer, invoke_agent_web_semantic_consumer
 from .agent_web_semantic_contracts import build_agent_web_semantic_contract_manifest, read_agent_web_semantic_contract_descriptor
+from .authority_feed_sync import sync_source_authority_feed
 from .agent_web_source_registry import (
     DEFAULT_AGENT_WEB_SOURCE_REGISTRY_PATH,
     build_agent_web_crawl_bootstrap_from_registry,
@@ -46,7 +47,7 @@ from .git_federation import GitWikiFederationSync, detect_git_remote_metadata, e
 from .local_lab import LocalDualCityLab
 from .lotus_api import LOTUS_MUTATING_ACTIONS, LotusControlPlaneAPI
 from .lotus_daemon import LotusApiDaemon
-from .models import EndpointVisibility, LotusApiScope, TrustLevel, TrustRecord
+from .models import AuthorityFeedTransport, EndpointVisibility, LotusApiScope, TrustLevel, TrustRecord
 from .projection_reconciler import ProjectionReconcileDaemon, ProjectionReconciler, build_projection_reconcile_snapshot
 from .repo_capsule import extract_repo_capsule
 from .snapshot import ControlPlaneStateStore, snapshot_control_plane
@@ -128,6 +129,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show configured source feeds and projection reconcile runtime status",
     )
     reconcile_status.add_argument("--state-path", default="data/control_plane/state.json")
+
+    import_bundle = subparsers.add_parser(
+        "import-authority-bundle",
+        help="Import a source authority bundle into the persisted control-plane state",
+    )
+    import_bundle.add_argument("--state-path", default="data/control_plane/state.json")
+    import_bundle.add_argument("--bundle-path", required=True)
+    import_bundle.add_argument("--now", type=float)
+
+    configure_feed = subparsers.add_parser(
+        "configure-authority-feed",
+        help="Create or update a source authority feed definition in persisted control-plane state",
+    )
+    configure_feed.add_argument("--state-path", default="data/control_plane/state.json")
+    configure_feed.add_argument("--source-repo-id", required=True)
+    configure_feed.add_argument("--transport", choices=[item.value for item in AuthorityFeedTransport], required=True)
+    configure_feed.add_argument("--locator", required=True)
+    configure_feed.add_argument("--feed-id")
+    configure_feed.add_argument("--poll-interval-seconds", type=int, default=300)
+    configure_feed.add_argument("--disabled", action="store_true")
+
+    sync_feed = subparsers.add_parser(
+        "sync-authority-feed",
+        help="Fetch, verify, cache, and import configured source authority feeds",
+    )
+    sync_feed.add_argument("--state-path", default="data/control_plane/state.json")
+    sync_feed.add_argument("--feed-id")
+    sync_feed.add_argument("--force", action="store_true")
+    sync_feed.add_argument("--now", type=float)
 
     feed_pause = subparsers.add_parser("projection-feed-pause", help="Pause a configured source authority feed")
     feed_pause.add_argument("--state-path", default="data/control_plane/state.json")
@@ -798,6 +828,75 @@ def cmd_projection_reconcile_daemon(args: argparse.Namespace) -> int:
 def cmd_projection_reconcile_status(args: argparse.Namespace) -> int:
     plane = ControlPlaneStateStore(path=Path(args.state_path)).load()
     print(json.dumps(build_projection_reconcile_snapshot(plane), indent=2))
+    return 0
+
+
+def cmd_import_authority_bundle(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    imported = store.update(
+        lambda plane: plane.ingest_authority_bundle_path(
+            Path(args.bundle_path),
+            now=(None if args.now is None else float(args.now)),
+        ),
+    )
+    print(
+        json.dumps(
+            {
+                "bundle_path": imported["bundle_path"],
+                "artifact_count": imported["artifact_count"],
+                "artifact_paths": list(imported["artifact_paths"]),
+                "repo_role": asdict(imported["repo_role"]),
+                "authority_exports": [asdict(record) for record in imported["authority_exports"]],
+                "publication_statuses": [asdict(record) for record in imported["publication_statuses"]],
+            },
+            indent=2,
+        ),
+    )
+    return 0
+
+
+def cmd_configure_authority_feed(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    record = store.update(
+        lambda plane: plane.configure_source_authority_feed(
+            args.source_repo_id,
+            transport=AuthorityFeedTransport(args.transport),
+            locator=args.locator,
+            feed_id=args.feed_id,
+            poll_interval_seconds=args.poll_interval_seconds,
+            enabled=not bool(args.disabled),
+        ),
+    )
+    print(json.dumps(asdict(record), indent=2))
+    return 0
+
+
+def cmd_sync_authority_feed(args: argparse.Namespace) -> int:
+    store = ControlPlaneStateStore(path=Path(args.state_path))
+    plane = store.load()
+    feed_ids = [args.feed_id] if args.feed_id else [record.feed_id for record in plane.registry.list_source_authority_feeds()]
+    results = []
+    for feed_id in feed_ids:
+        synced = sync_source_authority_feed(
+            store,
+            feed_id=feed_id,
+            force=bool(args.force),
+            now=args.now,
+        )
+        results.append(
+            {
+                "feed_id": synced.feed.feed_id,
+                "source_repo_id": synced.feed.source_repo_id,
+                "transport": synced.feed.transport.value,
+                "manifest_url": synced.manifest_url,
+                "bundle_path": str(synced.bundle_path),
+                "source_sha": synced.source_sha,
+                "bundle_sha256": synced.bundle_sha256,
+                "changed": synced.changed,
+                "imported": synced.imported,
+            },
+        )
+    print(json.dumps({"feeds": results}, indent=2))
     return 0
 
 
@@ -2058,6 +2157,12 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_projection_reconcile_daemon(args)
     if args.command == "projection-reconcile-status":
         return cmd_projection_reconcile_status(args)
+    if args.command == "import-authority-bundle":
+        return cmd_import_authority_bundle(args)
+    if args.command == "configure-authority-feed":
+        return cmd_configure_authority_feed(args)
+    if args.command == "sync-authority-feed":
+        return cmd_sync_authority_feed(args)
     if args.command == "projection-feed-pause":
         return cmd_projection_feed_pause(args)
     if args.command == "projection-feed-resume":

@@ -508,6 +508,7 @@ def test_publish_agent_internet_wiki_records_success_for_bound_projection(tmp_pa
     )
 
     status = store.load().registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID)
+    authority_page = (tmp_path / "wiki-checkout" / "Steward-Authority.md").read_text()
 
     assert result["binding_id"] == STEWARD_PUBLIC_WIKI_BINDING_ID
     assert result["publication_state"] == PublicationState.SUCCESS.value
@@ -518,6 +519,55 @@ def test_publish_agent_internet_wiki_records_success_for_bound_projection(tmp_pa
     assert status.failure_reason == ""
     assert status.labels["source_export_version"] == "v-success"
     assert status.labels["operator_source_sha"] == result["source_sha"]
+    assert "Publication Status: `success`" in authority_page
+
+
+def test_publish_agent_internet_wiki_updates_all_matching_projection_bindings(tmp_path):
+    work_root, wiki_remote = _init_git_workspace(tmp_path)
+    state_path = tmp_path / "state.json"
+    store = _seed_steward_public_wiki_binding(state_path, wiki_repo_url=str(wiki_remote), version="v-steward", source_sha="bundle-steward")
+    _seed_agent_world_authority_artifacts(state_path, version="v-world", source_sha="bundle-world")
+
+    def _update(plane):
+        binding = plane.registry.get_projection_binding(AGENT_WORLD_PUBLIC_WIKI_BINDING_ID)
+        plane.registry.upsert_projection_binding(
+            binding.__class__(
+                binding_id=binding.binding_id,
+                source_repo_id=binding.source_repo_id,
+                required_export_kind=binding.required_export_kind,
+                operator_repo_id=binding.operator_repo_id,
+                target_kind=binding.target_kind,
+                target_locator=str(wiki_remote),
+                projection_mode=binding.projection_mode,
+                failure_policy=binding.failure_policy,
+                freshness_sla_seconds=binding.freshness_sla_seconds,
+                labels=dict(binding.labels),
+            ),
+        )
+
+    store.update(_update)
+
+    result = publish_agent_internet_wiki(
+        root=work_root,
+        state_path=state_path,
+        wiki_path=tmp_path / "wiki-checkout",
+        wiki_repo_url=str(wiki_remote),
+        push=False,
+    )
+
+    plane = store.load()
+    steward_status = plane.registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID)
+    world_status = plane.registry.get_publication_status(AGENT_WORLD_PUBLIC_WIKI_BINDING_ID)
+    steward_page = (tmp_path / "wiki-checkout" / "Steward-Authority.md").read_text()
+    world_page = (tmp_path / "wiki-checkout" / "Agent-World-Authority.md").read_text()
+
+    assert set(result["updated_binding_ids"]) == {STEWARD_PUBLIC_WIKI_BINDING_ID, AGENT_WORLD_PUBLIC_WIKI_BINDING_ID}
+    assert result["publication_states"][STEWARD_PUBLIC_WIKI_BINDING_ID] == PublicationState.SUCCESS.value
+    assert result["publication_states"][AGENT_WORLD_PUBLIC_WIKI_BINDING_ID] == PublicationState.SUCCESS.value
+    assert steward_status is not None and steward_status.status == PublicationState.SUCCESS
+    assert world_status is not None and world_status.status == PublicationState.SUCCESS
+    assert "Publication Status: `success`" in steward_page
+    assert "Publication Status: `success`" in world_page
 
 
 def test_publish_agent_internet_wiki_records_failed_projection_attempt(tmp_path, monkeypatch):

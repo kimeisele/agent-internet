@@ -2,10 +2,13 @@ import json
 import subprocess
 from dataclasses import replace
 from hashlib import sha256
+from pathlib import Path
+
+import pytest
 
 from agent_internet.cli import main
 from agent_internet.control_plane import STEWARD_AUTHORITY_BUNDLE_FEED_ID, STEWARD_PROTOCOL_REPO_ID, STEWARD_PUBLIC_WIKI_BINDING_ID
-from agent_internet.models import AuthorityExportKind, ForkLineageRecord, ForkMode, PublicationState, UpstreamSyncPolicy
+from agent_internet.models import AuthorityExportKind, AuthorityFeedTransport, ForkLineageRecord, ForkMode, PublicationState, UpstreamSyncPolicy
 from agent_internet.snapshot import ControlPlaneStateStore
 
 
@@ -69,6 +72,42 @@ def _write_steward_authority_bundle(tmp_path, *, version="v-cli", source_sha="bu
     bundle_path = bundle_dir / ".authority-export-bundle.json"
     bundle_path.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n")
     return bundle_path
+
+
+def _write_authority_feed_manifest(tmp_path, *, bundle_path, contract_version=1):
+    bundle_payload = json.loads(Path(bundle_path).read_text())
+    source_sha = str(bundle_payload["source_sha"])
+    feed_root = tmp_path / "steward-feed"
+    version_root = feed_root / "bundles" / source_sha
+    version_root.mkdir(parents=True)
+    persisted_bundle_path = version_root / "source-authority-bundle.json"
+    persisted_bundle_path.write_text(Path(bundle_path).read_text())
+    artifacts = {}
+    for relative_path in bundle_payload["artifact_paths"].values():
+        source_artifact = Path(bundle_path).parent / relative_path
+        target_artifact = version_root / relative_path
+        target_artifact.parent.mkdir(parents=True, exist_ok=True)
+        target_artifact.write_text(source_artifact.read_text())
+        artifacts[relative_path] = {
+            "path": str(Path("bundles") / source_sha / relative_path),
+            "sha256": sha256(target_artifact.read_bytes()).hexdigest(),
+        }
+    manifest = {
+        "kind": "source_authority_feed_manifest",
+        "contract_version": contract_version,
+        "generated_at": bundle_payload["generated_at"],
+        "source_repo_id": STEWARD_PROTOCOL_REPO_ID,
+        "source_sha": source_sha,
+        "bundle": {
+            "kind": "source_authority_bundle",
+            "path": str(Path("bundles") / source_sha / "source-authority-bundle.json"),
+            "sha256": sha256(persisted_bundle_path.read_bytes()).hexdigest(),
+        },
+        "artifacts": artifacts,
+    }
+    manifest_path = feed_root / "latest-authority-manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    return manifest_path
 
 
 def test_cli_onboards_agent_city_and_persists_state(tmp_path, capsys):
@@ -280,6 +319,109 @@ def test_cli_projection_reconcile_once(tmp_path, capsys):
     assert payload["reconcile_state"] == "success"
     assert payload["publication_state"] == PublicationState.SUCCESS.value
     assert plane.registry.get_source_authority_feed(STEWARD_AUTHORITY_BUNDLE_FEED_ID).locator == str(bundle_path.resolve())
+
+
+def test_cli_import_authority_bundle(tmp_path, capsys):
+    state_path = tmp_path / "state" / "control_plane.json"
+    bundle_path = _write_steward_authority_bundle(tmp_path, version="v-import", source_sha="bundle-import")
+
+    assert main(
+        [
+            "import-authority-bundle",
+            "--state-path",
+            str(state_path),
+            "--bundle-path",
+            str(bundle_path),
+            "--now",
+            "222.0",
+        ],
+    ) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    plane = ControlPlaneStateStore(path=state_path).load()
+    publication_status = plane.registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID)
+
+    assert payload["repo_role"]["repo_id"] == STEWARD_PROTOCOL_REPO_ID
+    assert payload["artifact_count"] == 1
+    assert payload["authority_exports"][0]["export_kind"] == AuthorityExportKind.CANONICAL_SURFACE.value
+    assert publication_status is not None
+    assert publication_status.status == PublicationState.STALE
+    assert publication_status.labels["authority_bundle_source_sha"] == "bundle-import"
+
+
+def test_cli_configure_and_sync_manifest_authority_feed(tmp_path, capsys):
+    state_path = tmp_path / "state" / "control_plane.json"
+    bundle_path = _write_steward_authority_bundle(tmp_path, version="v-sync", source_sha="bundle-sync")
+    manifest_path = _write_authority_feed_manifest(tmp_path, bundle_path=bundle_path)
+
+    assert main(
+        [
+            "configure-authority-feed",
+            "--state-path",
+            str(state_path),
+            "--source-repo-id",
+            STEWARD_PROTOCOL_REPO_ID,
+            "--transport",
+            AuthorityFeedTransport.MANIFEST_URL.value,
+            "--locator",
+            manifest_path.resolve().as_uri(),
+        ],
+    ) == 0
+    configured = json.loads(capsys.readouterr().out)
+
+    assert main(
+        [
+            "sync-authority-feed",
+            "--state-path",
+            str(state_path),
+            "--feed-id",
+            STEWARD_AUTHORITY_BUNDLE_FEED_ID,
+        ],
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    plane = ControlPlaneStateStore(path=state_path).load()
+    feed = plane.registry.get_source_authority_feed(STEWARD_AUTHORITY_BUNDLE_FEED_ID)
+    publication_status = plane.registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID)
+
+    assert configured["transport"] == AuthorityFeedTransport.MANIFEST_URL.value
+    assert payload["feeds"][0]["source_sha"] == "bundle-sync"
+    assert payload["feeds"][0]["imported"] is True
+    assert feed.transport == AuthorityFeedTransport.MANIFEST_URL
+    assert feed.labels["bundle_sha256"] == payload["feeds"][0]["bundle_sha256"]
+    assert publication_status is not None
+    assert publication_status.status == PublicationState.STALE
+    assert publication_status.labels["source_export_version"] == "v-sync"
+
+
+def test_cli_sync_manifest_authority_feed_rejects_unsupported_contract_version(tmp_path):
+    state_path = tmp_path / "state" / "control_plane.json"
+    bundle_path = _write_steward_authority_bundle(tmp_path, version="v-sync", source_sha="bundle-sync")
+    manifest_path = _write_authority_feed_manifest(tmp_path, bundle_path=bundle_path, contract_version=99)
+
+    assert main(
+        [
+            "configure-authority-feed",
+            "--state-path",
+            str(state_path),
+            "--source-repo-id",
+            STEWARD_PROTOCOL_REPO_ID,
+            "--transport",
+            AuthorityFeedTransport.MANIFEST_URL.value,
+            "--locator",
+            manifest_path.resolve().as_uri(),
+        ],
+    ) == 0
+
+    with pytest.raises(ValueError, match="unsupported_authority_feed_contract_version"):
+        main(
+            [
+                "sync-authority-feed",
+                "--state-path",
+                str(state_path),
+                "--feed-id",
+                STEWARD_AUTHORITY_BUNDLE_FEED_ID,
+            ],
+        )
 
 
 def test_cli_projection_reconcile_status_and_pause_resume(tmp_path, capsys):

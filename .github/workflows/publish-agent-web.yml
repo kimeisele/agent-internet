@@ -44,6 +44,8 @@ jobs:
       - name: Validate agent web publication slice
         run: |
           python -m py_compile \
+            agent_internet/authority_feed_sync.py \
+            agent_internet/cli.py \
             agent_internet/agent_web.py \
             agent_internet/agent_web_repo_graph.py \
             agent_internet/git_federation.py \
@@ -52,11 +54,35 @@ jobs:
             agent_internet/repo_capsule.py \
             scripts/build_agent_web_wiki.py \
             scripts/publish_agent_web_wiki.py \
+            tests/test_cli.py \
             tests/test_git_federation.py \
+            tests/test_projection_reconciler.py \
             tests/test_repo_capsule.py \
             tests/test_publisher.py
-          python -m pytest -q tests/test_git_federation.py tests/test_repo_capsule.py tests/test_publisher.py
+          python -m pytest -q tests/test_cli.py::test_cli_import_authority_bundle tests/test_cli.py::test_cli_configure_and_sync_manifest_authority_feed tests/test_projection_reconciler.py::test_projection_reconciler_imports_manifest_feed_and_publishes tests/test_git_federation.py tests/test_repo_capsule.py tests/test_publisher.py
           python scripts/build_agent_web_wiki.py --output-dir .agent_internet/wiki-build-ci
+
+      - name: Configure upstream authority feeds
+        run: |
+          python -m agent_internet.cli configure-authority-feed \
+            --state-path data/control_plane/state.json \
+            --source-repo-id agent-world \
+            --transport manifest_url \
+            --locator "https://raw.githubusercontent.com/${{ github.repository_owner }}/agent-world/authority-feed/latest-authority-manifest.json"
+          python -m agent_internet.cli configure-authority-feed \
+            --state-path data/control_plane/state.json \
+            --source-repo-id steward-protocol \
+            --transport manifest_url \
+            --locator "https://raw.githubusercontent.com/${{ github.repository_owner }}/steward-protocol/authority-feed/latest-authority-manifest.json"
+
+      - name: Sync upstream authority feeds into control-plane state
+        run: |
+          python -m agent_internet.cli sync-authority-feed \
+            --state-path data/control_plane/state.json \
+            --feed-id agent-world-authority-bundle
+          python -m agent_internet.cli sync-authority-feed \
+            --state-path data/control_plane/state.json \
+            --feed-id steward-authority-bundle
 
       - name: Configure git identity
         run: |
