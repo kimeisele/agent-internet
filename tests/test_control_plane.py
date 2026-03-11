@@ -76,6 +76,67 @@ def _write_steward_authority_bundle(tmp_path, *, version: str = "2026-03-09T17:0
     return bundle_path, bundle, artifacts
 
 
+def _write_agent_world_authority_bundle(tmp_path, *, version: str = "world-v1", source_sha: str = "world123"):
+    bundle_dir = tmp_path / "world-bundle"
+    artifacts_dir = bundle_dir / ".authority-exports"
+    artifacts_dir.mkdir(parents=True)
+    canonical_payload = {"kind": "canonical_surface", "documents": [{"document_id": "constitution", "title": "Agent World Constitution"}]}
+    public_summary_payload = {"kind": "public_summary_registry", "records": [{"id": "constitution", "public_summary": "World summary"}]}
+    source_surface_payload = {"kind": "source_surface_registry", "pages": [{"id": "PUBLIC_HOME", "wiki_name": "Home", "include_in_sidebar": True}]}
+    surface_metadata_payload = {"kind": "surface_metadata", "surface_registry": {"kind": "wiki_surface_registry", "page_count": 1}}
+    artifacts = {
+        ".authority-exports/canonical-surface.json": canonical_payload,
+        ".authority-exports/public-summary-registry.json": public_summary_payload,
+        ".authority-exports/source-surface-registry.json": source_surface_payload,
+        ".authority-exports/surface-metadata.json": surface_metadata_payload,
+    }
+    for relative_path, payload in artifacts.items():
+        target = bundle_dir / relative_path
+        target.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    authority_exports = []
+    for export_kind, relative_path in {
+        AuthorityExportKind.CANONICAL_SURFACE.value: ".authority-exports/canonical-surface.json",
+        AuthorityExportKind.PUBLIC_SUMMARY_REGISTRY.value: ".authority-exports/public-summary-registry.json",
+        AuthorityExportKind.SOURCE_SURFACE_REGISTRY.value: ".authority-exports/source-surface-registry.json",
+        AuthorityExportKind.SURFACE_METADATA.value: ".authority-exports/surface-metadata.json",
+    }.items():
+        payload = artifacts[relative_path]
+        digest = sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        authority_exports.append(
+            {
+                "export_id": f"agent-world/{export_kind}",
+                "repo_id": AGENT_WORLD_REPO_ID,
+                "export_kind": export_kind,
+                "version": version,
+                "artifact_uri": relative_path,
+                "generated_at": 270.0,
+                "contract_version": 1,
+                "content_sha256": digest,
+                "labels": {"source_sha": source_sha},
+            },
+        )
+    bundle = {
+        "kind": "source_authority_bundle",
+        "contract_version": 1,
+        "generated_at": 271.0,
+        "source_sha": source_sha,
+        "repo_role": {
+            "repo_id": AGENT_WORLD_REPO_ID,
+            "role": RepoRole.NORMATIVE_SOURCE.value,
+            "owner_boundary": "world_governance_surface",
+            "exports": [record["export_kind"] for record in authority_exports],
+            "consumes": [],
+            "publication_targets": [AGENT_WORLD_PUBLIC_WIKI_BINDING_ID],
+            "labels": {"public_surface_owner": AGENT_INTERNET_REPO_ID},
+        },
+        "authority_exports": authority_exports,
+        "artifact_paths": {record["export_kind"]: record["artifact_uri"] for record in authority_exports},
+    }
+    bundle_path = bundle_dir / ".authority-export-bundle.json"
+    bundle_path.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n")
+    return bundle_path, bundle, artifacts
+
+
 def test_city_presence_from_report_maps_health_states():
     report = {
         "heartbeat": 7,
@@ -487,3 +548,23 @@ def test_control_plane_bootstraps_agent_world_public_wiki_contract():
     assert operator is not None
     assert AGENT_WORLD_PUBLIC_WIKI_BINDING_ID in operator.publication_targets
     assert AGENT_WORLD_REPO_ID in operator.labels["projects"]
+
+
+def test_ingesting_multiple_bundles_keeps_binding_bundle_source_sha_scoped_to_source_repo(tmp_path):
+    world_bundle_path, _, _ = _write_agent_world_authority_bundle(tmp_path, version="world-v1", source_sha="world-sha")
+    steward_bundle_path, _, _ = _write_steward_authority_bundle(tmp_path, version="steward-v1", source_sha="steward-sha")
+    plane = AgentInternetControlPlane()
+
+    plane.bootstrap_default_public_wiki_contracts(now=100.0)
+    plane.ingest_authority_bundle_path(world_bundle_path, now=110.0)
+    plane.ingest_authority_bundle_path(steward_bundle_path, now=120.0)
+
+    world_status = plane.registry.get_publication_status(AGENT_WORLD_PUBLIC_WIKI_BINDING_ID)
+    steward_status = plane.registry.get_publication_status(STEWARD_PUBLIC_WIKI_BINDING_ID)
+
+    assert world_status is not None
+    assert steward_status is not None
+    assert world_status.labels["source_export_version"] == "world-v1"
+    assert world_status.labels["authority_bundle_source_sha"] == "world-sha"
+    assert steward_status.labels["source_export_version"] == "steward-v1"
+    assert steward_status.labels["authority_bundle_source_sha"] == "steward-sha"
