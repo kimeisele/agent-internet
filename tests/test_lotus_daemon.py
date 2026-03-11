@@ -236,6 +236,109 @@ def test_lotus_daemon_returns_structured_not_found_error(tmp_path):
         daemon.shutdown()
 
 
+def test_lotus_daemon_replays_publish_service_request_id(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    operator_secret = store.update(
+        lambda plane: LotusControlPlaneAPI(plane).issue_token(
+            subject="operator",
+            scopes=(LotusApiScope.READ.value, LotusApiScope.SERVICE_WRITE.value),
+            token_secret="operator-secret",
+            token_id="tok-operator",
+        ).secret,
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        payload = {
+            "request_id": "req-service-1",
+            "city_id": "city-a",
+            "service_name": "forum-api",
+            "public_handle": "api.forum.city-a.lotus",
+            "transport": "https",
+            "location": "https://forum.city-a.example/api",
+            "required_scopes": [LotusApiScope.READ.value],
+            "now": 123.0,
+        }
+        status, first = _request_json(
+            daemon.base_url,
+            "/v1/lotus/services",
+            method="POST",
+            token=operator_secret,
+            payload=payload,
+        )
+        status2, second = _request_json(
+            daemon.base_url,
+            "/v1/lotus/services",
+            method="POST",
+            token=operator_secret,
+            payload={**payload, "now": 456.0},
+        )
+        assert status == 200
+        assert status2 == 200
+        assert second["service_address"] == first["service_address"]
+        assert first["receipt"]["applied"] is True
+        assert first["receipt"]["replayed"] is False
+        assert second["receipt"]["applied"] is False
+        assert second["receipt"]["replayed"] is True
+        assert second["receipt"]["replay_count"] == 1
+
+        status3, state = _request_json(daemon.base_url, "/v1/lotus/state", token=operator_secret)
+        assert status3 == 200
+        assert len(state["state"]["operation_receipts"]) == 1
+        assert state["state"]["operation_receipts"][0]["action"] == "publish_service"
+    finally:
+        daemon.shutdown()
+
+
+def test_lotus_daemon_returns_structured_idempotency_conflict(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    operator_secret = store.update(
+        lambda plane: LotusControlPlaneAPI(plane).issue_token(
+            subject="operator",
+            scopes=(LotusApiScope.SERVICE_WRITE.value,),
+            token_secret="operator-secret",
+            token_id="tok-operator",
+        ).secret,
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        payload = {
+            "request_id": "req-service-1",
+            "city_id": "city-a",
+            "service_name": "forum-api",
+            "public_handle": "api.forum.city-a.lotus",
+            "transport": "https",
+            "location": "https://forum.city-a.example/api",
+        }
+        _request_json(
+            daemon.base_url,
+            "/v1/lotus/services",
+            method="POST",
+            token=operator_secret,
+            payload=payload,
+        )
+
+        with pytest.raises(HTTPError) as exc_info:
+            _request_json(
+                daemon.base_url,
+                "/v1/lotus/services",
+                method="POST",
+                token=operator_secret,
+                payload={**payload, "location": "https://forum.city-a.example/v2"},
+            )
+        assert exc_info.value.code == 409
+        error = json.loads(exc_info.value.read().decode("utf-8"))
+        assert error["error"] == "idempotency_conflict:publish_service:req-service-1"
+        assert error["error_kind"] == "conflict"
+        assert error["recoverable"] is True
+        assert error["retryable"] is False
+    finally:
+        daemon.shutdown()
+
+
 def test_lotus_daemon_serves_route_resolution_http_api(tmp_path):
     store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
     root_secret = store.update(

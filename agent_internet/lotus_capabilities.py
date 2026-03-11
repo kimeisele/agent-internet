@@ -7,11 +7,11 @@ def build_lotus_capability_manifest(*, base_url: str | None = None) -> dict:
         _capability("control_plane_state", "Read the full persisted control-plane snapshot.", "GET", "/v1/lotus/state", "show_state", ["lotus.read"], "read_only", []),
         _capability("steward_protocol", "Read the steward-protocol-compatible summary of authority and routing bindings.", "GET", "/v1/lotus/steward-protocol", "show_steward_protocol", ["lotus.read"], "read_only", []),
         _capability("commons_inventory", "List spaces, slots, claims, and leases from the typed commons model.", "GET", "/v1/lotus/space-claims", "list_space_claims", ["lotus.read"], "read_only", []),
-        _capability("intent_workflow", "Create, inspect, and transition intents that drive governed actuation.", "POST", "/v1/lotus/intents", "create_intent", ["lotus.write.intent"], "client_supplied_intent_id", ["intent_id", "intent_type", "title"]),
+        _capability("intent_workflow", "Create intents with optional request-id replay protection for AI-safe retries.", "POST", "/v1/lotus/intents", "create_intent", ["lotus.write.intent"], "request_id_replay_safe", ["request_id?", "intent_id", "intent_type", "title"]),
         _capability("claim_lifecycle", "Release or expire granted claims through typed lifecycle transitions.", "POST", "/v1/lotus/space-claims/{claim_id}/release", "release_space_claim", ["lotus.write.contract"], "transition_once", ["claim_id", "now?"]),
         _capability("lease_lifecycle", "Release or expire active leases; expired or released leases degrade live slots to dormant+reclaimable.", "POST", "/v1/lotus/slot-leases/{lease_id}/expire", "expire_slot_lease", ["lotus.write.contract"], "transition_once", ["lease_id", "now?"]),
-        _capability("grant_recovery", "Run the deterministic expired-grant sweep manually.", "POST", "/v1/lotus/grants/sweep-expired", "sweep_expired_grants", ["lotus.write.contract"], "time_window_idempotent", ["now?"]),
-        _capability("service_publication", "Publish endpoints, services, and routes into the Lotus control plane.", "POST", "/v1/lotus/services", "publish_service", ["lotus.write.service"], "upsert_by_handle", ["city_id", "service_name", "public_handle", "transport", "location"]),
+        _capability("grant_recovery", "Run the deterministic expired-grant sweep manually with optional request-id replay protection.", "POST", "/v1/lotus/grants/sweep-expired", "sweep_expired_grants", ["lotus.write.contract"], "request_id_replay_safe", ["request_id?", "now?"]),
+        _capability("service_publication", "Publish endpoints, services, and routes into the Lotus control plane with optional request-id replay protection.", "POST", "/v1/lotus/services", "publish_service", ["lotus.write.service"], "request_id_replay_safe", ["request_id?", "city_id", "service_name", "public_handle", "transport", "location"]),
         _capability("authority_feed_controls", "List and toggle source-authority feed enablement for reconcile-driven ingestion.", "POST", "/v1/lotus/source-authority-feeds/{feed_id}/enable", "set_source_authority_feed_enabled", ["lotus.write.repo_sync"], "set_desired_state", ["feed_id", "enabled"]),
         _capability("token_issuance", "Issue scoped Lotus bearer tokens for AI operators and delegated workflows.", "POST", "/v1/lotus/tokens", "issue_token", ["lotus.write.token"], "caller_supplied_token_id", ["subject", "scopes"]),
     ]
@@ -42,6 +42,7 @@ def build_lotus_capability_manifest(*, base_url: str | None = None) -> dict:
             "manual_sweep_action": "sweep_expired_grants",
             "manual_sweep_http_path": _href(root, "/v1/lotus/grants/sweep-expired"),
             "daemon_interval_flag": "--grant-sweep-interval-seconds",
+            "request_id_supported_actions": ["create_intent", "publish_endpoint", "publish_service", "publish_route", "sweep_expired_grants"],
         },
         "delegated_manifests": [
             {"manifest_http_path": _href(root, "/v1/lotus/agent-web-semantic-capabilities"), "manifest_lotus_action": "agent_web_semantic_capabilities"},

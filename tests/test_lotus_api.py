@@ -151,6 +151,7 @@ def test_lotus_api_describes_capabilities_manifest():
     assert payload["kind"] == "lotus_capability_manifest"
     assert payload["discovery"]["manifest_http_path"] == "https://lotus.example/v1/lotus/capabilities"
     assert payload["recoverability"]["manual_sweep_action"] == "sweep_expired_grants"
+    assert "create_intent" in payload["recoverability"]["request_id_supported_actions"]
     assert payload["parseability"]["http_error_envelope_fields"] == ["error", "error_code", "error_kind", "recoverable", "retryable", "context"]
     assert any(item["lotus_action"] == "create_intent" for item in payload["capabilities"])
 
@@ -935,6 +936,39 @@ def test_lotus_api_sweeps_expired_grants():
     assert plane.registry.get_slot("slot-due").status == SlotStatus.DORMANT
 
 
+def test_lotus_api_rejects_request_id_payload_conflict():
+    plane = AgentInternetControlPlane()
+    plane.register_city(
+        CityIdentity(city_id="city-a", slug="a", repo="org/city-a"),
+        CityEndpoint(city_id="city-a", transport="filesystem", location="/tmp/city-a"),
+    )
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="operator",
+        scopes=(LotusApiScope.SERVICE_WRITE.value,),
+        token_secret="service-token",
+        token_id="tok-service",
+        now=10.0,
+    )
+    params = {
+        "request_id": "req-service-1",
+        "city_id": "city-a",
+        "service_name": "forum-api",
+        "public_handle": "api.forum.city-a.lotus",
+        "transport": "https",
+        "location": "https://forum.city-a.example/api",
+    }
+
+    api.call(bearer_token=issued.secret, action="publish_service", params=params)
+
+    with pytest.raises(ValueError, match="idempotency_conflict:publish_service:req-service-1"):
+        api.call(
+            bearer_token=issued.secret,
+            action="publish_service",
+            params={**params, "location": "https://forum.city-a.example/v2"},
+        )
+
+
 def test_lotus_api_lists_federation_contract_records():
     plane = AgentInternetControlPlane()
     plane.bootstrap_steward_public_wiki_contract(now=50.0)
@@ -1056,6 +1090,45 @@ def test_lotus_api_creates_and_lists_intents():
     assert created["intent"]["status"] == "pending"
     assert created["intent"]["requested_by_subject_id"] == "human:ss"
     assert listed["intents"][0]["lineage_id"] == "lineage:city-b"
+
+
+def test_lotus_api_replays_create_intent_request_id():
+    plane = AgentInternetControlPlane()
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="human:ss",
+        scopes=(LotusApiScope.INTENT_WRITE.value,),
+        token_secret="intent-replay-token",
+        token_id="tok-intent-replay",
+        now=10.0,
+    )
+    params = {
+        "request_id": "req-intent-1",
+        "intent_id": "intent:fork-city-c",
+        "intent_type": IntentType.REQUEST_FORK.value,
+        "title": "Fork city-c",
+        "description": "Create a sovereign derivative line for city-c.",
+        "repo": "org/city-c",
+        "lineage_id": "lineage:city-c",
+        "now": 123.0,
+    }
+
+    first = api.call(bearer_token=issued.secret, action="create_intent", params=params)
+    second = api.call(
+        bearer_token=issued.secret,
+        action="create_intent",
+        params={**params, "now": 456.0},
+    )
+
+    assert first["intent"]["intent_id"] == "intent:fork-city-c"
+    assert second["intent"] == first["intent"]
+    assert first["receipt"]["request_id"] == "req-intent-1"
+    assert first["receipt"]["applied"] is True
+    assert first["receipt"]["replayed"] is False
+    assert second["receipt"]["applied"] is False
+    assert second["receipt"]["replayed"] is True
+    assert second["receipt"]["replay_count"] == 1
+    assert plane.registry.list_operation_receipts()[0].action == "create_intent"
 
 
 def test_lotus_api_allows_delegated_intent_subject_with_explicit_scope():

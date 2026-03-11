@@ -20,6 +20,7 @@ from .models import (
     LotusApiToken,
     LotusLinkAddress,
     LotusNetworkAddress,
+    OperationReceiptRecord,
     LotusRoute,
     LotusServiceAddress,
     SlotDescriptor,
@@ -138,6 +139,9 @@ class ThreadSafeRegistryWrapper:
     def upsert_intent(self, intent: IntentRecord) -> None:
         self._write("upsert_intent", intent)
 
+    def upsert_operation_receipt(self, receipt: OperationReceiptRecord) -> None:
+        self._write("upsert_operation_receipt", receipt)
+
     # --- CityRegistry: read operations ---
 
     def get_identity(self, city_id: str) -> CityIdentity | None:
@@ -208,6 +212,12 @@ class ThreadSafeRegistryWrapper:
 
     def list_slots(self) -> list[SlotDescriptor]:
         return self._read("list_slots")  # type: ignore[return-value]
+
+    def get_operation_receipt(self, *, action: str, operator_subject: str, request_id: str) -> OperationReceiptRecord | None:
+        return self._read("get_operation_receipt", action=action, operator_subject=operator_subject, request_id=request_id)  # type: ignore[return-value]
+
+    def list_operation_receipts(self) -> list[OperationReceiptRecord]:
+        return self._read("list_operation_receipts")  # type: ignore[return-value]
 
     def get_space_claim(self, claim_id: str) -> SpaceClaimRecord | None:
         return self._read("get_space_claim", claim_id)  # type: ignore[return-value]
