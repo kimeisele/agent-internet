@@ -400,7 +400,9 @@ def test_matching_projection_bindings_matches_bootstrapped_authority_contracts_f
 
 def test_build_agent_internet_wiki_materializes_pages(tmp_path):
     work_root, _wiki_remote = _init_git_workspace(tmp_path)
-    built = build_agent_internet_wiki(root=work_root, output_dir=tmp_path / "wiki-build", state_path=tmp_path / "state.json")
+    state_path = tmp_path / "state.json"
+    ControlPlaneStateStore(path=state_path).update(lambda plane: plane.bootstrap_default_public_wiki_contracts(now=100.0))
+    built = build_agent_internet_wiki(root=work_root, output_dir=tmp_path / "wiki-build", state_path=state_path)
     assert any(path.name == "Agent-Web.md" for path in built)
     assert any(path.name == "Assistant-Surface.md" for path in built)
     assert any(path.name == "Agent-World-Authority.md" for path in built)
@@ -430,6 +432,18 @@ def test_build_agent_internet_wiki_materializes_pages(tmp_path):
     assert "No imported steward-protocol canonical documents are available yet." in (tmp_path / "wiki-build" / "Steward-Canonical-Surface.md").read_text()
     assert "[[Agent World Authority|Agent-World-Authority]]" in (tmp_path / "wiki-build" / "_Sidebar.md").read_text()
     assert "[[Steward Authority|Steward-Authority]]" in (tmp_path / "wiki-build" / "_Sidebar.md").read_text()
+
+
+def test_build_agent_internet_wiki_omits_unregistered_authority_pages(tmp_path):
+    work_root, _wiki_remote = _init_git_workspace(tmp_path)
+
+    built = build_agent_internet_wiki(root=work_root, output_dir=tmp_path / "wiki-build", state_path=tmp_path / "state.json")
+
+    assert not any(path.name == "Agent-World-Authority.md" for path in built)
+    assert not any(path.name == "Steward-Authority.md" for path in built)
+    sidebar = (tmp_path / "wiki-build" / "_Sidebar.md").read_text()
+    assert "[[Agent World Authority|Agent-World-Authority]]" not in sidebar
+    assert "[[Steward Authority|Steward-Authority]]" not in sidebar
 
 
 def test_build_agent_internet_wiki_renders_imported_steward_authority_artifacts(tmp_path):

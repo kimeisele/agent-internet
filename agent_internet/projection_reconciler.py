@@ -6,8 +6,6 @@ import time
 from pathlib import Path
 
 from .authority_contracts import (
-    default_public_authority_source_contract,
-    get_public_authority_source_contract_by_feed_id,
     get_public_authority_source_contract_by_repo_id,
 )
 from .authority_feed_sync import sync_source_authority_feed
@@ -377,8 +375,7 @@ class ProjectionReconciler:
                     now=checked_at,
                 )
             if source_repo_id is None:
-                contract = self._resolve_contract(bundle_path=resolved_bundle_path, feed_id=feed_id)
-                source_repo_id = contract.source_repo_id
+                raise ValueError(f"unable_to_resolve_source_repo_id_from_bundle:{resolved_bundle_path}")
             return plane.configure_source_authority_feed(
                 source_repo_id,
                 transport=AuthorityFeedTransport.FILESYSTEM_BUNDLE,
@@ -387,7 +384,12 @@ class ProjectionReconciler:
                 poll_interval_seconds=poll_interval_seconds,
                 now=checked_at,
             )
-        resolved_feed_id = str(feed_id or default_public_authority_source_contract().feed_id)
+        if feed_id is None:
+            configured_feeds = list(plane.registry.list_source_authority_feeds())
+            if len(configured_feeds) == 1:
+                return configured_feeds[0]
+            raise ValueError("feed_id_required_without_bundle_path")
+        resolved_feed_id = str(feed_id)
         feed = plane.registry.get_source_authority_feed(resolved_feed_id)
         if feed is None:
             raise ValueError(f"unknown_source_authority_feed:{resolved_feed_id}")
@@ -399,7 +401,7 @@ class ProjectionReconciler:
         source_repo_id = self._source_repo_id_from_bundle_path(bundle_path)
         if source_repo_id:
             return default_public_authority_feed_id(source_repo_id)
-        return self._resolve_contract(bundle_path=bundle_path, feed_id=feed_id).feed_id
+        raise ValueError(f"unable_to_resolve_feed_id_from_bundle:{Path(bundle_path).resolve()}")
 
     def _source_repo_id_from_bundle_path(self, bundle_path: Path | str) -> str | None:
         try:
@@ -409,20 +411,6 @@ class ProjectionReconciler:
         repo_role = bundle.get("repo_role") if isinstance(bundle, dict) else None
         repo_id = str(repo_role.get("repo_id", "")) if isinstance(repo_role, dict) else ""
         return repo_id or None
-
-    def _resolve_contract(self, *, bundle_path: Path | str, feed_id: str | None):
-        if feed_id:
-            contract = get_public_authority_source_contract_by_feed_id(str(feed_id))
-            if contract is None:
-                raise ValueError(f"unknown_public_authority_feed:{feed_id}")
-            return contract
-        try:
-            bundle = json.loads(Path(bundle_path).resolve().read_text())
-        except Exception:
-            return default_public_authority_source_contract()
-        repo_role = bundle.get("repo_role") if isinstance(bundle, dict) else None
-        repo_id = str(repo_role.get("repo_id", "")) if isinstance(repo_role, dict) else ""
-        return get_public_authority_source_contract_by_repo_id(repo_id) or default_public_authority_source_contract()
 
     def _record_status(
         self,

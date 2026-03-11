@@ -64,7 +64,7 @@ def iter_public_authority_source_contracts() -> tuple[PublicAuthoritySourceContr
 
 
 def iter_public_authority_projection_contracts(state_snapshot: dict[str, Any]) -> tuple[PublicAuthoritySourceContract, ...]:
-    contracts = {contract.binding_id: contract for contract in PUBLIC_AUTHORITY_SOURCE_CONTRACTS}
+    contracts: dict[str, PublicAuthoritySourceContract] = {}
     repo_roles = {
         str(record.get("repo_id", "")): dict(record)
         for record in list(state_snapshot.get("repo_roles", []))

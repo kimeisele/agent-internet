@@ -4,6 +4,8 @@ from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
 
+import pytest
+
 from agent_internet.control_plane import AGENT_WORLD_AUTHORITY_BUNDLE_FEED_ID, AGENT_WORLD_PUBLIC_WIKI_BINDING_ID, AGENT_WORLD_REPO_ID, STEWARD_AUTHORITY_BUNDLE_FEED_ID, STEWARD_PROTOCOL_REPO_ID, STEWARD_PUBLIC_WIKI_BINDING_ID
 from agent_internet.models import AuthorityExportKind, AuthorityFeedTransport, PublicationState
 from agent_internet.projection_reconciler import ProjectionReconcileDaemon, ProjectionReconciler
@@ -274,6 +276,17 @@ def test_projection_reconciler_imports_manifest_feed_and_publishes(tmp_path):
     assert feed.labels["source_sha"] == "manifest-bundle-v1"
     assert publication_status is not None
     assert publication_status.labels["source_export_version"] == "v-manifest"
+
+
+def test_projection_reconciler_requires_explicit_bundle_repo_context(tmp_path):
+    repo_root, wiki_remote = _init_git_workspace(tmp_path)
+    state_path = tmp_path / "state.json"
+    malformed_bundle = tmp_path / "bundle.json"
+    malformed_bundle.write_text(json.dumps({"kind": "source_authority_bundle", "repo_role": {}}, indent=2) + "\n")
+    reconciler = ProjectionReconciler(root=repo_root, state_path=state_path)
+
+    with pytest.raises(ValueError, match="unable_to_resolve_source_repo_id_from_bundle"):
+        reconciler.run_once(bundle_path=malformed_bundle, wiki_repo_url=str(wiki_remote), wiki_path=tmp_path / "wiki-checkout")
 
 
 def test_projection_reconciler_respects_backoff_and_force(tmp_path):

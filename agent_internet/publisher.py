@@ -316,8 +316,6 @@ def _prepare_projection_publication(*, state_path: Path | str, wiki_repo_url: st
     checked_at = time.time()
 
     def _update(plane):
-        if not plane.registry.list_projection_bindings():
-            plane.bootstrap_default_public_wiki_contracts(now=checked_at)
         bindings = _matching_projection_bindings(plane, wiki_repo_url=wiki_repo_url)
         if not bindings:
             return None
@@ -372,8 +370,6 @@ def _record_projection_publication_outcome(*, state_path: Path | str, wiki_repo_
     checked_at = time.time()
 
     def _update(plane):
-        if not plane.registry.list_projection_bindings():
-            plane.bootstrap_default_public_wiki_contracts(now=checked_at)
         records = _build_projection_publication_records(
             plane,
             wiki_repo_url=wiki_repo_url,
@@ -394,8 +390,6 @@ def _record_projection_publication_outcome(*, state_path: Path | str, wiki_repo_
 def _preview_projection_publication_outcome(*, state_path: Path | str, wiki_repo_url: str, operator_source_sha: str, push_requested: bool, commit_message: str, status: PublicationState, failure_reason: str = "") -> list[PublicationStatusRecord]:
     plane = ControlPlaneStateStore(path=Path(state_path)).load()
     checked_at = time.time()
-    if not plane.registry.list_projection_bindings():
-        plane.bootstrap_default_public_wiki_contracts(now=checked_at)
     return _build_projection_publication_records(
         plane,
         wiki_repo_url=wiki_repo_url,

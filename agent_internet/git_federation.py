@@ -9,8 +9,6 @@ from urllib.parse import urlsplit, urlunsplit
 
 from .agent_web import build_agent_web_manifest
 from .authority_contracts import (
-    AGENT_WORLD_PUBLIC_AUTHORITY_CONTRACT,
-    STEWARD_PUBLIC_AUTHORITY_CONTRACT,
     build_authority_projection_documents,
     iter_public_authority_projection_contracts,
 )
@@ -29,12 +27,6 @@ from .agent_web_repo_graph_contracts import render_agent_web_repo_graph_contract
 from .agent_web_semantic_capabilities import render_agent_web_semantic_capability_page
 from .agent_web_semantic_contracts import render_agent_web_semantic_contract_page
 from .file_locking import write_locked_json_value
-
-
-STEWARD_PROTOCOL_REPO_ID = STEWARD_PUBLIC_AUTHORITY_CONTRACT.source_repo_id
-AGENT_WORLD_REPO_ID = AGENT_WORLD_PUBLIC_AUTHORITY_CONTRACT.source_repo_id
-STEWARD_PUBLIC_WIKI_BINDING_ID = STEWARD_PUBLIC_AUTHORITY_CONTRACT.binding_id
-AGENT_WORLD_PUBLIC_WIKI_BINDING_ID = AGENT_WORLD_PUBLIC_AUTHORITY_CONTRACT.binding_id
 
 HOME_SUMMARY_START = "<!-- AGENT_INTERNET_SUMMARY_START -->"
 HOME_SUMMARY_END = "<!-- AGENT_INTERNET_SUMMARY_END -->"
@@ -451,15 +443,6 @@ def _authority_view(state_snapshot: dict, *, source_repo_id: str, binding_id: st
         "artifacts_by_kind": artifacts_by_kind,
     }
 
-
-def _agent_world_authority_view(state_snapshot: dict) -> dict[str, Any]:
-    return _authority_view(state_snapshot, source_repo_id=AGENT_WORLD_REPO_ID, binding_id=AGENT_WORLD_PUBLIC_WIKI_BINDING_ID)
-
-
-def _steward_authority_view(state_snapshot: dict) -> dict[str, Any]:
-    return _authority_view(state_snapshot, source_repo_id=STEWARD_PROTOCOL_REPO_ID, binding_id=STEWARD_PUBLIC_WIKI_BINDING_ID)
-
-
 def _build_authority_home_summary_lines(authority_view: dict[str, Any], *, label: str) -> list[str]:
     publication_status = authority_view.get("publication_status")
     exports_by_kind = dict(authority_view.get("exports_by_kind", {}))
@@ -621,51 +604,6 @@ def _canonical_document_by_id(authority_view: dict[str, Any], source_document_id
         ),
         {},
     )
-
-
-def _render_agent_world_authority_page(authority_view: dict[str, Any]) -> str:
-    return _render_authority_page(
-        authority_view,
-        title="Agent World Authority",
-        label="Agent World",
-        source_repo_id=AGENT_WORLD_REPO_ID,
-        binding_id=AGENT_WORLD_PUBLIC_WIKI_BINDING_ID,
-        empty_message="No imported agent-world authority exports have been imported yet.",
-    )
-
-
-def _render_steward_authority_page(authority_view: dict[str, Any]) -> str:
-    return _render_authority_page(
-        authority_view,
-        title="Steward Authority",
-        label="Steward",
-        source_repo_id=STEWARD_PROTOCOL_REPO_ID,
-        binding_id=STEWARD_PUBLIC_WIKI_BINDING_ID,
-        empty_message="No steward authority exports have been imported yet.",
-    )
-
-
-def _render_agent_world_canonical_surface_page(authority_view: dict[str, Any]) -> str:
-    return _render_canonical_surface_page(
-        authority_view,
-        title="Agent World Canonical Surface",
-        label="Agent World",
-        source_repo_id=AGENT_WORLD_REPO_ID,
-        empty_message="No imported agent-world canonical documents are available yet.",
-        projected_documents=[],
-    )
-
-
-def _render_steward_canonical_surface_page(authority_view: dict[str, Any]) -> str:
-    return _render_canonical_surface_page(
-        authority_view,
-        title="Steward Canonical Surface",
-        label="Steward",
-        source_repo_id=STEWARD_PROTOCOL_REPO_ID,
-        empty_message="No imported steward canonical documents are available yet.",
-        projected_documents=[],
-    )
-
 
 def _render_sidebar_page(authority_documents: tuple[dict[str, Any], ...]) -> str:
     links = [
