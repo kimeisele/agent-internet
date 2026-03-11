@@ -152,6 +152,7 @@ def test_lotus_api_describes_capabilities_manifest():
     assert payload["discovery"]["manifest_http_path"] == "https://lotus.example/v1/lotus/capabilities"
     assert payload["recoverability"]["manual_sweep_action"] == "sweep_expired_grants"
     assert "create_intent" in payload["recoverability"]["request_id_supported_actions"]
+    assert "release_space_claim" in payload["recoverability"]["request_id_supported_actions"]
     assert payload["parseability"]["http_error_envelope_fields"] == ["error", "error_code", "error_kind", "recoverable", "retryable", "context"]
     assert any(item["lotus_action"] == "create_intent" for item in payload["capabilities"])
 
@@ -907,6 +908,89 @@ def test_lotus_api_transitions_claims_and_leases():
     assert lease["slot_lease"]["status"] == LeaseStatus.EXPIRED.value
     assert lease["slot_lease"]["expires_at"] == 40.0
     assert plane.registry.get_slot("slot-1").status == SlotStatus.DORMANT
+
+
+def test_lotus_api_replays_claim_and_lease_lifecycle_request_ids():
+    plane = AgentInternetControlPlane()
+    plane.upsert_space_claim(
+        SpaceClaimRecord(
+            claim_id="claim-1",
+            source_intent_id="intent-space-1",
+            subject_id="operator-1",
+            space_id="space-1",
+            granted_at=20.0,
+        )
+    )
+    plane.upsert_slot(SlotDescriptor(slot_id="slot-1", space_id="space-1", slot_kind="general", holder_subject_id="operator-1", status=SlotStatus.ACTIVE))
+    plane.upsert_slot_lease(
+        SlotLeaseRecord(
+            lease_id="lease-1",
+            source_intent_id="intent-slot-1",
+            holder_subject_id="operator-1",
+            space_id="space-1",
+            slot_id="slot-1",
+            status=LeaseStatus.ACTIVE,
+            granted_at=21.0,
+        )
+    )
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(subject="governor", scopes=(LotusApiScope.CONTRACT_WRITE.value,), token_secret="claims-write-token", now=10.0)
+
+    claim_first = api.call(
+        bearer_token=issued.secret,
+        action="release_space_claim",
+        params={"request_id": "req-claim-1", "claim_id": "claim-1", "now": 30.0},
+    )
+    claim_second = api.call(
+        bearer_token=issued.secret,
+        action="release_space_claim",
+        params={"request_id": "req-claim-1", "claim_id": "claim-1", "now": 35.0},
+    )
+    lease_first = api.call(
+        bearer_token=issued.secret,
+        action="expire_slot_lease",
+        params={"request_id": "req-lease-1", "lease_id": "lease-1", "now": 40.0},
+    )
+    lease_second = api.call(
+        bearer_token=issued.secret,
+        action="expire_slot_lease",
+        params={"request_id": "req-lease-1", "lease_id": "lease-1", "now": 45.0},
+    )
+
+    assert claim_second["space_claim"] == claim_first["space_claim"]
+    assert claim_first["receipt"]["applied"] is True
+    assert claim_second["receipt"]["replayed"] is True
+    assert lease_second["slot_lease"] == lease_first["slot_lease"]
+    assert lease_first["receipt"]["applied"] is True
+    assert lease_second["receipt"]["replayed"] is True
+
+
+def test_lotus_api_rejects_claim_lifecycle_request_id_payload_conflict():
+    plane = AgentInternetControlPlane()
+    plane.upsert_space_claim(
+        SpaceClaimRecord(
+            claim_id="claim-1",
+            source_intent_id="intent-space-1",
+            subject_id="operator-1",
+            space_id="space-1",
+            granted_at=20.0,
+        )
+    )
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(subject="governor", scopes=(LotusApiScope.CONTRACT_WRITE.value,), token_secret="claims-write-token", now=10.0)
+
+    api.call(
+        bearer_token=issued.secret,
+        action="release_space_claim",
+        params={"request_id": "req-claim-1", "claim_id": "claim-1", "now": 30.0},
+    )
+
+    with pytest.raises(ValueError, match="idempotency_conflict:release_space_claim:req-claim-1"):
+        api.call(
+            bearer_token=issued.secret,
+            action="release_space_claim",
+            params={"request_id": "req-claim-1", "claim_id": "claim-2", "now": 30.0},
+        )
 
 
 def test_lotus_api_sweeps_expired_grants():
