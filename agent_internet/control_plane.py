@@ -436,11 +436,13 @@ class AgentInternetControlPlane:
                     "source_export_sha256": export.content_sha256,
                 },
             )
-            bundle_source_sha = str(bundle.get("source_sha", "")).strip()
-            if bundle_source_sha:
-                labels["authority_bundle_source_sha"] = bundle_source_sha
-            if bundle.get("generated_at") is not None:
-                labels["authority_bundle_generated_at"] = str(bundle["generated_at"])
+            bundle_repo_id = str(dict(bundle.get("repo_role") or {}).get("repo_id", "")).strip()
+            if bundle_repo_id == binding.source_repo_id:
+                bundle_source_sha = str(bundle.get("source_sha", "")).strip()
+                if bundle_source_sha:
+                    labels["authority_bundle_source_sha"] = bundle_source_sha
+                if bundle.get("generated_at") is not None:
+                    labels["authority_bundle_generated_at"] = str(bundle["generated_at"])
         else:
             for key in ("source_export_version", "source_export_sha256", "authority_bundle_source_sha", "authority_bundle_generated_at"):
                 labels.pop(key, None)
