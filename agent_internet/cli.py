@@ -634,6 +634,12 @@ def build_parser() -> argparse.ArgumentParser:
     lotus_api_daemon.add_argument("--state-path", default="data/control_plane/state.json")
     lotus_api_daemon.add_argument("--host", default="127.0.0.1")
     lotus_api_daemon.add_argument("--port", type=int, default=8788)
+    lotus_api_daemon.add_argument(
+        "--grant-sweep-interval-seconds",
+        type=float,
+        default=0.0,
+        help="Periodically sweep expired grants; 0 disables the background sweep.",
+    )
 
     lab_init = subparsers.add_parser("init-dual-city-lab", help="Create a local two-city filesystem lab")
     lab_init.add_argument("--root", required=True)
@@ -1747,6 +1753,7 @@ def cmd_lotus_api_daemon(args: argparse.Namespace) -> int:
         state_path=Path(args.state_path),
         host=args.host,
         port=args.port,
+        grant_sweep_interval_seconds=args.grant_sweep_interval_seconds,
     )
     daemon.start()
     host, port = daemon.address
@@ -1757,6 +1764,7 @@ def cmd_lotus_api_daemon(args: argparse.Namespace) -> int:
                 "host": host,
                 "port": port,
                 "state_path": str(Path(args.state_path)),
+                "grant_sweep_interval_seconds": args.grant_sweep_interval_seconds,
             },
             indent=2,
         ),
