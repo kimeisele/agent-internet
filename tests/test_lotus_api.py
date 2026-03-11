@@ -883,6 +883,33 @@ def test_lotus_api_transitions_claims_and_leases():
     assert plane.registry.get_slot("slot-1").status == SlotStatus.DORMANT
 
 
+def test_lotus_api_sweeps_expired_grants():
+    plane = AgentInternetControlPlane()
+    plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-due", source_intent_id="intent-space-due", subject_id="operator-1", space_id="space-1", status=ClaimStatus.GRANTED, granted_at=20.0, expires_at=40.0))
+    plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-future", source_intent_id="intent-space-future", subject_id="operator-1", space_id="space-1", status=ClaimStatus.GRANTED, granted_at=21.0, expires_at=60.0))
+    plane.upsert_slot(SlotDescriptor(slot_id="slot-due", space_id="space-1", slot_kind="general", holder_subject_id="operator-1", status=SlotStatus.ACTIVE))
+    plane.upsert_slot(SlotDescriptor(slot_id="slot-future", space_id="space-1", slot_kind="general", holder_subject_id="operator-2", status=SlotStatus.ACTIVE))
+    plane.upsert_slot_lease(SlotLeaseRecord(lease_id="lease-due", source_intent_id="intent-slot-due", holder_subject_id="operator-1", space_id="space-1", slot_id="slot-due", status=LeaseStatus.ACTIVE, granted_at=22.0, expires_at=40.0))
+    plane.upsert_slot_lease(SlotLeaseRecord(lease_id="lease-future", source_intent_id="intent-slot-future", holder_subject_id="operator-2", space_id="space-1", slot_id="slot-future", status=LeaseStatus.ACTIVE, granted_at=23.0, expires_at=60.0))
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(subject="governor", scopes=(LotusApiScope.CONTRACT_WRITE.value,), token_secret="claims-sweep-token", now=10.0)
+
+    swept = api.call(bearer_token=issued.secret, action="sweep_expired_grants", params={"now": 50.0})
+
+    assert swept["grant_sweep"] == {
+        "checked_at": 50.0,
+        "expired_space_claim_ids": ("claim-due",),
+        "expired_slot_lease_ids": ("lease-due",),
+        "expired_space_claim_count": 1,
+        "expired_slot_lease_count": 1,
+    }
+    assert plane.registry.get_space_claim("claim-due").status == ClaimStatus.EXPIRED
+    assert plane.registry.get_space_claim("claim-future").status == ClaimStatus.GRANTED
+    assert plane.registry.get_slot_lease("lease-due").status == LeaseStatus.EXPIRED
+    assert plane.registry.get_slot_lease("lease-future").status == LeaseStatus.ACTIVE
+    assert plane.registry.get_slot("slot-due").status == SlotStatus.DORMANT
+
+
 def test_lotus_api_lists_federation_contract_records():
     plane = AgentInternetControlPlane()
     plane.bootstrap_steward_public_wiki_contract(now=50.0)

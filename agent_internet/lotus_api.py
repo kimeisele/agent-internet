@@ -53,6 +53,7 @@ LOTUS_MUTATING_ACTIONS = frozenset(
         "import_authority_bundle",
         "issue_token",
         "run_projection_reconcile_once",
+        "sweep_expired_grants",
         "release_slot_lease",
         "release_space_claim",
         "set_source_authority_feed_enabled",
@@ -117,6 +118,11 @@ class LotusControlPlaneAPI:
         )
         return {"token_id": token.token_id, "slot_lease": asdict(lease)}
 
+    def _sweep_expired_grants(self, *, bearer_token: str, payload: dict) -> dict:
+        token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.CONTRACT_WRITE.value,))
+        summary = self.plane.sweep_expired_grants(current_time=(None if payload.get("now") is None else float(payload["now"])))
+        return {"token_id": token.token_id, "grant_sweep": summary}
+
     def issue_token(
         self,
         *,
@@ -176,6 +182,8 @@ class LotusControlPlaneAPI:
             return self._transition_slot_lease(bearer_token=bearer_token, payload=params, status=LeaseStatus.RELEASED)
         if action == "expire_slot_lease":
             return self._transition_slot_lease(bearer_token=bearer_token, payload=params, status=LeaseStatus.EXPIRED)
+        if action == "sweep_expired_grants":
+            return self._sweep_expired_grants(bearer_token=bearer_token, payload=payload)
         if action == "list_repo_roles":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "repo_roles": [asdict(record) for record in self.plane.registry.list_repo_roles()]}

@@ -422,6 +422,8 @@ class LotusApiDaemon:
                 return 200, self._call(token, "import_authority_bundle", _decode_json_object(body))
             if method == "POST" and path == "/v1/lotus/projection-reconcile/run":
                 return 200, self._call(token, "run_projection_reconcile_once", _decode_json_object(body))
+            if method == "POST" and path == "/v1/lotus/grants/sweep-expired":
+                return 200, self._call(token, "sweep_expired_grants", _decode_json_object(body))
             if method == "POST" and path.startswith("/v1/lotus/source-authority-feeds/"):
                 suffix = path.removeprefix("/v1/lotus/source-authority-feeds/")
                 parts = suffix.split("/", 1)

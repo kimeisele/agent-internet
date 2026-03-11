@@ -1227,6 +1227,51 @@ def test_lotus_daemon_transitions_claims_and_leases_http_api(tmp_path):
         daemon.shutdown()
 
 
+def test_lotus_daemon_sweeps_expired_grants_http_api(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+
+    def _seed_sweep(plane):
+        plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-due", source_intent_id="intent-space-due", subject_id="operator-1", space_id="space-1", status=ClaimStatus.GRANTED, granted_at=20.0, expires_at=40.0))
+        plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-future", source_intent_id="intent-space-future", subject_id="operator-1", space_id="space-1", status=ClaimStatus.GRANTED, granted_at=21.0, expires_at=60.0))
+        plane.upsert_slot(SlotDescriptor(slot_id="slot-due", space_id="space-1", slot_kind="general", holder_subject_id="operator-1", status=SlotStatus.ACTIVE))
+        plane.upsert_slot(SlotDescriptor(slot_id="slot-future", space_id="space-1", slot_kind="general", holder_subject_id="operator-2", status=SlotStatus.ACTIVE))
+        plane.upsert_slot_lease(SlotLeaseRecord(lease_id="lease-due", source_intent_id="intent-slot-due", holder_subject_id="operator-1", space_id="space-1", slot_id="slot-due", status=LeaseStatus.ACTIVE, granted_at=22.0, expires_at=40.0))
+        plane.upsert_slot_lease(SlotLeaseRecord(lease_id="lease-future", source_intent_id="intent-slot-future", holder_subject_id="operator-2", space_id="space-1", slot_id="slot-future", status=LeaseStatus.ACTIVE, granted_at=23.0, expires_at=60.0))
+        return LotusControlPlaneAPI(plane).issue_token(subject="governor", scopes=(LotusApiScope.CONTRACT_WRITE.value, LotusApiScope.READ.value), token_secret="claims-sweep-root", token_id="tok-claims-sweep-root").secret
+
+    root_secret = store.update(_seed_sweep)
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        status, swept = _request_json(daemon.base_url, "/v1/lotus/grants/sweep-expired", method="POST", token=root_secret, payload={"now": 50.0})
+        assert status == 200
+        assert swept["grant_sweep"] == {
+            "checked_at": 50.0,
+            "expired_space_claim_ids": ["claim-due"],
+            "expired_slot_lease_ids": ["lease-due"],
+            "expired_space_claim_count": 1,
+            "expired_slot_lease_count": 1,
+        }
+
+        status, claims = _request_json(daemon.base_url, "/v1/lotus/space-claims", token=root_secret)
+        assert status == 200
+        assert claims["space_claims"][0]["status"] == ClaimStatus.EXPIRED.value
+        assert claims["space_claims"][1]["status"] == ClaimStatus.GRANTED.value
+
+        status, leases = _request_json(daemon.base_url, "/v1/lotus/slot-leases", token=root_secret)
+        assert status == 200
+        assert leases["slot_leases"][0]["status"] == LeaseStatus.EXPIRED.value
+        assert leases["slot_leases"][1]["status"] == LeaseStatus.ACTIVE.value
+
+        status, slots = _request_json(daemon.base_url, "/v1/lotus/slots", token=root_secret)
+        assert status == 200
+        assert slots["slots"][0]["status"] == SlotStatus.DORMANT.value
+        assert slots["slots"][0]["reclaimable_since_at"] == 50.0
+    finally:
+        daemon.shutdown()
+
+
 def test_lotus_daemon_transitions_intents_http_api(tmp_path):
     store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
     root_secret = store.update(
