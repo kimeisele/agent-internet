@@ -846,6 +846,25 @@ def test_lotus_api_lists_space_claims_and_slot_leases():
     assert leases["slot_leases"][0]["lease_id"] == "lease-1"
 
 
+def test_lotus_api_lists_supersession_links_for_claims_and_leases():
+    plane = AgentInternetControlPlane()
+    plane.grant_space_claim(SpaceClaimRecord(claim_id="claim-1", source_intent_id="intent-space-1", subject_id="operator-1", space_id="space-1", granted_at=20.0))
+    plane.grant_space_claim(SpaceClaimRecord(claim_id="claim-2", source_intent_id="intent-space-2", subject_id="operator-1", space_id="space-1", granted_at=30.0))
+    plane.upsert_slot(SlotDescriptor(slot_id="slot-1", space_id="space-1", slot_kind="general", holder_subject_id="operator-1", status=SlotStatus.ACTIVE))
+    plane.grant_slot_lease(SlotLeaseRecord(lease_id="lease-1", source_intent_id="intent-slot-1", holder_subject_id="operator-1", space_id="space-1", slot_id="slot-1", status=LeaseStatus.ACTIVE, granted_at=21.0))
+    plane.grant_slot_lease(SlotLeaseRecord(lease_id="lease-2", source_intent_id="intent-slot-2", holder_subject_id="operator-2", space_id="space-1", slot_id="slot-1", status=LeaseStatus.ACTIVE, granted_at=31.0))
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(subject="observer", scopes=(LotusApiScope.READ.value,), token_secret="claims-history-token", now=10.0)
+
+    claims = api.call(bearer_token=issued.secret, action="list_space_claims", params={})
+    leases = api.call(bearer_token=issued.secret, action="list_slot_leases", params={})
+
+    assert claims["space_claims"][0]["superseded_by_claim_id"] == "claim-2"
+    assert claims["space_claims"][1]["supersedes_claim_id"] == "claim-1"
+    assert leases["slot_leases"][0]["superseded_by_lease_id"] == "lease-2"
+    assert leases["slot_leases"][1]["supersedes_lease_id"] == "lease-1"
+
+
 def test_lotus_api_transitions_claims_and_leases():
     plane = AgentInternetControlPlane()
     plane.upsert_slot(SlotDescriptor(slot_id="slot-1", space_id="space-1", slot_kind="general", holder_subject_id="operator-1", status=SlotStatus.ACTIVE))

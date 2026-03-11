@@ -261,6 +261,63 @@ def test_space_claim_and_slot_lease_transition_fields_roundtrip():
     assert stored_lease.released_at == 22.0
 
 
+def test_space_claim_and_slot_lease_supersession_fields_roundtrip():
+    reg = SqliteCityRegistry()
+    reg.upsert_space_claim(
+        SpaceClaimRecord(
+            claim_id="claim-3",
+            source_intent_id="intent-5",
+            subject_id="operator-3",
+            space_id="space-3",
+            status=ClaimStatus.RELEASED,
+            granted_at=20.0,
+            released_at=30.0,
+            superseded_by_claim_id="claim-4",
+        )
+    )
+    reg.upsert_space_claim(
+        SpaceClaimRecord(
+            claim_id="claim-4",
+            source_intent_id="intent-6",
+            subject_id="operator-3",
+            space_id="space-3",
+            status=ClaimStatus.GRANTED,
+            granted_at=30.0,
+            supersedes_claim_id="claim-3",
+        )
+    )
+    reg.upsert_slot_lease(
+        SlotLeaseRecord(
+            lease_id="lease-3",
+            source_intent_id="intent-7",
+            holder_subject_id="operator-3",
+            space_id="space-3",
+            slot_id="slot-3",
+            status=LeaseStatus.RELEASED,
+            granted_at=21.0,
+            released_at=31.0,
+            superseded_by_lease_id="lease-4",
+        )
+    )
+    reg.upsert_slot_lease(
+        SlotLeaseRecord(
+            lease_id="lease-4",
+            source_intent_id="intent-8",
+            holder_subject_id="operator-4",
+            space_id="space-3",
+            slot_id="slot-3",
+            status=LeaseStatus.ACTIVE,
+            granted_at=31.0,
+            supersedes_lease_id="lease-3",
+        )
+    )
+
+    assert reg.get_space_claim("claim-3").superseded_by_claim_id == "claim-4"
+    assert reg.get_space_claim("claim-4").supersedes_claim_id == "claim-3"
+    assert reg.get_slot_lease("lease-3").superseded_by_lease_id == "lease-4"
+    assert reg.get_slot_lease("lease-4").supersedes_lease_id == "lease-3"
+
+
 def test_presence():
     reg = SqliteCityRegistry()
     presence = CityPresence(city_id="alpha", health=HealthStatus.HEALTHY, capabilities=("search",))

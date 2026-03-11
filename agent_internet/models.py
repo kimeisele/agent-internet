@@ -420,6 +420,8 @@ class SpaceClaimRecord:
     granted_at: float | None = None
     released_at: float | None = None
     expires_at: float | None = None
+    supersedes_claim_id: str = ""
+    superseded_by_claim_id: str = ""
     labels: dict[str, str] = field(default_factory=dict)
 
 
@@ -435,6 +437,8 @@ class SlotLeaseRecord:
     released_at: float | None = None
     expires_at: float | None = None
     reclaimable_since_at: float | None = None
+    supersedes_lease_id: str = ""
+    superseded_by_lease_id: str = ""
     labels: dict[str, str] = field(default_factory=dict)
 
 

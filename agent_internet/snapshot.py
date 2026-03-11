@@ -203,6 +203,8 @@ def restore_control_plane(payload: dict) -> AgentInternetControlPlane:
                 granted_at=data.get("granted_at"),
                 released_at=data.get("released_at"),
                 expires_at=data.get("expires_at"),
+                supersedes_claim_id=data.get("supersedes_claim_id", ""),
+                superseded_by_claim_id=data.get("superseded_by_claim_id", ""),
                 labels=dict(data.get("labels", {})),
             )
         )
@@ -219,6 +221,8 @@ def restore_control_plane(payload: dict) -> AgentInternetControlPlane:
                 released_at=data.get("released_at"),
                 expires_at=data.get("expires_at"),
                 reclaimable_since_at=data.get("reclaimable_since_at"),
+                supersedes_lease_id=data.get("supersedes_lease_id", ""),
+                superseded_by_lease_id=data.get("superseded_by_lease_id", ""),
                 labels=dict(data.get("labels", {})),
             )
         )
