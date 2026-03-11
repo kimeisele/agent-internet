@@ -22,8 +22,11 @@ from agent_internet.models import (
     HealthStatus,
     IntentStatus,
     IntentType,
+    LeaseStatus,
     LotusApiScope,
     PublicationState,
+    SlotLeaseRecord,
+    SpaceClaimRecord,
     TrustLevel,
     TrustRecord,
     UpstreamSyncPolicy,
@@ -1168,6 +1171,30 @@ def test_lotus_daemon_creates_and_lists_intents_http_api(tmp_path):
         status, fetched = _request_json(daemon.base_url, "/v1/lotus/intents/intent%3Aslot-city-http", token=root_secret)
         assert status == 200
         assert fetched["intent"]["intent_id"] == "intent:slot-city-http"
+    finally:
+        daemon.shutdown()
+
+
+def test_lotus_daemon_lists_claims_and_leases_http_api(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+
+    def _seed_claims_and_leases(plane):
+        plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-1", source_intent_id="intent-space-1", subject_id="operator-1", space_id="space-1", granted_at=20.0))
+        plane.upsert_slot_lease(SlotLeaseRecord(lease_id="lease-1", source_intent_id="intent-slot-1", holder_subject_id="operator-1", space_id="space-1", slot_id="slot-1", status=LeaseStatus.ACTIVE, granted_at=21.0))
+        return LotusControlPlaneAPI(plane).issue_token(subject="observer", scopes=(LotusApiScope.READ.value,), token_secret="claims-root", token_id="tok-claims-root").secret
+
+    root_secret = store.update(_seed_claims_and_leases)
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        status, claims = _request_json(daemon.base_url, "/v1/lotus/space-claims", token=root_secret)
+        assert status == 200
+        assert claims["space_claims"][0]["claim_id"] == "claim-1"
+
+        status, leases = _request_json(daemon.base_url, "/v1/lotus/slot-leases", token=root_secret)
+        assert status == 200
+        assert leases["slot_leases"][0]["lease_id"] == "lease-1"
     finally:
         daemon.shutdown()
 

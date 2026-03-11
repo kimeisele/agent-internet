@@ -138,6 +138,12 @@ class LotusControlPlaneAPI:
         if action == "list_slots":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "slots": [asdict(slot) for slot in self.plane.registry.list_slots()]}
+        if action == "list_space_claims":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            return {"token_id": token.token_id, "space_claims": [asdict(claim) for claim in self.plane.registry.list_space_claims()]}
+        if action == "list_slot_leases":
+            token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+            return {"token_id": token.token_id, "slot_leases": [asdict(lease) for lease in self.plane.registry.list_slot_leases()]}
         if action == "list_repo_roles":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "repo_roles": [asdict(record) for record in self.plane.registry.list_repo_roles()]}

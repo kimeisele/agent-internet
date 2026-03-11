@@ -52,6 +52,17 @@ class SlotStatus(StrEnum):
     DORMANT = "dormant"
 
 
+class ClaimStatus(StrEnum):
+    PENDING = "pending"
+    GRANTED = "granted"
+    RELEASED = "released"
+
+
+class LeaseStatus(StrEnum):
+    ACTIVE = "active"
+    RELEASED = "released"
+
+
 class ForkMode(StrEnum):
     MIRROR = "mirror"
     EXPERIMENT = "experiment"
@@ -390,6 +401,35 @@ class SlotDescriptor:
     heartbeat: int | None = None
     last_seen_at: float | None = None
     lease_expires_at: float | None = None
+    reclaimable_since_at: float | None = None
+    labels: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class SpaceClaimRecord:
+    claim_id: str
+    source_intent_id: str
+    subject_id: str
+    space_id: str
+    slot_id: str = ""
+    claim_type: str = "space_claim"
+    status: ClaimStatus = ClaimStatus.GRANTED
+    requested_at: float | None = None
+    granted_at: float | None = None
+    expires_at: float | None = None
+    labels: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class SlotLeaseRecord:
+    lease_id: str
+    source_intent_id: str
+    holder_subject_id: str
+    space_id: str
+    slot_id: str
+    status: LeaseStatus = LeaseStatus.ACTIVE
+    granted_at: float | None = None
+    expires_at: float | None = None
     reclaimable_since_at: float | None = None
     labels: dict[str, str] = field(default_factory=dict)
 

@@ -36,7 +36,11 @@ def test_space_claim_actuator():
     outcome = registry.actuate(intent, context)
     assert outcome.result == ActuatorResult.SUCCESS
     assert "space_id" in outcome.artifacts
+    assert outcome.artifacts["claim_id"] == f"claim:{intent.intent_id}"
     assert len(plane.registry.list_spaces()) == 1
+    claim = plane.registry.get_space_claim(f"claim:{intent.intent_id}")
+    assert claim is not None
+    assert claim.space_id == outcome.artifacts["space_id"]
 
 
 def test_fork_actuator():
@@ -88,6 +92,10 @@ def test_slot_request_actuator():
     assert outcome.result == ActuatorResult.SUCCESS
     assert len(plane.registry.list_slots()) == 1
     assert outcome.artifacts["reclaimed"] is False
+    assert outcome.artifacts["lease_id"] == f"lease:{intent.intent_id}"
+    lease = plane.registry.get_slot_lease(f"lease:{intent.intent_id}")
+    assert lease is not None
+    assert lease.slot_id == outcome.artifacts["slot_id"]
 
 
 def test_slot_request_actuator_reclaims_matching_dormant_slot():
@@ -112,7 +120,7 @@ def test_slot_request_actuator_reclaims_matching_dormant_slot():
     outcome = registry.actuate(intent, context)
 
     assert outcome.result == ActuatorResult.SUCCESS
-    assert outcome.artifacts == {"slot_id": "slot-reclaim", "reclaimed": True}
+    assert outcome.artifacts == {"slot_id": "slot-reclaim", "reclaimed": True, "lease_id": f"lease:{intent.intent_id}"}
     stored = plane.registry.get_slot("slot-reclaim")
     assert stored is not None
     assert stored.holder_subject_id == "operator-1"
@@ -120,6 +128,10 @@ def test_slot_request_actuator_reclaims_matching_dormant_slot():
     assert stored.last_seen_at == 20.0
     assert stored.lease_expires_at is None
     assert stored.reclaimable_since_at is None
+    lease = plane.registry.get_slot_lease(f"lease:{intent.intent_id}")
+    assert lease is not None
+    assert lease.slot_id == "slot-reclaim"
+    assert lease.labels["reclaimed"] == "true"
 
 
 def test_actuate_pending_skips_non_accepted():

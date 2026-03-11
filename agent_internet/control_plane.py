@@ -48,7 +48,9 @@ from .models import (
     RepoRoleRecord,
     SourceAuthorityFeedRecord,
     SlotDescriptor,
+    SlotLeaseRecord,
     SlotStatus,
+    SpaceClaimRecord,
     SpaceDescriptor,
     TrustLevel,
     TrustRecord,
@@ -347,6 +349,12 @@ class AgentInternetControlPlane:
 
     def upsert_slot(self, slot: SlotDescriptor) -> None:
         self.registry.upsert_slot(slot)
+
+    def upsert_space_claim(self, claim: SpaceClaimRecord) -> None:
+        self.registry.upsert_space_claim(claim)
+
+    def upsert_slot_lease(self, lease: SlotLeaseRecord) -> None:
+        self.registry.upsert_slot_lease(lease)
 
     def find_reclaimable_slot(self, *, space_id: str, slot_kind: str = "", now: float | None = None) -> SlotDescriptor | None:
         current = float(time.time() if now is None else now)

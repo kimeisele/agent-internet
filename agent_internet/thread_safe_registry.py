@@ -23,6 +23,8 @@ from .models import (
     LotusRoute,
     LotusServiceAddress,
     SlotDescriptor,
+    SlotLeaseRecord,
+    SpaceClaimRecord,
     SpaceDescriptor,
 )
 
@@ -124,6 +126,12 @@ class ThreadSafeRegistryWrapper:
     def upsert_slot(self, slot: SlotDescriptor) -> None:
         self._write("upsert_slot", slot)
 
+    def upsert_space_claim(self, claim: SpaceClaimRecord) -> None:
+        self._write("upsert_space_claim", claim)
+
+    def upsert_slot_lease(self, lease: SlotLeaseRecord) -> None:
+        self._write("upsert_slot_lease", lease)
+
     def upsert_fork_lineage(self, lineage: ForkLineageRecord) -> None:
         self._write("upsert_fork_lineage", lineage)
 
@@ -200,6 +208,18 @@ class ThreadSafeRegistryWrapper:
 
     def list_slots(self) -> list[SlotDescriptor]:
         return self._read("list_slots")  # type: ignore[return-value]
+
+    def get_space_claim(self, claim_id: str) -> SpaceClaimRecord | None:
+        return self._read("get_space_claim", claim_id)  # type: ignore[return-value]
+
+    def list_space_claims(self) -> list[SpaceClaimRecord]:
+        return self._read("list_space_claims")  # type: ignore[return-value]
+
+    def get_slot_lease(self, lease_id: str) -> SlotLeaseRecord | None:
+        return self._read("get_slot_lease", lease_id)  # type: ignore[return-value]
+
+    def list_slot_leases(self) -> list[SlotLeaseRecord]:
+        return self._read("list_slot_leases")  # type: ignore[return-value]
 
     def get_fork_lineage(self, lineage_id: str) -> ForkLineageRecord | None:
         return self._read("get_fork_lineage", lineage_id)  # type: ignore[return-value]

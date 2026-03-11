@@ -8,7 +8,7 @@ from agent_internet.assistant_surface import assistant_social_slot_from_snapshot
 from agent_internet.agent_city_contract import AgentCityFilesystemContract
 from agent_internet.control_plane import AGENT_INTERNET_REPO_ID, AGENT_WORLD_PUBLIC_WIKI_BINDING_ID, AGENT_WORLD_REPO_ID, STEWARD_PROTOCOL_REPO_ID, STEWARD_PUBLIC_WIKI_BINDING_ID, AgentInternetControlPlane
 from agent_internet.filesystem_transport import FilesystemFederationTransport
-from agent_internet.models import AssistantSurfaceSnapshot, AuthorityExportKind, AuthorityExportRecord, CityEndpoint, CityIdentity, EndpointVisibility, ForkLineageRecord, ForkMode, HealthStatus, IntentRecord, IntentStatus, IntentType, LotusApiScope, ProjectionFailurePolicy, ProjectionMode, PublicationState, RepoRole, SlotDescriptor, SlotStatus, SpaceKind, TrustLevel, TrustRecord, UpstreamSyncPolicy
+from agent_internet.models import AssistantSurfaceSnapshot, AuthorityExportKind, AuthorityExportRecord, CityEndpoint, CityIdentity, EndpointVisibility, ForkLineageRecord, ForkMode, HealthStatus, IntentRecord, IntentStatus, IntentType, LeaseStatus, LotusApiScope, ProjectionFailurePolicy, ProjectionMode, PublicationState, RepoRole, SlotDescriptor, SlotLeaseRecord, SlotStatus, SpaceClaimRecord, SpaceKind, TrustLevel, TrustRecord, UpstreamSyncPolicy
 from agent_internet.snapshot import restore_control_plane, snapshot_control_plane
 
 
@@ -318,6 +318,35 @@ def test_control_plane_publishes_and_restores_assistant_space_and_slot(monkeypat
     assert slot.labels["campaign_focus"] == "Internet adaptation"
     assert restored.registry.get_space(space.space_id) == space
     assert restored.registry.get_slot(slot.slot_id) == slot
+
+
+def test_control_plane_snapshot_restores_claims_and_leases():
+    plane = AgentInternetControlPlane()
+    plane.upsert_space_claim(
+        SpaceClaimRecord(
+            claim_id="claim-1",
+            source_intent_id="intent-space-1",
+            subject_id="operator-1",
+            space_id="space-1",
+            granted_at=20.0,
+        )
+    )
+    plane.upsert_slot_lease(
+        SlotLeaseRecord(
+            lease_id="lease-1",
+            source_intent_id="intent-slot-1",
+            holder_subject_id="operator-1",
+            space_id="space-1",
+            slot_id="slot-1",
+            status=LeaseStatus.ACTIVE,
+            granted_at=21.0,
+        )
+    )
+
+    restored = restore_control_plane(snapshot_control_plane(plane))
+
+    assert restored.registry.get_space_claim("claim-1") == plane.registry.get_space_claim("claim-1")
+    assert restored.registry.get_slot_lease("lease-1") == plane.registry.get_slot_lease("lease-1")
 
 
 def test_find_reclaimable_slot_filters_by_space_kind_and_time():

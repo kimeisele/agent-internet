@@ -15,10 +15,13 @@ from agent_internet.models import (
     ForkMode,
     IntentStatus,
     IntentType,
+    LeaseStatus,
     LotusApiScope,
     PublicationState,
     ProjectionReconcileState,
     ProjectionReconcileStatusRecord,
+    SlotLeaseRecord,
+    SpaceClaimRecord,
     TrustLevel,
     TrustRecord,
     UpstreamSyncPolicy,
@@ -824,6 +827,20 @@ def test_lotus_api_lists_spaces_and_slots():
     assert spaces["spaces"][0]["kind"] == "assistant"
     assert slots["slots"][0]["slot_id"] == "slot:city-space:assistant-social"
     assert slots["slots"][0]["slot_kind"] == "assistant_social"
+
+
+def test_lotus_api_lists_space_claims_and_slot_leases():
+    plane = AgentInternetControlPlane()
+    plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-1", source_intent_id="intent-space-1", subject_id="operator-1", space_id="space-1", granted_at=20.0))
+    plane.upsert_slot_lease(SlotLeaseRecord(lease_id="lease-1", source_intent_id="intent-slot-1", holder_subject_id="operator-1", space_id="space-1", slot_id="slot-1", status=LeaseStatus.ACTIVE, granted_at=21.0))
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(subject="observer", scopes=(LotusApiScope.READ.value,), token_secret="claims-token", now=10.0)
+
+    claims = api.call(bearer_token=issued.secret, action="list_space_claims", params={})
+    leases = api.call(bearer_token=issued.secret, action="list_slot_leases", params={})
+
+    assert claims["space_claims"][0]["claim_id"] == "claim-1"
+    assert leases["slot_leases"][0]["lease_id"] == "lease-1"
 
 
 def test_lotus_api_lists_federation_contract_records():
