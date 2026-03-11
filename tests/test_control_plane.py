@@ -410,6 +410,88 @@ def test_control_plane_snapshot_restores_transitioned_claims_and_leases():
     assert restored.registry.get_slot_lease("lease-2") == plane.registry.get_slot_lease("lease-2")
 
 
+def test_control_plane_grants_supersede_prior_claims_and_leases():
+    plane = AgentInternetControlPlane()
+    first_claim = plane.grant_space_claim(
+        SpaceClaimRecord(
+            claim_id="claim-1",
+            source_intent_id="intent-space-1",
+            subject_id="operator-1",
+            space_id="space-1",
+            status=ClaimStatus.GRANTED,
+            granted_at=20.0,
+        )
+    )
+    second_claim = plane.grant_space_claim(
+        SpaceClaimRecord(
+            claim_id="claim-2",
+            source_intent_id="intent-space-2",
+            subject_id="operator-1",
+            space_id="space-1",
+            status=ClaimStatus.GRANTED,
+            granted_at=30.0,
+        )
+    )
+
+    plane.upsert_slot(SlotDescriptor(slot_id="slot-3", space_id="space-1", slot_kind="general", holder_subject_id="operator-1", status=SlotStatus.ACTIVE))
+    first_lease = plane.grant_slot_lease(
+        SlotLeaseRecord(
+            lease_id="lease-1",
+            source_intent_id="intent-slot-1",
+            holder_subject_id="operator-1",
+            space_id="space-1",
+            slot_id="slot-3",
+            status=LeaseStatus.ACTIVE,
+            granted_at=21.0,
+        )
+    )
+    second_lease = plane.grant_slot_lease(
+        SlotLeaseRecord(
+            lease_id="lease-2",
+            source_intent_id="intent-slot-2",
+            holder_subject_id="operator-2",
+            space_id="space-1",
+            slot_id="slot-3",
+            status=LeaseStatus.ACTIVE,
+            granted_at=31.0,
+        )
+    )
+
+    assert first_claim.claim_id == "claim-1"
+    stored_first_claim = plane.registry.get_space_claim("claim-1")
+    stored_second_claim = plane.registry.get_space_claim("claim-2")
+    assert stored_first_claim is not None
+    assert stored_second_claim is not None
+    assert stored_first_claim.status == ClaimStatus.RELEASED
+    assert stored_first_claim.superseded_by_claim_id == "claim-2"
+    assert stored_second_claim.supersedes_claim_id == "claim-1"
+
+    assert first_lease.lease_id == "lease-1"
+    stored_first_lease = plane.registry.get_slot_lease("lease-1")
+    stored_second_lease = plane.registry.get_slot_lease("lease-2")
+    assert stored_first_lease is not None
+    assert stored_second_lease is not None
+    assert stored_first_lease.status == LeaseStatus.RELEASED
+    assert stored_first_lease.superseded_by_lease_id == "lease-2"
+    assert stored_second_lease.supersedes_lease_id == "lease-1"
+
+
+def test_control_plane_snapshot_restores_supersession_links():
+    plane = AgentInternetControlPlane()
+    plane.grant_space_claim(SpaceClaimRecord(claim_id="claim-3", source_intent_id="intent-space-3", subject_id="operator-3", space_id="space-3", status=ClaimStatus.GRANTED, granted_at=20.0))
+    plane.grant_space_claim(SpaceClaimRecord(claim_id="claim-4", source_intent_id="intent-space-4", subject_id="operator-3", space_id="space-3", status=ClaimStatus.GRANTED, granted_at=30.0))
+    plane.upsert_slot(SlotDescriptor(slot_id="slot-4", space_id="space-3", slot_kind="general", holder_subject_id="operator-3", status=SlotStatus.ACTIVE))
+    plane.grant_slot_lease(SlotLeaseRecord(lease_id="lease-3", source_intent_id="intent-slot-3", holder_subject_id="operator-3", space_id="space-3", slot_id="slot-4", status=LeaseStatus.ACTIVE, granted_at=21.0))
+    plane.grant_slot_lease(SlotLeaseRecord(lease_id="lease-4", source_intent_id="intent-slot-4", holder_subject_id="operator-4", space_id="space-3", slot_id="slot-4", status=LeaseStatus.ACTIVE, granted_at=31.0))
+
+    restored = restore_control_plane(snapshot_control_plane(plane))
+
+    assert restored.registry.get_space_claim("claim-3").superseded_by_claim_id == "claim-4"
+    assert restored.registry.get_space_claim("claim-4").supersedes_claim_id == "claim-3"
+    assert restored.registry.get_slot_lease("lease-3").superseded_by_lease_id == "lease-4"
+    assert restored.registry.get_slot_lease("lease-4").supersedes_lease_id == "lease-3"
+
+
 def test_find_reclaimable_slot_filters_by_space_kind_and_time():
     plane = AgentInternetControlPlane()
     plane.upsert_slot(

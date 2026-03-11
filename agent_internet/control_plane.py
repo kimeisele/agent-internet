@@ -358,6 +358,39 @@ class AgentInternetControlPlane:
     def upsert_slot_lease(self, lease: SlotLeaseRecord) -> None:
         self.registry.upsert_slot_lease(lease)
 
+    def grant_space_claim(self, claim: SpaceClaimRecord) -> SpaceClaimRecord:
+        predecessor = self._find_superseded_space_claim(claim)
+        if predecessor is not None:
+            granted_at = float(time.time() if claim.granted_at is None else claim.granted_at)
+            self.registry.upsert_space_claim(
+                replace(
+                    predecessor,
+                    status=ClaimStatus.RELEASED,
+                    released_at=granted_at,
+                    superseded_by_claim_id=claim.claim_id,
+                )
+            )
+            claim = replace(claim, supersedes_claim_id=predecessor.claim_id)
+        self.registry.upsert_space_claim(claim)
+        return claim
+
+    def grant_slot_lease(self, lease: SlotLeaseRecord) -> SlotLeaseRecord:
+        predecessor = self._find_superseded_slot_lease(lease)
+        if predecessor is not None:
+            granted_at = float(time.time() if lease.granted_at is None else lease.granted_at)
+            self.registry.upsert_slot_lease(
+                replace(
+                    predecessor,
+                    status=LeaseStatus.RELEASED,
+                    released_at=granted_at,
+                    reclaimable_since_at=granted_at,
+                    superseded_by_lease_id=lease.lease_id,
+                )
+            )
+            lease = replace(lease, supersedes_lease_id=predecessor.lease_id)
+        self.registry.upsert_slot_lease(lease)
+        return lease
+
     def transition_space_claim(self, *, claim_id: str, status: ClaimStatus, updated_at: float | None = None) -> SpaceClaimRecord:
         claim = self.registry.get_space_claim(claim_id)
         if claim is None:
@@ -420,6 +453,28 @@ class AgentInternetControlPlane:
                 continue
             return slot
         return None
+
+    def _find_superseded_space_claim(self, claim: SpaceClaimRecord) -> SpaceClaimRecord | None:
+        candidates = [
+            current
+            for current in self.registry.list_space_claims()
+            if current.claim_id != claim.claim_id
+            and current.status == ClaimStatus.GRANTED
+            and current.space_id == claim.space_id
+            and current.subject_id == claim.subject_id
+            and current.claim_type == claim.claim_type
+        ]
+        return max(candidates, key=lambda current: (current.granted_at or 0.0, current.claim_id), default=None)
+
+    def _find_superseded_slot_lease(self, lease: SlotLeaseRecord) -> SlotLeaseRecord | None:
+        candidates = [
+            current
+            for current in self.registry.list_slot_leases()
+            if current.lease_id != lease.lease_id
+            and current.status == LeaseStatus.ACTIVE
+            and current.slot_id == lease.slot_id
+        ]
+        return max(candidates, key=lambda current: (current.granted_at or 0.0, current.lease_id), default=None)
 
     def upsert_fork_lineage(self, lineage: ForkLineageRecord) -> None:
         self.registry.upsert_fork_lineage(lineage)

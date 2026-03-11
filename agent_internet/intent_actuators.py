@@ -105,7 +105,7 @@ class SpaceClaimActuator(IntentActuator):
 
         if not context.dry_run:
             plane.upsert_space(space)
-            plane.upsert_space_claim(
+            plane.grant_space_claim(
                 SpaceClaimRecord(
                     claim_id=f"claim:{intent.intent_id}",
                     source_intent_id=intent.intent_id,
@@ -329,7 +329,7 @@ class SlotRequestActuator(IntentActuator):
 
         if not context.dry_run:
             plane.upsert_slot(slot)
-            plane.upsert_slot_lease(
+            plane.grant_slot_lease(
                 SlotLeaseRecord(
                     lease_id=f"lease:{intent.intent_id}",
                     source_intent_id=intent.intent_id,
