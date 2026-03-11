@@ -11,7 +11,6 @@ from typing import Any
 from .authority_contracts import (
     AGENT_WORLD_PUBLIC_AUTHORITY_CONTRACT,
     STEWARD_PUBLIC_AUTHORITY_CONTRACT,
-    default_public_authority_source_contract,
     get_public_authority_source_contract_by_repo_id,
     iter_public_authority_source_contracts,
 )
@@ -66,6 +65,7 @@ STEWARD_PUBLIC_WIKI_BINDING_ID = STEWARD_PUBLIC_AUTHORITY_CONTRACT.binding_id
 STEWARD_AUTHORITY_BUNDLE_FEED_ID = STEWARD_PUBLIC_AUTHORITY_CONTRACT.feed_id
 AGENT_WORLD_PUBLIC_WIKI_BINDING_ID = AGENT_WORLD_PUBLIC_AUTHORITY_CONTRACT.binding_id
 AGENT_WORLD_AUTHORITY_BUNDLE_FEED_ID = AGENT_WORLD_PUBLIC_AUTHORITY_CONTRACT.feed_id
+DEFAULT_PUBLIC_AUTHORITY_TARGET_LOCATOR = "github.com/kimeisele/agent-internet.wiki.git"
 DEFAULT_PUBLIC_AUTHORITY_SOURCE_EXPORTS = (
     AuthorityExportKind.CANONICAL_SURFACE.value,
     AuthorityExportKind.PUBLIC_SUMMARY_REGISTRY.value,
@@ -443,7 +443,7 @@ class AgentInternetControlPlane:
                 owner_boundary=descriptor.owner_boundary or default_public_authority_owner_boundary(descriptor.repo_id),
                 source_exports=DEFAULT_PUBLIC_AUTHORITY_SOURCE_EXPORTS,
                 public_surface_label=f"{_slugify_repo_id(descriptor.repo_id)}-wiki",
-                target_locator=str(target_locator or STEWARD_PUBLIC_AUTHORITY_CONTRACT.target_locator),
+                target_locator=str(target_locator or DEFAULT_PUBLIC_AUTHORITY_TARGET_LOCATOR),
                 binding_labels=_public_authority_binding_labels(
                     source_repo_id=descriptor.repo_id,
                     display_name=descriptor.display_name,
