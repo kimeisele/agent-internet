@@ -1,0 +1,63 @@
+name: Reusable Publish Authority Feed
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        required: false
+        type: string
+        default: '3.11'
+      install-command:
+        required: false
+        type: string
+        default: ''
+      build-command:
+        required: true
+        type: string
+      output-dir:
+        required: false
+        type: string
+        default: '.authority-feed-out'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install dependencies
+        if: ${{ inputs.install-command != '' }}
+        run: ${{ inputs.install-command }}
+
+      - name: Build authority feed
+        run: ${{ inputs.build-command }}
+
+      - name: Publish authority-feed branch
+        env:
+          OUTPUT_DIR: ${{ inputs.output-dir }}
+          PUSH_URL: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+        run: |
+          set -euo pipefail
+          test -f "$OUTPUT_DIR/latest-authority-manifest.json"
+          PUBLISH_DIR=$(mktemp -d)
+          cp -R "$OUTPUT_DIR"/. "$PUBLISH_DIR"/
+          touch "$PUBLISH_DIR/.nojekyll"
+          cd "$PUBLISH_DIR"
+          git init -b authority-feed
+          git config user.name "agent-internet-bot"
+          git config user.email "bot@agent-internet"
+          git add .
+          git commit -m "Publish authority feed for ${GITHUB_SHA}"
+          git remote add origin "$PUSH_URL"
+          git push --force origin HEAD:authority-feed

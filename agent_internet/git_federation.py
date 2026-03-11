@@ -12,7 +12,7 @@ from .authority_contracts import (
     AGENT_WORLD_PUBLIC_AUTHORITY_CONTRACT,
     STEWARD_PUBLIC_AUTHORITY_CONTRACT,
     build_authority_projection_documents,
-    iter_public_authority_source_contracts,
+    iter_public_authority_projection_contracts,
 )
 from .agent_web_graph import build_agent_web_public_graph
 from .agent_web_index import build_agent_web_search_index
@@ -178,7 +178,7 @@ def _authority_projection_snapshots(state_snapshot: dict) -> list[dict[str, Any]
             "contract": contract,
             "view": _authority_view(state_snapshot, source_repo_id=contract.source_repo_id, binding_id=contract.binding_id),
         }
-        for contract in iter_public_authority_source_contracts()
+        for contract in iter_public_authority_projection_contracts(state_snapshot)
     ]
 
 

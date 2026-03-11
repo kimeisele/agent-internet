@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any
 
 from .models import AuthorityExportKind
@@ -62,6 +63,48 @@ def iter_public_authority_source_contracts() -> tuple[PublicAuthoritySourceContr
     return PUBLIC_AUTHORITY_SOURCE_CONTRACTS
 
 
+def iter_public_authority_projection_contracts(state_snapshot: dict[str, Any]) -> tuple[PublicAuthoritySourceContract, ...]:
+    contracts = {contract.binding_id: contract for contract in PUBLIC_AUTHORITY_SOURCE_CONTRACTS}
+    repo_roles = {
+        str(record.get("repo_id", "")): dict(record)
+        for record in list(state_snapshot.get("repo_roles", []))
+        if isinstance(record, dict) and str(record.get("repo_id", "")).strip()
+    }
+    feeds_by_repo_id: dict[str, str] = {}
+    for record in list(state_snapshot.get("source_authority_feeds", [])):
+        if not isinstance(record, dict):
+            continue
+        repo_id = str(record.get("source_repo_id", "")).strip()
+        feed_id = str(record.get("feed_id", "")).strip()
+        if repo_id and feed_id and repo_id not in feeds_by_repo_id:
+            feeds_by_repo_id[repo_id] = feed_id
+    for record in list(state_snapshot.get("projection_bindings", [])):
+        if not isinstance(record, dict) or not _is_public_authority_binding(record):
+            continue
+        binding_id = str(record.get("binding_id", "")).strip()
+        source_repo_id = str(record.get("source_repo_id", "")).strip()
+        if not binding_id or not source_repo_id:
+            continue
+        labels = {str(key): str(value) for key, value in dict(record.get("labels") or {}).items()}
+        repo_role = repo_roles.get(source_repo_id, {})
+        display_name = labels.get("display_name") or str(dict(repo_role.get("labels") or {}).get("display_name") or _display_name(source_repo_id))
+        authority_key = labels.get("authority_key") or _slugify(source_repo_id).replace("-", "_")
+        public_surface_label = labels.get("public_surface") or f"{_slugify(source_repo_id)}-wiki"
+        exports = tuple(str(item) for item in list(repo_role.get("exports") or ()) if str(item).strip())
+        contracts[binding_id] = PublicAuthoritySourceContract(
+            key=authority_key,
+            label=display_name,
+            source_repo_id=source_repo_id,
+            binding_id=binding_id,
+            feed_id=feeds_by_repo_id.get(source_repo_id, f"{_slugify(source_repo_id)}-authority-bundle"),
+            target_locator=str(record.get("target_locator", "")),
+            owner_boundary=labels.get("owner_boundary") or str(repo_role.get("owner_boundary", "")),
+            source_exports=exports,
+            public_surface_label=public_surface_label,
+        )
+    return tuple(sorted(contracts.values(), key=lambda contract: contract.binding_id))
+
+
 def default_public_authority_source_contract() -> PublicAuthoritySourceContract:
     return STEWARD_PUBLIC_AUTHORITY_CONTRACT
 
@@ -87,7 +130,7 @@ def build_authority_document_specs(state_snapshot: dict[str, Any]) -> tuple[tupl
 
 def build_authority_projection_documents(state_snapshot: dict[str, Any]) -> tuple[dict[str, Any], ...]:
     documents: list[dict[str, Any]] = []
-    for contract in PUBLIC_AUTHORITY_SOURCE_CONTRACTS:
+    for contract in iter_public_authority_projection_contracts(state_snapshot):
         artifacts_by_kind = _artifacts_by_kind_for_repo(state_snapshot, contract.source_repo_id)
         config = _public_surface_config(contract, artifacts_by_kind)
         documents.extend(
@@ -247,3 +290,20 @@ def _truthy(value: object, *, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_public_authority_binding(record: dict[str, Any]) -> bool:
+    binding_id = str(record.get("binding_id", "")).strip()
+    if get_public_authority_source_contract_by_binding_id(binding_id) is not None:
+        return True
+    labels = dict(record.get("labels") or {})
+    return str(labels.get("authority_projection") or labels.get("projection_intent") or "").strip() == "public_authority_page"
+
+
+def _slugify(value: str) -> str:
+    lowered = re.sub(r"[^a-z0-9]+", "-", str(value).strip().lower()).strip("-")
+    return lowered or "authority-source"
+
+
+def _display_name(repo_id: str) -> str:
+    return " ".join(word.capitalize() for word in _slugify(repo_id).split("-")) or str(repo_id)
