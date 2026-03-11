@@ -492,6 +492,44 @@ def test_control_plane_snapshot_restores_supersession_links():
     assert restored.registry.get_slot_lease("lease-4").supersedes_lease_id == "lease-3"
 
 
+def test_control_plane_sweep_expires_due_claims_and_leases():
+    plane = AgentInternetControlPlane()
+    plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-due", source_intent_id="intent-space-due", subject_id="operator-1", space_id="space-1", status=ClaimStatus.GRANTED, granted_at=10.0, expires_at=40.0))
+    plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-equal", source_intent_id="intent-space-equal", subject_id="operator-1", space_id="space-1", status=ClaimStatus.GRANTED, granted_at=11.0, expires_at=50.0))
+    plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-future", source_intent_id="intent-space-future", subject_id="operator-1", space_id="space-1", status=ClaimStatus.GRANTED, granted_at=12.0, expires_at=60.0))
+    plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-released", source_intent_id="intent-space-released", subject_id="operator-1", space_id="space-1", status=ClaimStatus.RELEASED, granted_at=13.0, released_at=20.0, expires_at=30.0))
+
+    plane.upsert_slot(SlotDescriptor(slot_id="slot-due", space_id="space-1", slot_kind="general", holder_subject_id="operator-1", status=SlotStatus.ACTIVE))
+    plane.upsert_slot(SlotDescriptor(slot_id="slot-equal", space_id="space-1", slot_kind="general", holder_subject_id="operator-2", status=SlotStatus.ACTIVE))
+    plane.upsert_slot(SlotDescriptor(slot_id="slot-future", space_id="space-1", slot_kind="general", holder_subject_id="operator-3", status=SlotStatus.ACTIVE))
+    plane.upsert_slot_lease(SlotLeaseRecord(lease_id="lease-due", source_intent_id="intent-slot-due", holder_subject_id="operator-1", space_id="space-1", slot_id="slot-due", status=LeaseStatus.ACTIVE, granted_at=21.0, expires_at=40.0))
+    plane.upsert_slot_lease(SlotLeaseRecord(lease_id="lease-equal", source_intent_id="intent-slot-equal", holder_subject_id="operator-2", space_id="space-1", slot_id="slot-equal", status=LeaseStatus.ACTIVE, granted_at=22.0, expires_at=50.0))
+    plane.upsert_slot_lease(SlotLeaseRecord(lease_id="lease-future", source_intent_id="intent-slot-future", holder_subject_id="operator-3", space_id="space-1", slot_id="slot-future", status=LeaseStatus.ACTIVE, granted_at=23.0, expires_at=60.0))
+    plane.upsert_slot_lease(SlotLeaseRecord(lease_id="lease-released", source_intent_id="intent-slot-released", holder_subject_id="operator-4", space_id="space-1", slot_id="slot-future", status=LeaseStatus.RELEASED, granted_at=24.0, released_at=30.0, expires_at=35.0))
+
+    summary = plane.sweep_expired_grants(current_time=50.0)
+
+    assert summary == {
+        "checked_at": 50.0,
+        "expired_space_claim_ids": ("claim-due",),
+        "expired_slot_lease_ids": ("lease-due",),
+        "expired_space_claim_count": 1,
+        "expired_slot_lease_count": 1,
+    }
+    assert plane.registry.get_space_claim("claim-due").status == ClaimStatus.EXPIRED
+    assert plane.registry.get_space_claim("claim-equal").status == ClaimStatus.GRANTED
+    assert plane.registry.get_space_claim("claim-future").status == ClaimStatus.GRANTED
+    assert plane.registry.get_slot_lease("lease-due").status == LeaseStatus.EXPIRED
+    assert plane.registry.get_slot_lease("lease-equal").status == LeaseStatus.ACTIVE
+    assert plane.registry.get_slot_lease("lease-future").status == LeaseStatus.ACTIVE
+    expired_slot = plane.registry.get_slot("slot-due")
+    assert expired_slot is not None
+    assert expired_slot.status == SlotStatus.DORMANT
+    assert expired_slot.lease_expires_at == 50.0
+    assert expired_slot.reclaimable_since_at == 50.0
+    assert plane.registry.get_slot("slot-equal").status == SlotStatus.ACTIVE
+
+
 def test_find_reclaimable_slot_filters_by_space_kind_and_time():
     plane = AgentInternetControlPlane()
     plane.upsert_slot(
