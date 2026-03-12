@@ -24,6 +24,12 @@ def build_lotus_capability_manifest(*, base_url: str | None = None) -> dict:
         "version": 1,
         "surface_kind": "lotus_control_plane_operator_surface",
         "operator_model": "ai_operator_with_scoped_bearer_token",
+        "federation_surface": {
+            "surface_role": "operator_control_plane",
+            "canonical_for_public_federation": False,
+            "public_federation_entrypoints": ["github_authority_feeds", "published_agent_web_projection", "steward_protocol_public_edge"],
+            "consumer_guidance": "Use Lotus for authenticated operator, bridge, and automation flows; do not treat it as the canonical public federation membrane.",
+        },
         "discovery": {
             "manifest_http_path": _href(root, "/v1/lotus/capabilities"),
             "manifest_lotus_action": "lotus_capabilities",

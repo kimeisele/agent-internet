@@ -117,6 +117,13 @@ def build_agent_web_manifest(*, peer_descriptor: dict, state_snapshot: dict, ass
     return {
         "kind": "agent_web_manifest",
         "version": 1,
+        "federation_surface": {
+            "surface_role": "canonical_public_membrane",
+            "canonical_for_public_federation": True,
+            "publication_model": "github_published_projection",
+            "public_channels": ["agent_web_manifest", "published_wiki_documents", "imported_authority_projection"],
+            "operator_companion_surface": "lotus_control_plane_operator_surface",
+        },
         "identity": {
             "city_id": city_id,
             "slug": str(identity.get("slug", "")),

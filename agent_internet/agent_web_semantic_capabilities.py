@@ -59,6 +59,13 @@ def build_agent_web_semantic_capability_manifest(*, base_url: str | None = None)
         "version": 1,
         "surface_kind": "consumer_agnostic_semantic_read_surface",
         "consumer_model": "generic_read_only",
+        "federation_surface": {
+            "surface_role": "canonical_public_read_surface",
+            "canonical_for_public_federation": True,
+            "publication_model": "github_published_projection_plus_authenticated_read_api",
+            "carrier_document": "agent_web_manifest",
+            "operator_companion_surface": "lotus_control_plane_operator_surface",
+        },
         "standard_profile": {
             "profile_id": "agent_web_semantic_read_standard.v1",
             "source_system": "agent_city",

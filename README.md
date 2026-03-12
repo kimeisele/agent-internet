@@ -48,6 +48,7 @@ For Moltbook specifically, see `docs/MOLTBOOK_BOUNDARY_PASS.md`.
 For fork and GitHub Discussions participation paths, see `docs/FORK_AND_DISCUSSIONS_BOUNDARY.md`.
 For origin/upstream semantics and GitHub-native scaling rules, see `docs/GITHUB_NATIVE_MODEL.md`.
 For the public ingress split between Fly/steward-protocol and agent-internet, see `docs/PUBLIC_EDGE_ARCHITECTURE.md`.
+For the canonical public-vs-operator boundary inside `agent-internet`, see `docs/PUBLIC_FEDERATION_SURFACE.md`.
 
 ## Source authority vs public projection
 
@@ -65,6 +66,11 @@ The important separation is:
 - **local contracts in `agent-internet` stay infra-scoped** — bindings, feeds, bootstrap targets, and publication plumbing
 
 This keeps page identity and navigation shape closer to the source repos instead of hardcoding every public page in the membrane repo.
+
+The important practical rule is:
+
+- published GitHub/wiki/authority projections are the canonical public federation surface
+- Lotus HTTP/API surfaces are the authenticated operator/integration companion surface
 
 ## Initial structure
 
