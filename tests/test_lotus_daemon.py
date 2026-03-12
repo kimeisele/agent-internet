@@ -375,6 +375,64 @@ def test_lotus_daemon_returns_structured_unknown_operation_receipt(tmp_path):
         daemon.shutdown()
 
 
+def test_lotus_daemon_preflights_publish_service_and_reports_conflict_state(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    operator_secret = store.update(
+        lambda plane: LotusControlPlaneAPI(plane).issue_token(
+            subject="operator",
+            scopes=(LotusApiScope.SERVICE_WRITE.value,),
+            token_secret="operator-secret",
+            token_id="tok-operator",
+        ).secret,
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        params = {
+            "request_id": "req-service-preflight-1",
+            "city_id": "city-a",
+            "service_name": "forum-api",
+            "public_handle": "api.forum.city-a.lotus",
+            "transport": "https",
+            "location": "https://forum.city-a.example/api",
+        }
+        status, before = _request_json(
+            daemon.base_url,
+            "/v1/lotus/preflight",
+            method="POST",
+            token=operator_secret,
+            payload={"target_action": "publish_service", "params": params},
+        )
+        assert status == 200
+        assert before["preflight"]["effect_kind"] == "create"
+
+        _request_json(
+            daemon.base_url,
+            "/v1/lotus/services",
+            method="POST",
+            token=operator_secret,
+            payload=params,
+        )
+
+        status2, conflict = _request_json(
+            daemon.base_url,
+            "/v1/lotus/preflight",
+            method="POST",
+            token=operator_secret,
+            payload={
+                "target_action": "publish_service",
+                "params": {**params, "location": "https://forum.city-a.example/v2"},
+            },
+        )
+        assert status2 == 200
+        assert conflict["preflight"]["ok"] is False
+        assert conflict["preflight"]["effect_kind"] == "conflict"
+        assert conflict["preflight"]["blockers"] == ["idempotency_conflict:publish_service:req-service-preflight-1"]
+    finally:
+        daemon.shutdown()
+
+
 def test_lotus_daemon_serves_route_resolution_http_api(tmp_path):
     store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
     root_secret = store.update(

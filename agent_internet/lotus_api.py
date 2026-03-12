@@ -40,7 +40,7 @@ from .control_plane import AgentInternetControlPlane
 from .lotus_capabilities import build_lotus_capability_manifest
 from .models import ClaimStatus, EndpointVisibility, IntentRecord, IntentStatus, IntentType, LeaseStatus, LotusApiScope, LotusApiToken, OperationReceiptRecord
 from .snapshot import snapshot_control_plane
-from .steward_protocol_compat import summarize_steward_protocol_bindings
+from .steward_protocol_compat import load_steward_protocol_bindings, summarize_steward_protocol_bindings
 
 
 LOTUS_MUTATING_ACTIONS = frozenset(
@@ -69,6 +69,19 @@ LOTUS_MUTATING_ACTIONS = frozenset(
 )
 
 _IDEMPOTENCY_EPHEMERAL_KEYS = frozenset({"request_id", "idempotency_key", "now"})
+_PREFLIGHT_SUPPORTED_ACTIONS = frozenset(
+    {
+        "create_intent",
+        "publish_endpoint",
+        "publish_service",
+        "publish_route",
+        "release_space_claim",
+        "expire_space_claim",
+        "release_slot_lease",
+        "expire_slot_lease",
+        "sweep_expired_grants",
+    },
+)
 
 
 def _serialize_lotus_route(route: dict) -> dict:
@@ -151,6 +164,333 @@ class LotusControlPlaneAPI:
             "created_at": receipt.created_at,
             "last_replayed_at": receipt.last_replayed_at,
             "replay_count": receipt.replay_count,
+        }
+
+    def _preflight_idempotency(self, *, action: str, token: LotusApiToken, payload: dict) -> dict[str, object]:
+        request_id = self._request_id(payload)
+        if not request_id:
+            return {"mode": "absent", "request_id": ""}
+        request_sha256 = self._request_sha256(action=action, payload=payload)
+        receipt = self.plane.registry.get_operation_receipt(action=action, operator_subject=token.subject, request_id=request_id)
+        if receipt is None:
+            return {"mode": "new", "request_id": request_id}
+        if receipt.request_sha256 != request_sha256:
+            return {
+                "mode": "conflict",
+                "request_id": request_id,
+                "operation_id": receipt.operation_id,
+                "error": f"idempotency_conflict:{action}:{request_id}",
+            }
+        return {
+            "mode": "replay",
+            "request_id": request_id,
+            "operation_id": receipt.operation_id,
+            "status": receipt.status,
+        }
+
+    def _preflight_result(
+        self,
+        *,
+        action: str,
+        ok: bool,
+        would_apply: bool,
+        effect_kind: str,
+        idempotency: dict[str, object],
+        blockers: list[str] | None = None,
+        preview: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        return {
+            "kind": "lotus_mutation_preflight",
+            "target_action": action,
+            "ok": ok,
+            "would_apply": would_apply,
+            "effect_kind": effect_kind,
+            "blockers": list(blockers or ()),
+            "idempotency": dict(idempotency),
+            "preview": dict(preview or {}),
+        }
+
+    def _preflight_blocked(self, *, action: str, blocker: str, idempotency: dict[str, object] | None = None, preview: dict[str, object] | None = None) -> dict[str, object]:
+        return self._preflight_result(
+            action=action,
+            ok=False,
+            would_apply=False,
+            effect_kind=("conflict" if blocker.startswith("idempotency_conflict:") else "blocked"),
+            blockers=[blocker],
+            idempotency=(idempotency or {"mode": "absent", "request_id": ""}),
+            preview=preview,
+        )
+
+    def _preflight_mutation(self, *, bearer_token: str, payload: dict) -> dict:
+        target_action = str(payload.get("target_action", "")).strip()
+        raw_params = payload.get("params", {})
+        if not isinstance(raw_params, dict):
+            raise ValueError("invalid_preflight_params")
+        params = dict(raw_params)
+        if target_action not in _PREFLIGHT_SUPPORTED_ACTIONS:
+            raise ValueError(f"unsupported_preflight_action:{target_action}")
+        if target_action == "create_intent":
+            return self._preflight_create_intent(bearer_token=bearer_token, payload=params)
+        if target_action == "publish_endpoint":
+            return self._preflight_publish_endpoint(bearer_token=bearer_token, payload=params)
+        if target_action == "publish_service":
+            return self._preflight_publish_service(bearer_token=bearer_token, payload=params)
+        if target_action == "publish_route":
+            return self._preflight_publish_route(bearer_token=bearer_token, payload=params)
+        if target_action in {"release_space_claim", "expire_space_claim"}:
+            return self._preflight_space_claim_transition(
+                action=target_action,
+                bearer_token=bearer_token,
+                payload=params,
+                status=(ClaimStatus.RELEASED if target_action == "release_space_claim" else ClaimStatus.EXPIRED),
+            )
+        if target_action in {"release_slot_lease", "expire_slot_lease"}:
+            return self._preflight_slot_lease_transition(
+                action=target_action,
+                bearer_token=bearer_token,
+                payload=params,
+                status=(LeaseStatus.RELEASED if target_action == "release_slot_lease" else LeaseStatus.EXPIRED),
+            )
+        return self._preflight_sweep_expired_grants(bearer_token=bearer_token, payload=params)
+
+    def _preflight_create_intent(self, *, bearer_token: str, payload: dict) -> dict:
+        token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.INTENT_WRITE.value,))
+        requested_by_subject_id = token.subject
+        delegated_subject = str(payload.get("requested_by_subject_id", "")).strip()
+        if delegated_subject:
+            if LotusApiScope.INTENT_SUBJECT_DELEGATE.value not in set(token.scopes):
+                raise PermissionError(f"missing_scopes:{LotusApiScope.INTENT_SUBJECT_DELEGATE.value}")
+            requested_by_subject_id = delegated_subject
+        idempotency = self._preflight_idempotency(action="create_intent", token=token, payload=payload)
+        if idempotency["mode"] == "conflict":
+            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action="create_intent", blocker=str(idempotency["error"]), idempotency=idempotency)}
+        if idempotency["mode"] == "replay":
+            return {"token_id": token.token_id, "preflight": self._preflight_result(action="create_intent", ok=True, would_apply=False, effect_kind="replay", idempotency=idempotency, preview={"operation_id": idempotency["operation_id"]})}
+        created_at = float(time.time() if payload.get("now") is None else payload["now"])
+        intent = IntentRecord(
+            intent_id=str(payload.get("intent_id") or f"intent_{created_at:.6f}".replace(".", "_")),
+            intent_type=IntentType(str(payload["intent_type"])),
+            status=IntentStatus.PENDING,
+            title=str(payload.get("title", "")),
+            description=str(payload.get("description", "")),
+            requested_by_subject_id=requested_by_subject_id,
+            repo=str(payload.get("repo", "")),
+            city_id=str(payload.get("city_id", "")),
+            space_id=str(payload.get("space_id", "")),
+            slot_id=str(payload.get("slot_id", "")),
+            lineage_id=str(payload.get("lineage_id", "")),
+            discussion_id=str(payload.get("discussion_id", "")),
+            linked_issue_url=str(payload.get("linked_issue_url", "")),
+            linked_pr_url=str(payload.get("linked_pr_url", "")),
+            created_at=created_at,
+            updated_at=created_at,
+            labels=dict(payload.get("labels", {})),
+        )
+        existing = self.plane.registry.get_intent(intent.intent_id)
+        effect_kind = "create"
+        would_apply = True
+        if existing is not None:
+            effect_kind = "noop" if asdict(existing) == asdict(intent) else "update"
+            would_apply = effect_kind != "noop"
+        return {
+            "token_id": token.token_id,
+            "preflight": self._preflight_result(
+                action="create_intent",
+                ok=True,
+                would_apply=would_apply,
+                effect_kind=effect_kind,
+                idempotency=idempotency,
+                preview={"intent": asdict(intent)},
+            ),
+        }
+
+    def _preflight_publish_endpoint(self, *, bearer_token: str, payload: dict) -> dict:
+        token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.ENDPOINT_WRITE.value,))
+        idempotency = self._preflight_idempotency(action="publish_endpoint", token=token, payload=payload)
+        if idempotency["mode"] == "conflict":
+            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action="publish_endpoint", blocker=str(idempotency["error"]), idempotency=idempotency)}
+        if idempotency["mode"] == "replay":
+            return {"token_id": token.token_id, "preflight": self._preflight_result(action="publish_endpoint", ok=True, would_apply=False, effect_kind="replay", idempotency=idempotency, preview={"operation_id": idempotency["operation_id"]})}
+        endpoint_id = str(payload.get("endpoint_id") or f"{payload['city_id']}:{payload['public_handle']}")
+        visibility = EndpointVisibility(payload.get("visibility", EndpointVisibility.PUBLIC.value))
+        existing = self.plane.registry.get_hosted_endpoint(endpoint_id)
+        preview = {
+            "endpoint": {
+                "endpoint_id": endpoint_id,
+                "owner_city_id": str(payload["city_id"]),
+                "public_handle": str(payload["public_handle"]),
+                "transport": str(payload["transport"]),
+                "location": str(payload["location"]),
+                "visibility": visibility.value,
+                "ttl_s": payload.get("ttl_s"),
+                "would_assign_link_address": self.plane.registry.get_link_address(str(payload["city_id"])) is None,
+                "would_assign_network_address": self.plane.registry.get_network_address(str(payload["city_id"])) is None,
+            },
+        }
+        effect_kind = "create"
+        would_apply = True
+        if existing is not None:
+            unchanged = (
+                existing.owner_city_id == str(payload["city_id"])
+                and existing.public_handle == str(payload["public_handle"])
+                and existing.transport == str(payload["transport"])
+                and existing.location == str(payload["location"])
+                and existing.visibility == visibility
+                and dict(existing.labels) == dict(payload.get("labels", {}))
+            )
+            effect_kind = "noop" if unchanged else "update"
+            would_apply = effect_kind != "noop"
+        return {"token_id": token.token_id, "preflight": self._preflight_result(action="publish_endpoint", ok=True, would_apply=would_apply, effect_kind=effect_kind, idempotency=idempotency, preview=preview)}
+
+    def _preflight_publish_service(self, *, bearer_token: str, payload: dict) -> dict:
+        token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.SERVICE_WRITE.value,))
+        idempotency = self._preflight_idempotency(action="publish_service", token=token, payload=payload)
+        if idempotency["mode"] == "conflict":
+            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action="publish_service", blocker=str(idempotency["error"]), idempotency=idempotency)}
+        if idempotency["mode"] == "replay":
+            return {"token_id": token.token_id, "preflight": self._preflight_result(action="publish_service", ok=True, would_apply=False, effect_kind="replay", idempotency=idempotency, preview={"operation_id": idempotency["operation_id"]})}
+        service_id = str(payload.get("service_id") or f"{payload['city_id']}:{payload['service_name']}")
+        visibility = EndpointVisibility(payload.get("visibility", EndpointVisibility.FEDERATED.value))
+        existing = self.plane.registry.get_service_address(service_id)
+        preview = {
+            "service_address": {
+                "service_id": service_id,
+                "owner_city_id": str(payload["city_id"]),
+                "service_name": str(payload["service_name"]),
+                "public_handle": str(payload["public_handle"]),
+                "transport": str(payload["transport"]),
+                "location": str(payload["location"]),
+                "visibility": visibility.value,
+                "auth_required": bool(payload.get("auth_required", True)),
+                "required_scopes": list(payload.get("required_scopes", ())),
+                "would_assign_network_address": self.plane.registry.get_network_address(str(payload["city_id"])) is None,
+            },
+        }
+        effect_kind = "create"
+        would_apply = True
+        if existing is not None:
+            unchanged = (
+                existing.owner_city_id == str(payload["city_id"])
+                and existing.service_name == str(payload["service_name"])
+                and existing.public_handle == str(payload["public_handle"])
+                and existing.transport == str(payload["transport"])
+                and existing.location == str(payload["location"])
+                and existing.visibility == visibility
+                and existing.auth_required == bool(payload.get("auth_required", True))
+                and tuple(existing.required_scopes) == tuple(payload.get("required_scopes", ()))
+                and dict(existing.labels) == dict(payload.get("labels", {}))
+            )
+            effect_kind = "noop" if unchanged else "update"
+            would_apply = effect_kind != "noop"
+        return {"token_id": token.token_id, "preflight": self._preflight_result(action="publish_service", ok=True, would_apply=would_apply, effect_kind=effect_kind, idempotency=idempotency, preview=preview)}
+
+    def _preflight_publish_route(self, *, bearer_token: str, payload: dict) -> dict:
+        token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.SERVICE_WRITE.value,))
+        idempotency = self._preflight_idempotency(action="publish_route", token=token, payload=payload)
+        if idempotency["mode"] == "conflict":
+            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action="publish_route", blocker=str(idempotency["error"]), idempotency=idempotency)}
+        if idempotency["mode"] == "replay":
+            return {"token_id": token.token_id, "preflight": self._preflight_result(action="publish_route", ok=True, would_apply=False, effect_kind="replay", idempotency=idempotency, preview={"operation_id": idempotency["operation_id"]})}
+        bindings = load_steward_protocol_bindings()
+        selected_nadi_type = str(payload.get("nadi_type", "") or bindings.default_route_nadi_type)
+        selected_priority = str(payload.get("nadi_priority", payload.get("priority", "")) or bindings.default_route_priority)
+        blockers: list[str] = []
+        if selected_nadi_type not in bindings.allowed_nadi_types:
+            blockers.append(f"invalid_nadi_type:{selected_nadi_type}")
+        if selected_priority not in bindings.allowed_priorities:
+            blockers.append(f"invalid_priority:{selected_priority}")
+        route_id = str(payload.get("route_id") or f"{payload['owner_city_id']}:{payload['destination_prefix']}")
+        preview = {
+            "route": {
+                "route_id": route_id,
+                "owner_city_id": str(payload["owner_city_id"]),
+                "destination_prefix": str(payload["destination_prefix"]),
+                "target_city_id": str(payload["target_city_id"]),
+                "next_hop_city_id": str(payload["next_hop_city_id"]),
+                "metric": int(payload.get("metric", 100)),
+                "nadi_type": selected_nadi_type,
+                "priority": selected_priority,
+                "ttl_ms": int(payload.get("ttl_ms", payload.get("ttl_s", 24.0) * 1000 if payload.get("ttl_s") is not None else 24_000)),
+            },
+        }
+        if blockers:
+            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action="publish_route", blocker=blockers[0], idempotency=idempotency, preview=preview)}
+        existing = self.plane.registry.get_route(route_id)
+        effect_kind = "create"
+        would_apply = True
+        if existing is not None:
+            unchanged = (
+                existing.owner_city_id == str(payload["owner_city_id"])
+                and existing.destination_prefix == str(payload["destination_prefix"])
+                and existing.target_city_id == str(payload["target_city_id"])
+                and existing.next_hop_city_id == str(payload["next_hop_city_id"])
+                and existing.metric == int(payload.get("metric", 100))
+                and existing.nadi_type == selected_nadi_type
+                and existing.priority == selected_priority
+                and dict(existing.labels) == dict(payload.get("labels", {}))
+            )
+            effect_kind = "noop" if unchanged else "update"
+            would_apply = effect_kind != "noop"
+        return {"token_id": token.token_id, "preflight": self._preflight_result(action="publish_route", ok=True, would_apply=would_apply, effect_kind=effect_kind, idempotency=idempotency, preview=preview)}
+
+    def _preflight_space_claim_transition(self, *, action: str, bearer_token: str, payload: dict, status: ClaimStatus) -> dict:
+        token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.CONTRACT_WRITE.value,))
+        idempotency = self._preflight_idempotency(action=action, token=token, payload=payload)
+        if idempotency["mode"] == "conflict":
+            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action=action, blocker=str(idempotency["error"]), idempotency=idempotency)}
+        if idempotency["mode"] == "replay":
+            return {"token_id": token.token_id, "preflight": self._preflight_result(action=action, ok=True, would_apply=False, effect_kind="replay", idempotency=idempotency, preview={"operation_id": idempotency["operation_id"]})}
+        claim = self.plane.registry.get_space_claim(str(payload["claim_id"]))
+        preview = {"claim_id": str(payload["claim_id"]), "target_status": status.value}
+        if claim is None:
+            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action=action, blocker=f"unknown_space_claim:{payload['claim_id']}", idempotency=idempotency, preview=preview)}
+        allowed = status in {ClaimStatus.RELEASED, ClaimStatus.EXPIRED} and claim.status == ClaimStatus.GRANTED
+        if not allowed:
+            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action=action, blocker=f"invalid_space_claim_transition:{claim.status.value}->{status.value}", idempotency=idempotency, preview={**preview, "current_status": claim.status.value})}
+        return {"token_id": token.token_id, "preflight": self._preflight_result(action=action, ok=True, would_apply=True, effect_kind="transition", idempotency=idempotency, preview={**preview, "current_status": claim.status.value})}
+
+    def _preflight_slot_lease_transition(self, *, action: str, bearer_token: str, payload: dict, status: LeaseStatus) -> dict:
+        token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.CONTRACT_WRITE.value,))
+        idempotency = self._preflight_idempotency(action=action, token=token, payload=payload)
+        if idempotency["mode"] == "conflict":
+            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action=action, blocker=str(idempotency["error"]), idempotency=idempotency)}
+        if idempotency["mode"] == "replay":
+            return {"token_id": token.token_id, "preflight": self._preflight_result(action=action, ok=True, would_apply=False, effect_kind="replay", idempotency=idempotency, preview={"operation_id": idempotency["operation_id"]})}
+        lease = self.plane.registry.get_slot_lease(str(payload["lease_id"]))
+        preview = {"lease_id": str(payload["lease_id"]), "target_status": status.value}
+        if lease is None:
+            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action=action, blocker=f"unknown_slot_lease:{payload['lease_id']}", idempotency=idempotency, preview=preview)}
+        allowed = status in {LeaseStatus.RELEASED, LeaseStatus.EXPIRED} and lease.status == LeaseStatus.ACTIVE
+        if not allowed:
+            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action=action, blocker=f"invalid_slot_lease_transition:{lease.status.value}->{status.value}", idempotency=idempotency, preview={**preview, "current_status": lease.status.value})}
+        return {"token_id": token.token_id, "preflight": self._preflight_result(action=action, ok=True, would_apply=True, effect_kind="transition", idempotency=idempotency, preview={**preview, "current_status": lease.status.value})}
+
+    def _preflight_sweep_expired_grants(self, *, bearer_token: str, payload: dict) -> dict:
+        token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.CONTRACT_WRITE.value,))
+        idempotency = self._preflight_idempotency(action="sweep_expired_grants", token=token, payload=payload)
+        if idempotency["mode"] == "conflict":
+            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action="sweep_expired_grants", blocker=str(idempotency["error"]), idempotency=idempotency)}
+        if idempotency["mode"] == "replay":
+            return {"token_id": token.token_id, "preflight": self._preflight_result(action="sweep_expired_grants", ok=True, would_apply=False, effect_kind="replay", idempotency=idempotency, preview={"operation_id": idempotency["operation_id"]})}
+        checked_at = float(time.time() if payload.get("now") is None else payload["now"])
+        expired_space_claim_ids = [claim.claim_id for claim in self.plane.registry.list_space_claims() if claim.status == ClaimStatus.GRANTED and claim.expires_at is not None and claim.expires_at < checked_at]
+        expired_slot_lease_ids = [lease.lease_id for lease in self.plane.registry.list_slot_leases() if lease.status == LeaseStatus.ACTIVE and lease.expires_at is not None and lease.expires_at < checked_at]
+        return {
+            "token_id": token.token_id,
+            "preflight": self._preflight_result(
+                action="sweep_expired_grants",
+                ok=True,
+                would_apply=bool(expired_space_claim_ids or expired_slot_lease_ids),
+                effect_kind=("sweep" if expired_space_claim_ids or expired_slot_lease_ids else "noop"),
+                idempotency=idempotency,
+                preview={
+                    "checked_at": checked_at,
+                    "expired_space_claim_ids": expired_space_claim_ids,
+                    "expired_slot_lease_ids": expired_slot_lease_ids,
+                    "expired_space_claim_count": len(expired_space_claim_ids),
+                    "expired_slot_lease_count": len(expired_slot_lease_ids),
+                },
+            ),
         }
 
     def _show_operation_receipt(self, *, bearer_token: str, payload: dict) -> dict:
@@ -271,6 +611,8 @@ class LotusControlPlaneAPI:
         if action == "show_steward_protocol":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "bindings": summarize_steward_protocol_bindings()}
+        if action == "preflight_mutation":
+            return self._preflight_mutation(bearer_token=bearer_token, payload=payload)
         if action == "show_operation_receipt":
             return self._show_operation_receipt(bearer_token=bearer_token, payload=payload)
         if action == "lotus_capabilities":

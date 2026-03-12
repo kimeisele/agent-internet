@@ -154,9 +154,12 @@ def test_lotus_api_describes_capabilities_manifest():
     assert "create_intent" in payload["recoverability"]["request_id_supported_actions"]
     assert "release_space_claim" in payload["recoverability"]["request_id_supported_actions"]
     assert payload["parseability"]["operation_receipt_http_paths"][0] == "https://lotus.example/v1/lotus/operations/{operation_id}"
+    assert payload["parseability"]["preflight_http_path"] == "https://lotus.example/v1/lotus/preflight"
+    assert "publish_service" in payload["recoverability"]["preflight_supported_actions"]
     assert payload["parseability"]["http_error_envelope_fields"] == ["error", "error_code", "error_kind", "recoverable", "retryable", "context"]
     assert any(item["lotus_action"] == "create_intent" for item in payload["capabilities"])
     assert any(item["lotus_action"] == "show_operation_receipt" for item in payload["capabilities"])
+    assert any(item["lotus_action"] == "preflight_mutation" for item in payload["capabilities"])
 
 
 def test_lotus_api_generates_cli_safe_secret_prefix():
@@ -1256,6 +1259,109 @@ def test_lotus_api_reads_operation_receipt_by_id_and_request_id():
     assert by_id["operation_receipt"]["operation_id"] == created["receipt"]["operation_id"]
     assert by_request["operation_receipt"] == by_id["operation_receipt"]
     assert by_id["operation_receipt"]["response_payload"]["intent"]["intent_id"] == "intent:fork-city-d"
+
+
+def test_lotus_api_preflights_publish_service_and_replay_state():
+    plane = AgentInternetControlPlane()
+    plane.register_city(
+        CityIdentity(city_id="city-a", slug="a", repo="org/city-a"),
+        CityEndpoint(city_id="city-a", transport="filesystem", location="/tmp/city-a"),
+    )
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="operator",
+        scopes=(LotusApiScope.SERVICE_WRITE.value,),
+        token_secret="service-preflight-token",
+        token_id="tok-service-preflight",
+        now=10.0,
+    )
+    params = {
+        "request_id": "req-service-preflight-1",
+        "city_id": "city-a",
+        "service_name": "forum-api",
+        "public_handle": "api.forum.city-a.lotus",
+        "transport": "https",
+        "location": "https://forum.city-a.example/api",
+        "required_scopes": [LotusApiScope.READ.value],
+    }
+
+    before = api.call(
+        bearer_token=issued.secret,
+        action="preflight_mutation",
+        params={"target_action": "publish_service", "params": params},
+    )
+    created = api.call(bearer_token=issued.secret, action="publish_service", params=params)
+    after = api.call(
+        bearer_token=issued.secret,
+        action="preflight_mutation",
+        params={"target_action": "publish_service", "params": params},
+    )
+
+    assert before["preflight"]["ok"] is True
+    assert before["preflight"]["would_apply"] is True
+    assert before["preflight"]["effect_kind"] == "create"
+    assert before["preflight"]["idempotency"]["mode"] == "new"
+    assert after["preflight"]["ok"] is True
+    assert after["preflight"]["would_apply"] is False
+    assert after["preflight"]["effect_kind"] == "replay"
+    assert after["preflight"]["idempotency"]["mode"] == "replay"
+    assert after["preflight"]["idempotency"]["operation_id"] == created["receipt"]["operation_id"]
+
+
+def test_lotus_api_preflights_claim_transition_blocker_and_sweep_preview():
+    plane = AgentInternetControlPlane()
+    overdue = 90.0
+    plane.upsert_space_claim(
+        SpaceClaimRecord(
+            claim_id="claim-1",
+            source_intent_id="intent-space-1",
+            subject_id="operator-1",
+            space_id="space-1",
+            status=ClaimStatus.RELEASED,
+            granted_at=20.0,
+            released_at=30.0,
+        )
+    )
+    plane.upsert_slot(SlotDescriptor(slot_id="slot-overdue", space_id="space-1", slot_kind="general", holder_subject_id="operator-1", status=SlotStatus.ACTIVE))
+    plane.upsert_slot_lease(
+        SlotLeaseRecord(
+            lease_id="lease-overdue",
+            source_intent_id="intent-slot-overdue",
+            holder_subject_id="operator-1",
+            space_id="space-1",
+            slot_id="slot-overdue",
+            status=LeaseStatus.ACTIVE,
+            granted_at=50.0,
+            expires_at=overdue,
+        )
+    )
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="governor",
+        scopes=(LotusApiScope.CONTRACT_WRITE.value,),
+        token_secret="contract-preflight-token",
+        token_id="tok-contract-preflight",
+        now=10.0,
+    )
+
+    blocked = api.call(
+        bearer_token=issued.secret,
+        action="preflight_mutation",
+        params={"target_action": "release_space_claim", "params": {"claim_id": "claim-1", "now": 35.0}},
+    )
+    sweep = api.call(
+        bearer_token=issued.secret,
+        action="preflight_mutation",
+        params={"target_action": "sweep_expired_grants", "params": {"now": 100.0}},
+    )
+
+    assert blocked["preflight"]["ok"] is False
+    assert blocked["preflight"]["effect_kind"] == "blocked"
+    assert blocked["preflight"]["blockers"] == ["invalid_space_claim_transition:released->released"]
+    assert sweep["preflight"]["ok"] is True
+    assert sweep["preflight"]["would_apply"] is True
+    assert sweep["preflight"]["effect_kind"] == "sweep"
+    assert sweep["preflight"]["preview"]["expired_slot_lease_ids"] == ["lease-overdue"]
 
 
 def test_lotus_api_allows_delegated_intent_subject_with_explicit_scope():
