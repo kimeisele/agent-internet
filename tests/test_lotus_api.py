@@ -159,9 +159,10 @@ def test_lotus_api_describes_capabilities_manifest():
     assert payload["parseability"]["operation_feed_filter_fields"] == ["action", "operator_subject", "resource_kind", "resource_id", "change_kind"]
     assert "resource_changes" in payload["parseability"]["operation_feed_item_fields"]
     assert payload["parseability"]["operation_feed_resource_change_fields"][0] == "resource_kind"
-    assert payload["parseability"]["resource_change_feed_response_fields"] == ["items", "filters", "page"]
+    assert payload["parseability"]["resource_change_feed_response_fields"] == ["items", "filters", "page", "checkpoint"]
     assert payload["parseability"]["resource_change_feed_item_fields"][0] == "change_cursor"
     assert payload["parseability"]["resource_change_feed_page_fields"][0] == "after_change_cursor"
+    assert payload["parseability"]["resource_change_feed_checkpoint_fields"][0] == "requested_after_change_cursor"
     assert payload["parseability"]["operation_feed_page_fields"][0] == "after_operation_id"
     assert payload["parseability"]["operation_receipt_http_paths"][0] == "https://lotus.example/v1/lotus/operations/{operation_id}"
     assert payload["parseability"]["preflight_http_path"] == "https://lotus.example/v1/lotus/preflight"
@@ -1460,14 +1461,35 @@ def test_lotus_api_lists_resource_change_feed_with_cursor_and_filters():
     ]
     assert page1["resource_change_feed"]["items"][0]["resource_change"]["resource_id"] == "claim-1"
     assert page1["resource_change_feed"]["page"]["has_more"] is True
+    assert page1["resource_change_feed"]["checkpoint"] == {
+        "requested_after_change_cursor": None,
+        "resume_after_change_cursor": f"{swept['receipt']['operation_id']}:0",
+        "high_watermark_change_cursor": f"{swept['receipt']['operation_id']}:1",
+        "caught_up": False,
+        "empty_page": False,
+    }
     assert [item["change_cursor"] for item in page2["resource_change_feed"]["items"]] == [f"{swept['receipt']['operation_id']}:1"]
     assert page2["resource_change_feed"]["page"]["has_more"] is False
+    assert page2["resource_change_feed"]["checkpoint"] == {
+        "requested_after_change_cursor": f"{swept['receipt']['operation_id']}:0",
+        "resume_after_change_cursor": f"{swept['receipt']['operation_id']}:1",
+        "high_watermark_change_cursor": f"{swept['receipt']['operation_id']}:1",
+        "caught_up": True,
+        "empty_page": False,
+    }
     assert filtered["resource_change_feed"]["filters"] == {
         "action": None,
         "operator_subject": None,
         "resource_kind": "slot_lease",
         "resource_id": "lease-due",
         "change_kind": "expire",
+    }
+    assert filtered["resource_change_feed"]["checkpoint"] == {
+        "requested_after_change_cursor": None,
+        "resume_after_change_cursor": f"{swept['receipt']['operation_id']}:1",
+        "high_watermark_change_cursor": f"{swept['receipt']['operation_id']}:1",
+        "caught_up": True,
+        "empty_page": False,
     }
     assert filtered["resource_change_feed"]["items"] == [
         {
@@ -1492,6 +1514,31 @@ def test_lotus_api_lists_resource_change_feed_with_cursor_and_filters():
             "receipt_http_path": f"/v1/lotus/operations/{swept['receipt']['operation_id']}",
         }
     ]
+
+
+def test_lotus_api_resource_change_feed_checkpoint_is_stable_for_empty_caught_up_page():
+    plane = AgentInternetControlPlane()
+    plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-1", source_intent_id="intent-space-1", subject_id="operator-1", space_id="space-1", granted_at=20.0))
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(subject="governor", scopes=(LotusApiScope.CONTRACT_WRITE.value, LotusApiScope.READ.value), token_secret="checkpoint-token", now=10.0)
+
+    released = api.call(bearer_token=issued.secret, action="release_space_claim", params={"request_id": "req-claim-1", "claim_id": "claim-1", "now": 30.0})
+    first_page = api.call(bearer_token=issued.secret, action="list_resource_change_feed", params={"limit": 1})
+    caught_up = api.call(
+        bearer_token=issued.secret,
+        action="list_resource_change_feed",
+        params={"after_change_cursor": first_page["resource_change_feed"]["checkpoint"]["resume_after_change_cursor"]},
+    )
+
+    assert released["receipt"]["operation_id"] == first_page["resource_change_feed"]["items"][0]["operation_id"]
+    assert caught_up["resource_change_feed"]["items"] == []
+    assert caught_up["resource_change_feed"]["checkpoint"] == {
+        "requested_after_change_cursor": f"{released['receipt']['operation_id']}:0",
+        "resume_after_change_cursor": f"{released['receipt']['operation_id']}:0",
+        "high_watermark_change_cursor": f"{released['receipt']['operation_id']}:0",
+        "caught_up": True,
+        "empty_page": True,
+    }
 
 
 def test_lotus_api_preflights_publish_service_and_replay_state():
