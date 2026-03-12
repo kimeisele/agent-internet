@@ -147,9 +147,12 @@ def test_operation_receipt_roundtrip():
     )
     reg.upsert_operation_receipt(receipt)
     loaded = reg.get_operation_receipt(action="create_intent", operator_subject="human:ss", request_id="req-1")
+    loaded_by_id = reg.get_operation_receipt_by_id("op-1")
 
     assert loaded is not None
+    assert loaded_by_id is not None
     assert loaded.operation_id == "op-1"
+    assert loaded_by_id.request_id == "req-1"
     assert loaded.response_payload["intent"]["intent_id"] == "intent:fork-city-b"
     assert reg.list_operation_receipts()[0].request_id == "req-1"
 

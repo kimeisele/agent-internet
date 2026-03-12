@@ -201,6 +201,9 @@ class ThreadSafeRegistryWrapper:
     def list_api_tokens(self) -> list[LotusApiToken]:
         return self._read("list_api_tokens")  # type: ignore[return-value]
 
+    def get_operation_receipt_by_id(self, operation_id: str) -> OperationReceiptRecord | None:
+        return self._read("get_operation_receipt_by_id", operation_id)  # type: ignore[return-value]
+
     def get_space(self, space_id: str) -> SpaceDescriptor | None:
         return self._read("get_space", space_id)  # type: ignore[return-value]
 

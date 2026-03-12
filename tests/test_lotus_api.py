@@ -153,8 +153,10 @@ def test_lotus_api_describes_capabilities_manifest():
     assert payload["recoverability"]["manual_sweep_action"] == "sweep_expired_grants"
     assert "create_intent" in payload["recoverability"]["request_id_supported_actions"]
     assert "release_space_claim" in payload["recoverability"]["request_id_supported_actions"]
+    assert payload["parseability"]["operation_receipt_http_paths"][0] == "https://lotus.example/v1/lotus/operations/{operation_id}"
     assert payload["parseability"]["http_error_envelope_fields"] == ["error", "error_code", "error_kind", "recoverable", "retryable", "context"]
     assert any(item["lotus_action"] == "create_intent" for item in payload["capabilities"])
+    assert any(item["lotus_action"] == "show_operation_receipt" for item in payload["capabilities"])
 
 
 def test_lotus_api_generates_cli_safe_secret_prefix():
@@ -1213,6 +1215,47 @@ def test_lotus_api_replays_create_intent_request_id():
     assert second["receipt"]["replayed"] is True
     assert second["receipt"]["replay_count"] == 1
     assert plane.registry.list_operation_receipts()[0].action == "create_intent"
+
+
+def test_lotus_api_reads_operation_receipt_by_id_and_request_id():
+    plane = AgentInternetControlPlane()
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="human:ss",
+        scopes=(LotusApiScope.INTENT_WRITE.value, LotusApiScope.READ.value),
+        token_secret="intent-readback-token",
+        token_id="tok-intent-readback",
+        now=10.0,
+    )
+    created = api.call(
+        bearer_token=issued.secret,
+        action="create_intent",
+        params={
+            "request_id": "req-intent-readback",
+            "intent_id": "intent:fork-city-d",
+            "intent_type": IntentType.REQUEST_FORK.value,
+            "title": "Fork city-d",
+            "description": "Create a sovereign derivative line for city-d.",
+            "repo": "org/city-d",
+            "lineage_id": "lineage:city-d",
+            "now": 123.0,
+        },
+    )
+
+    by_id = api.call(
+        bearer_token=issued.secret,
+        action="show_operation_receipt",
+        params={"operation_id": created["receipt"]["operation_id"]},
+    )
+    by_request = api.call(
+        bearer_token=issued.secret,
+        action="show_operation_receipt",
+        params={"action": "create_intent", "request_id": "req-intent-readback"},
+    )
+
+    assert by_id["operation_receipt"]["operation_id"] == created["receipt"]["operation_id"]
+    assert by_request["operation_receipt"] == by_id["operation_receipt"]
+    assert by_id["operation_receipt"]["response_payload"]["intent"]["intent_id"] == "intent:fork-city-d"
 
 
 def test_lotus_api_allows_delegated_intent_subject_with_explicit_scope():

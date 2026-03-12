@@ -287,6 +287,18 @@ def test_lotus_daemon_replays_publish_service_request_id(tmp_path):
         assert status3 == 200
         assert len(state["state"]["operation_receipts"]) == 1
         assert state["state"]["operation_receipts"][0]["action"] == "publish_service"
+
+        operation_id = first["receipt"]["operation_id"]
+        status4, by_id = _request_json(daemon.base_url, f"/v1/lotus/operations/{operation_id}", token=operator_secret)
+        assert status4 == 200
+        assert by_id["operation_receipt"]["operation_id"] == operation_id
+        status5, by_request = _request_json(
+            daemon.base_url,
+            "/v1/lotus/operations/by-request?action=publish_service&request_id=req-service-1",
+            token=operator_secret,
+        )
+        assert status5 == 200
+        assert by_request["operation_receipt"] == by_id["operation_receipt"]
     finally:
         daemon.shutdown()
 
@@ -335,6 +347,30 @@ def test_lotus_daemon_returns_structured_idempotency_conflict(tmp_path):
         assert error["error_kind"] == "conflict"
         assert error["recoverable"] is True
         assert error["retryable"] is False
+    finally:
+        daemon.shutdown()
+
+
+def test_lotus_daemon_returns_structured_unknown_operation_receipt(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    operator_secret = store.update(
+        lambda plane: LotusControlPlaneAPI(plane).issue_token(
+            subject="operator",
+            scopes=(LotusApiScope.READ.value,),
+            token_secret="operator-secret",
+            token_id="tok-operator",
+        ).secret,
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        with pytest.raises(HTTPError) as exc_info:
+            _request_json(daemon.base_url, "/v1/lotus/operations/op-missing", token=operator_secret)
+        assert exc_info.value.code == 404
+        payload = json.loads(exc_info.value.read().decode("utf-8"))
+        assert payload["error"] == "unknown_operation_receipt:op-missing"
+        assert payload["error_kind"] == "not_found"
     finally:
         daemon.shutdown()
 
