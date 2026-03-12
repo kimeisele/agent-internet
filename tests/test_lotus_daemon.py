@@ -433,6 +433,10 @@ def test_lotus_daemon_preflights_publish_service_and_reports_conflict_state(tmp_
         assert conflict["preflight"]["typed_blockers"][0]["context"]["request_id"] == "req-service-preflight-1"
         assert conflict["preflight"]["remediation_hints"][0]["hint_code"] == "inspect_conflicting_receipt"
         assert conflict["preflight"]["remediation_hints"][1]["hint_code"] == "mint_new_request_id"
+        assert conflict["preflight"]["next_actions"][0]["action_code"] == "inspect_conflicting_receipt"
+        assert conflict["preflight"]["next_actions"][0]["action_kind"] == "lotus_call"
+        assert conflict["preflight"]["next_actions"][1]["action_code"] == "mint_new_request_id"
+        assert conflict["preflight"]["next_actions"][1]["action_kind"] == "local_change"
     finally:
         daemon.shutdown()
 
