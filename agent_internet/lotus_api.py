@@ -974,6 +974,64 @@ class LotusControlPlaneAPI:
             raise ValueError(f"unknown_operation_receipt:{action}:{request_id}")
         return {"token_id": token.token_id, "operation_receipt": asdict(receipt)}
 
+    @staticmethod
+    def _operation_feed_item(receipt: OperationReceiptRecord) -> dict[str, object]:
+        return {
+            "operation_id": receipt.operation_id,
+            "request_id": receipt.request_id,
+            "action": receipt.action,
+            "operator_subject": receipt.operator_subject,
+            "status": receipt.status,
+            "created_at": receipt.created_at,
+            "last_replayed_at": receipt.last_replayed_at,
+            "replay_count": receipt.replay_count,
+            "response_payload_keys": sorted(receipt.response_payload.keys()),
+            "receipt_lotus_action": "show_operation_receipt",
+            "receipt_http_path": f"/v1/lotus/operations/{receipt.operation_id}",
+        }
+
+    def _list_operation_feed(self, *, bearer_token: str, payload: dict) -> dict:
+        token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+        action_filter = ("" if payload.get("action") in (None, "") else str(payload.get("action"))).strip()
+        operator_subject_filter = ("" if payload.get("operator_subject") in (None, "") else str(payload.get("operator_subject"))).strip()
+        after_operation_id = ("" if payload.get("after_operation_id") in (None, "") else str(payload.get("after_operation_id"))).strip()
+        limit = int(payload.get("limit", 50))
+        if limit < 1 or limit > 200:
+            raise ValueError(f"invalid_operation_feed_limit:{limit}")
+        receipts = sorted(
+            self.plane.registry.list_operation_receipts(),
+            key=lambda item: ((-1.0 if item.created_at is None else float(item.created_at)), item.operation_id),
+        )
+        if action_filter:
+            receipts = [item for item in receipts if item.action == action_filter]
+        if operator_subject_filter:
+            receipts = [item for item in receipts if item.operator_subject == operator_subject_filter]
+        if after_operation_id:
+            indexes = {item.operation_id: index for index, item in enumerate(receipts)}
+            if after_operation_id not in indexes:
+                raise ValueError(f"unknown_operation_feed_cursor:{after_operation_id}")
+            receipts = receipts[indexes[after_operation_id] + 1 :]
+        page = receipts[:limit]
+        has_more = len(receipts) > len(page)
+        next_after_operation_id = page[-1].operation_id if has_more and page else None
+        return {
+            "token_id": token.token_id,
+            "operation_feed": {
+                "items": [self._operation_feed_item(item) for item in page],
+                "filters": {
+                    "action": action_filter or None,
+                    "operator_subject": operator_subject_filter or None,
+                },
+                "page": {
+                    "after_operation_id": after_operation_id or None,
+                    "limit": limit,
+                    "returned_count": len(page),
+                    "has_more": has_more,
+                    "next_after_operation_id": next_after_operation_id,
+                },
+            },
+        }
+
     def _transition_intent(self, *, bearer_token: str, payload: dict, status: IntentStatus) -> dict:
         token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.INTENT_REVIEW.value,))
         updated_at = float(time.time() if payload.get("now") is None else payload["now"])
@@ -1071,6 +1129,8 @@ class LotusControlPlaneAPI:
         if action == "show_steward_protocol":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "bindings": summarize_steward_protocol_bindings()}
+        if action == "list_operation_feed":
+            return self._list_operation_feed(bearer_token=bearer_token, payload=payload)
         if action == "preflight_mutation":
             return self._preflight_mutation(bearer_token=bearer_token, payload=payload)
         if action == "show_operation_receipt":

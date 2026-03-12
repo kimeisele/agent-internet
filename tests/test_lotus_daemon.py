@@ -375,6 +375,61 @@ def test_lotus_daemon_returns_structured_unknown_operation_receipt(tmp_path):
         daemon.shutdown()
 
 
+def test_lotus_daemon_lists_operation_feed_with_cursor_and_structured_cursor_error(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+    operator_secret = store.update(
+        lambda plane: LotusControlPlaneAPI(plane).issue_token(
+            subject="operator",
+            scopes=(LotusApiScope.READ.value, LotusApiScope.INTENT_WRITE.value),
+            token_secret="operator-secret",
+            token_id="tok-operator",
+        ).secret,
+    )
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        first_payload = {
+            "request_id": "req-intent-1",
+            "intent_id": "intent:daemon-1",
+            "intent_type": IntentType.REQUEST_FORK.value,
+            "title": "Daemon 1",
+            "now": 20.0,
+        }
+        second_payload = {
+            "request_id": "req-intent-2",
+            "intent_id": "intent:daemon-2",
+            "intent_type": IntentType.REQUEST_FORK.value,
+            "title": "Daemon 2",
+            "now": 30.0,
+        }
+        _, first = _request_json(daemon.base_url, "/v1/lotus/intents", method="POST", token=operator_secret, payload=first_payload)
+        _, second = _request_json(daemon.base_url, "/v1/lotus/intents", method="POST", token=operator_secret, payload=second_payload)
+
+        status, page1 = _request_json(daemon.base_url, "/v1/lotus/operations?limit=1", token=operator_secret)
+        assert status == 200
+        assert [item["operation_id"] for item in page1["operation_feed"]["items"]] == [first["receipt"]["operation_id"]]
+        assert page1["operation_feed"]["page"]["has_more"] is True
+
+        status2, page2 = _request_json(
+            daemon.base_url,
+            f"/v1/lotus/operations?limit=1&after_operation_id={first['receipt']['operation_id']}",
+            token=operator_secret,
+        )
+        assert status2 == 200
+        assert [item["operation_id"] for item in page2["operation_feed"]["items"]] == [second["receipt"]["operation_id"]]
+        assert page2["operation_feed"]["page"]["has_more"] is False
+
+        with pytest.raises(HTTPError) as exc_info:
+            _request_json(daemon.base_url, "/v1/lotus/operations?after_operation_id=op-missing", token=operator_secret)
+        assert exc_info.value.code == 404
+        payload = json.loads(exc_info.value.read().decode("utf-8"))
+        assert payload["error"] == "unknown_operation_feed_cursor:op-missing"
+        assert payload["error_kind"] == "not_found"
+    finally:
+        daemon.shutdown()
+
+
 def test_lotus_daemon_preflights_publish_service_and_reports_conflict_state(tmp_path):
     store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
     operator_secret = store.update(

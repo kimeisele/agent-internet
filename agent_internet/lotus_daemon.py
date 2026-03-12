@@ -176,6 +176,17 @@ class LotusApiDaemon:
                 return 200, self._call(token, "show_steward_protocol", {})
             if method == "GET" and path == "/v1/lotus/capabilities":
                 return 200, self._call(token, "lotus_capabilities", {"base_url": self.base_url})
+            if method == "GET" and path == "/v1/lotus/operations":
+                return 200, self._call(
+                    token,
+                    "list_operation_feed",
+                    {
+                        "limit": int(_query_param(query, "limit") or "50"),
+                        "after_operation_id": _query_param(query, "after_operation_id"),
+                        "action": _query_param(query, "action"),
+                        "operator_subject": _query_param(query, "operator_subject"),
+                    },
+                )
             if method == "GET" and path == "/v1/lotus/operations/by-request":
                 return 200, self._call(
                     token,
