@@ -153,6 +153,9 @@ def test_lotus_api_describes_capabilities_manifest():
     assert payload["recoverability"]["manual_sweep_action"] == "sweep_expired_grants"
     assert "create_intent" in payload["recoverability"]["request_id_supported_actions"]
     assert "release_space_claim" in payload["recoverability"]["request_id_supported_actions"]
+    assert payload["parseability"]["operation_feed_http_path"] == "https://lotus.example/v1/lotus/operations"
+    assert payload["parseability"]["operation_feed_response_fields"] == ["items", "filters", "page"]
+    assert payload["parseability"]["operation_feed_page_fields"][0] == "after_operation_id"
     assert payload["parseability"]["operation_receipt_http_paths"][0] == "https://lotus.example/v1/lotus/operations/{operation_id}"
     assert payload["parseability"]["preflight_http_path"] == "https://lotus.example/v1/lotus/preflight"
     assert "remediation_hints" in payload["parseability"]["preflight_response_fields"]
@@ -164,6 +167,7 @@ def test_lotus_api_describes_capabilities_manifest():
     assert "publish_service" in payload["recoverability"]["preflight_supported_actions"]
     assert payload["parseability"]["http_error_envelope_fields"] == ["error", "error_code", "error_kind", "recoverable", "retryable", "context"]
     assert any(item["lotus_action"] == "create_intent" for item in payload["capabilities"])
+    assert any(item["lotus_action"] == "list_operation_feed" for item in payload["capabilities"])
     assert any(item["lotus_action"] == "show_operation_receipt" for item in payload["capabilities"])
     assert any(item["lotus_action"] == "preflight_mutation" for item in payload["capabilities"])
 
@@ -1265,6 +1269,91 @@ def test_lotus_api_reads_operation_receipt_by_id_and_request_id():
     assert by_id["operation_receipt"]["operation_id"] == created["receipt"]["operation_id"]
     assert by_request["operation_receipt"] == by_id["operation_receipt"]
     assert by_id["operation_receipt"]["response_payload"]["intent"]["intent_id"] == "intent:fork-city-d"
+
+
+def test_lotus_api_lists_operation_feed_with_paging_and_filters():
+    plane = AgentInternetControlPlane()
+    api = LotusControlPlaneAPI(plane)
+    alpha = api.issue_token(
+        subject="alpha",
+        scopes=(LotusApiScope.INTENT_WRITE.value, LotusApiScope.READ.value),
+        token_secret="alpha-token",
+        token_id="tok-alpha",
+        now=10.0,
+    )
+    beta = api.issue_token(
+        subject="beta",
+        scopes=(LotusApiScope.INTENT_WRITE.value, LotusApiScope.READ.value),
+        token_secret="beta-token",
+        token_id="tok-beta",
+        now=10.0,
+    )
+    observer = api.issue_token(
+        subject="observer",
+        scopes=(LotusApiScope.READ.value,),
+        token_secret="observer-token",
+        token_id="tok-observer",
+        now=10.0,
+    )
+
+    first = api.call(
+        bearer_token=alpha.secret,
+        action="create_intent",
+        params={
+            "request_id": "req-alpha-1",
+            "intent_id": "intent:alpha-1",
+            "intent_type": IntentType.REQUEST_FORK.value,
+            "title": "Alpha 1",
+            "now": 20.0,
+        },
+    )
+    second = api.call(
+        bearer_token=beta.secret,
+        action="create_intent",
+        params={
+            "request_id": "req-beta-1",
+            "intent_id": "intent:beta-1",
+            "intent_type": IntentType.REQUEST_FORK.value,
+            "title": "Beta 1",
+            "now": 30.0,
+        },
+    )
+    third = api.call(
+        bearer_token=alpha.secret,
+        action="create_intent",
+        params={
+            "request_id": "req-alpha-2",
+            "intent_id": "intent:alpha-2",
+            "intent_type": IntentType.REQUEST_FORK.value,
+            "title": "Alpha 2",
+            "now": 40.0,
+        },
+    )
+
+    page1 = api.call(
+        bearer_token=observer.secret,
+        action="list_operation_feed",
+        params={"limit": 2},
+    )
+    page2 = api.call(
+        bearer_token=observer.secret,
+        action="list_operation_feed",
+        params={"limit": 2, "after_operation_id": second["receipt"]["operation_id"]},
+    )
+    alpha_only = api.call(
+        bearer_token=observer.secret,
+        action="list_operation_feed",
+        params={"operator_subject": "alpha"},
+    )
+
+    assert [item["operation_id"] for item in page1["operation_feed"]["items"]] == [first["receipt"]["operation_id"], second["receipt"]["operation_id"]]
+    assert page1["operation_feed"]["page"]["has_more"] is True
+    assert page1["operation_feed"]["page"]["next_after_operation_id"] == second["receipt"]["operation_id"]
+    assert page1["operation_feed"]["items"][0]["response_payload_keys"] == ["intent", "token_id"]
+    assert [item["operation_id"] for item in page2["operation_feed"]["items"]] == [third["receipt"]["operation_id"]]
+    assert page2["operation_feed"]["page"]["has_more"] is False
+    assert [item["operator_subject"] for item in alpha_only["operation_feed"]["items"]] == ["alpha", "alpha"]
+    assert alpha_only["operation_feed"]["filters"]["operator_subject"] == "alpha"
 
 
 def test_lotus_api_preflights_publish_service_and_replay_state():
