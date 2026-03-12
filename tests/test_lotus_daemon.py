@@ -490,6 +490,13 @@ def test_lotus_daemon_lists_resource_change_feed_with_cursor_and_structured_curs
             f"{swept['receipt']['operation_id']}:0",
         ]
         assert page1["resource_change_feed"]["page"]["has_more"] is True
+        assert page1["resource_change_feed"]["checkpoint"] == {
+            "requested_after_change_cursor": None,
+            "resume_after_change_cursor": f"{swept['receipt']['operation_id']}:0",
+            "high_watermark_change_cursor": f"{swept['receipt']['operation_id']}:1",
+            "caught_up": False,
+            "empty_page": False,
+        }
 
         status2, page2 = _request_json(
             daemon.base_url,
@@ -499,6 +506,13 @@ def test_lotus_daemon_lists_resource_change_feed_with_cursor_and_structured_curs
         assert status2 == 200
         assert [item["change_cursor"] for item in page2["resource_change_feed"]["items"]] == [f"{swept['receipt']['operation_id']}:1"]
         assert page2["resource_change_feed"]["page"]["has_more"] is False
+        assert page2["resource_change_feed"]["checkpoint"] == {
+            "requested_after_change_cursor": f"{swept['receipt']['operation_id']}:0",
+            "resume_after_change_cursor": f"{swept['receipt']['operation_id']}:1",
+            "high_watermark_change_cursor": f"{swept['receipt']['operation_id']}:1",
+            "caught_up": True,
+            "empty_page": False,
+        }
 
         status3, filtered = _request_json(
             daemon.base_url,
@@ -508,6 +522,28 @@ def test_lotus_daemon_lists_resource_change_feed_with_cursor_and_structured_curs
         assert status3 == 200
         assert [item["change_cursor"] for item in filtered["resource_change_feed"]["items"]] == [f"{swept['receipt']['operation_id']}:1"]
         assert filtered["resource_change_feed"]["items"][0]["resource_change"]["resource_id"] == "lease-due"
+        assert filtered["resource_change_feed"]["checkpoint"] == {
+            "requested_after_change_cursor": None,
+            "resume_after_change_cursor": f"{swept['receipt']['operation_id']}:1",
+            "high_watermark_change_cursor": f"{swept['receipt']['operation_id']}:1",
+            "caught_up": True,
+            "empty_page": False,
+        }
+
+        status4, empty_page = _request_json(
+            daemon.base_url,
+            f"/v1/lotus/resource-changes?after_change_cursor={swept['receipt']['operation_id']}:1",
+            token=operator_secret,
+        )
+        assert status4 == 200
+        assert empty_page["resource_change_feed"]["items"] == []
+        assert empty_page["resource_change_feed"]["checkpoint"] == {
+            "requested_after_change_cursor": f"{swept['receipt']['operation_id']}:1",
+            "resume_after_change_cursor": f"{swept['receipt']['operation_id']}:1",
+            "high_watermark_change_cursor": f"{swept['receipt']['operation_id']}:1",
+            "caught_up": True,
+            "empty_page": True,
+        }
 
         with pytest.raises(HTTPError) as exc_info:
             _request_json(daemon.base_url, "/v1/lotus/resource-changes?after_change_cursor=op-missing:0", token=operator_secret)

@@ -1214,9 +1214,11 @@ class LotusControlPlaneAPI:
             if after_change_cursor not in indexes:
                 raise ValueError(f"unknown_resource_change_feed_cursor:{after_change_cursor}")
             items = items[indexes[after_change_cursor] + 1 :]
+        visible_high_watermark_change_cursor = items[-1]["change_cursor"] if items else (after_change_cursor or None)
         page = items[:limit]
         has_more = len(items) > len(page)
         next_after_change_cursor = page[-1]["change_cursor"] if has_more and page else None
+        resume_after_change_cursor = page[-1]["change_cursor"] if page else (after_change_cursor or None)
         return {
             "token_id": token.token_id,
             "resource_change_feed": {
@@ -1234,6 +1236,13 @@ class LotusControlPlaneAPI:
                     "returned_count": len(page),
                     "has_more": has_more,
                     "next_after_change_cursor": next_after_change_cursor,
+                },
+                "checkpoint": {
+                    "requested_after_change_cursor": after_change_cursor or None,
+                    "resume_after_change_cursor": resume_after_change_cursor,
+                    "high_watermark_change_cursor": visible_high_watermark_change_cursor,
+                    "caught_up": not has_more,
+                    "empty_page": not bool(page),
                 },
             },
         }
