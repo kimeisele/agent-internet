@@ -203,6 +203,14 @@ class LotusControlPlaneAPI:
         blocker_list = list(blockers or ())
         typed_blocker_list = [dict(item) for item in (typed_blockers or ())]
         preview_payload = dict(preview or {})
+        remediation_hints = self._preflight_remediation_hints(
+            action=action,
+            effect_kind=effect_kind,
+            blockers=blocker_list,
+            typed_blockers=typed_blocker_list,
+            idempotency=dict(idempotency),
+            preview=preview_payload,
+        )
         return {
             "kind": "lotus_mutation_preflight",
             "target_action": action,
@@ -213,14 +221,8 @@ class LotusControlPlaneAPI:
             "typed_blockers": typed_blocker_list,
             "idempotency": dict(idempotency),
             "preview": preview_payload,
-            "remediation_hints": self._preflight_remediation_hints(
-                action=action,
-                effect_kind=effect_kind,
-                blockers=blocker_list,
-                typed_blockers=typed_blocker_list,
-                idempotency=dict(idempotency),
-                preview=preview_payload,
-            ),
+            "remediation_hints": remediation_hints,
+            "next_actions": self._preflight_next_actions(remediation_hints),
         }
 
     @staticmethod
@@ -245,6 +247,31 @@ class LotusControlPlaneAPI:
         if suggested_change is not None:
             hint["suggested_change"] = dict(suggested_change)
         return hint
+
+    @staticmethod
+    def _next_action(
+        *,
+        action_code: str,
+        action_kind: str,
+        purpose: str,
+        lotus_action: str | None = None,
+        http_path: str | None = None,
+        params: dict[str, object] | None = None,
+        suggested_change: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        action = {
+            "action_code": action_code,
+            "action_kind": action_kind,
+            "purpose": purpose,
+            "params": dict(params or {}),
+        }
+        if lotus_action:
+            action["lotus_action"] = lotus_action
+        if http_path:
+            action["http_path"] = http_path
+        if suggested_change is not None:
+            action["suggested_change"] = dict(suggested_change)
+        return action
 
     @staticmethod
     def _typed_blocker(*, blocker_code: str, summary: str, **context: object) -> dict[str, object]:
@@ -382,6 +409,38 @@ class LotusControlPlaneAPI:
                     )
                 )
         return hints
+
+    def _preflight_next_actions(self, remediation_hints: list[dict[str, object]]) -> list[dict[str, object]]:
+        next_actions: list[dict[str, object]] = []
+        for hint in remediation_hints:
+            hint_code = str(hint.get("hint_code", ""))
+            lotus_action = hint.get("lotus_action")
+            http_path = hint.get("http_path")
+            params = dict(hint.get("params", {}))
+            suggested_change = hint.get("suggested_change")
+            summary = str(hint.get("summary", ""))
+            if lotus_action:
+                next_actions.append(
+                    self._next_action(
+                        action_code=hint_code,
+                        action_kind="lotus_call",
+                        purpose=summary,
+                        lotus_action=str(lotus_action),
+                        http_path=(str(http_path) if http_path else None),
+                        params=params,
+                    )
+                )
+                continue
+            if suggested_change is not None:
+                next_actions.append(
+                    self._next_action(
+                        action_code=hint_code,
+                        action_kind="local_change",
+                        purpose=summary,
+                        suggested_change=dict(suggested_change),
+                    )
+                )
+        return next_actions
 
     def _preflight_blocked(
         self,
