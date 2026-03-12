@@ -159,10 +159,12 @@ def test_lotus_api_describes_capabilities_manifest():
     assert payload["parseability"]["operation_feed_filter_fields"] == ["action", "operator_subject", "resource_kind", "resource_id", "change_kind"]
     assert "resource_changes" in payload["parseability"]["operation_feed_item_fields"]
     assert payload["parseability"]["operation_feed_resource_change_fields"][0] == "resource_kind"
-    assert payload["parseability"]["resource_change_feed_response_fields"] == ["items", "filters", "page", "checkpoint"]
+    assert payload["parseability"]["resource_change_feed_response_fields"] == ["items", "filters", "page", "checkpoint", "watch"]
     assert payload["parseability"]["resource_change_feed_item_fields"][0] == "change_cursor"
     assert payload["parseability"]["resource_change_feed_page_fields"][0] == "after_change_cursor"
     assert payload["parseability"]["resource_change_feed_checkpoint_fields"][0] == "requested_after_change_cursor"
+    assert payload["parseability"]["resource_change_feed_watch_fields"][0] == "mode"
+    assert payload["parseability"]["resource_change_feed_watch_next_request_fields"] == ["lotus_action", "http_path", "params"]
     assert payload["parseability"]["operation_feed_page_fields"][0] == "after_operation_id"
     assert payload["parseability"]["operation_receipt_http_paths"][0] == "https://lotus.example/v1/lotus/operations/{operation_id}"
     assert payload["parseability"]["preflight_http_path"] == "https://lotus.example/v1/lotus/preflight"
@@ -1468,6 +1470,17 @@ def test_lotus_api_lists_resource_change_feed_with_cursor_and_filters():
         "caught_up": False,
         "empty_page": False,
     }
+    assert page1["resource_change_feed"]["watch"] == {
+        "mode": "poll_with_cursor",
+        "reason": "drain_backlog",
+        "continue_immediately": True,
+        "recommended_wait_ms": 0,
+        "next_request": {
+            "lotus_action": "list_resource_change_feed",
+            "http_path": "/v1/lotus/resource-changes",
+            "params": {"limit": 2, "after_change_cursor": f"{swept['receipt']['operation_id']}:0"},
+        },
+    }
     assert [item["change_cursor"] for item in page2["resource_change_feed"]["items"]] == [f"{swept['receipt']['operation_id']}:1"]
     assert page2["resource_change_feed"]["page"]["has_more"] is False
     assert page2["resource_change_feed"]["checkpoint"] == {
@@ -1476,6 +1489,17 @@ def test_lotus_api_lists_resource_change_feed_with_cursor_and_filters():
         "high_watermark_change_cursor": f"{swept['receipt']['operation_id']}:1",
         "caught_up": True,
         "empty_page": False,
+    }
+    assert page2["resource_change_feed"]["watch"] == {
+        "mode": "poll_with_cursor",
+        "reason": "await_new_changes",
+        "continue_immediately": False,
+        "recommended_wait_ms": 1000,
+        "next_request": {
+            "lotus_action": "list_resource_change_feed",
+            "http_path": "/v1/lotus/resource-changes",
+            "params": {"limit": 2, "after_change_cursor": f"{swept['receipt']['operation_id']}:1"},
+        },
     }
     assert filtered["resource_change_feed"]["filters"] == {
         "action": None,
@@ -1490,6 +1514,23 @@ def test_lotus_api_lists_resource_change_feed_with_cursor_and_filters():
         "high_watermark_change_cursor": f"{swept['receipt']['operation_id']}:1",
         "caught_up": True,
         "empty_page": False,
+    }
+    assert filtered["resource_change_feed"]["watch"] == {
+        "mode": "poll_with_cursor",
+        "reason": "await_new_changes",
+        "continue_immediately": False,
+        "recommended_wait_ms": 1000,
+        "next_request": {
+            "lotus_action": "list_resource_change_feed",
+            "http_path": "/v1/lotus/resource-changes",
+            "params": {
+                "limit": 50,
+                "after_change_cursor": f"{swept['receipt']['operation_id']}:1",
+                "resource_kind": "slot_lease",
+                "resource_id": "lease-due",
+                "change_kind": "expire",
+            },
+        },
     }
     assert filtered["resource_change_feed"]["items"] == [
         {
@@ -1538,6 +1579,17 @@ def test_lotus_api_resource_change_feed_checkpoint_is_stable_for_empty_caught_up
         "high_watermark_change_cursor": f"{released['receipt']['operation_id']}:0",
         "caught_up": True,
         "empty_page": True,
+    }
+    assert caught_up["resource_change_feed"]["watch"] == {
+        "mode": "poll_with_cursor",
+        "reason": "await_new_changes",
+        "continue_immediately": False,
+        "recommended_wait_ms": 1000,
+        "next_request": {
+            "lotus_action": "list_resource_change_feed",
+            "http_path": "/v1/lotus/resource-changes",
+            "params": {"limit": 50, "after_change_cursor": f"{released['receipt']['operation_id']}:0"},
+        },
     }
 
 

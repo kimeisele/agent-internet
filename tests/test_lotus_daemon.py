@@ -497,6 +497,17 @@ def test_lotus_daemon_lists_resource_change_feed_with_cursor_and_structured_curs
             "caught_up": False,
             "empty_page": False,
         }
+        assert page1["resource_change_feed"]["watch"] == {
+            "mode": "poll_with_cursor",
+            "reason": "drain_backlog",
+            "continue_immediately": True,
+            "recommended_wait_ms": 0,
+            "next_request": {
+                "lotus_action": "list_resource_change_feed",
+                "http_path": "/v1/lotus/resource-changes",
+                "params": {"limit": 2, "after_change_cursor": f"{swept['receipt']['operation_id']}:0"},
+            },
+        }
 
         status2, page2 = _request_json(
             daemon.base_url,
@@ -512,6 +523,17 @@ def test_lotus_daemon_lists_resource_change_feed_with_cursor_and_structured_curs
             "high_watermark_change_cursor": f"{swept['receipt']['operation_id']}:1",
             "caught_up": True,
             "empty_page": False,
+        }
+        assert page2["resource_change_feed"]["watch"] == {
+            "mode": "poll_with_cursor",
+            "reason": "await_new_changes",
+            "continue_immediately": False,
+            "recommended_wait_ms": 1000,
+            "next_request": {
+                "lotus_action": "list_resource_change_feed",
+                "http_path": "/v1/lotus/resource-changes",
+                "params": {"limit": 2, "after_change_cursor": f"{swept['receipt']['operation_id']}:1"},
+            },
         }
 
         status3, filtered = _request_json(
@@ -529,6 +551,23 @@ def test_lotus_daemon_lists_resource_change_feed_with_cursor_and_structured_curs
             "caught_up": True,
             "empty_page": False,
         }
+        assert filtered["resource_change_feed"]["watch"] == {
+            "mode": "poll_with_cursor",
+            "reason": "await_new_changes",
+            "continue_immediately": False,
+            "recommended_wait_ms": 1000,
+            "next_request": {
+                "lotus_action": "list_resource_change_feed",
+                "http_path": "/v1/lotus/resource-changes",
+                "params": {
+                    "limit": 50,
+                    "after_change_cursor": f"{swept['receipt']['operation_id']}:1",
+                    "resource_kind": "slot_lease",
+                    "resource_id": "lease-due",
+                    "change_kind": "expire",
+                },
+            },
+        }
 
         status4, empty_page = _request_json(
             daemon.base_url,
@@ -543,6 +582,17 @@ def test_lotus_daemon_lists_resource_change_feed_with_cursor_and_structured_curs
             "high_watermark_change_cursor": f"{swept['receipt']['operation_id']}:1",
             "caught_up": True,
             "empty_page": True,
+        }
+        assert empty_page["resource_change_feed"]["watch"] == {
+            "mode": "poll_with_cursor",
+            "reason": "await_new_changes",
+            "continue_immediately": False,
+            "recommended_wait_ms": 1000,
+            "next_request": {
+                "lotus_action": "list_resource_change_feed",
+                "http_path": "/v1/lotus/resource-changes",
+                "params": {"limit": 50, "after_change_cursor": f"{swept['receipt']['operation_id']}:1"},
+            },
         }
 
         with pytest.raises(HTTPError) as exc_info:

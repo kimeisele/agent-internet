@@ -82,6 +82,8 @@ _PREFLIGHT_SUPPORTED_ACTIONS = frozenset(
         "sweep_expired_grants",
     },
 )
+_RESOURCE_CHANGE_FEED_BACKLOG_WAIT_MS = 0
+_RESOURCE_CHANGE_FEED_CAUGHT_UP_WAIT_MS = 1000
 
 
 def _serialize_lotus_route(route: dict) -> dict:
@@ -1173,6 +1175,43 @@ class LotusControlPlaneAPI:
             "receipt_http_path": f"/v1/lotus/operations/{receipt.operation_id}",
         }
 
+    @staticmethod
+    def _resource_change_feed_watch(
+        *,
+        limit: int,
+        action_filter: str,
+        operator_subject_filter: str,
+        resource_kind_filter: str,
+        resource_id_filter: str,
+        change_kind_filter: str,
+        resume_after_change_cursor: str | None,
+        has_more: bool,
+    ) -> dict[str, object]:
+        next_request_params: dict[str, object] = {"limit": limit}
+        if resume_after_change_cursor is not None:
+            next_request_params["after_change_cursor"] = resume_after_change_cursor
+        if action_filter:
+            next_request_params["action"] = action_filter
+        if operator_subject_filter:
+            next_request_params["operator_subject"] = operator_subject_filter
+        if resource_kind_filter:
+            next_request_params["resource_kind"] = resource_kind_filter
+        if resource_id_filter:
+            next_request_params["resource_id"] = resource_id_filter
+        if change_kind_filter:
+            next_request_params["change_kind"] = change_kind_filter
+        return {
+            "mode": "poll_with_cursor",
+            "reason": ("drain_backlog" if has_more else "await_new_changes"),
+            "continue_immediately": has_more,
+            "recommended_wait_ms": (_RESOURCE_CHANGE_FEED_BACKLOG_WAIT_MS if has_more else _RESOURCE_CHANGE_FEED_CAUGHT_UP_WAIT_MS),
+            "next_request": {
+                "lotus_action": "list_resource_change_feed",
+                "http_path": "/v1/lotus/resource-changes",
+                "params": next_request_params,
+            },
+        }
+
     def _list_resource_change_feed(self, *, bearer_token: str, payload: dict) -> dict:
         token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
         action_filter = ("" if payload.get("action") in (None, "") else str(payload.get("action"))).strip()
@@ -1244,6 +1283,16 @@ class LotusControlPlaneAPI:
                     "caught_up": not has_more,
                     "empty_page": not bool(page),
                 },
+                "watch": self._resource_change_feed_watch(
+                    limit=limit,
+                    action_filter=action_filter,
+                    operator_subject_filter=operator_subject_filter,
+                    resource_kind_filter=resource_kind_filter,
+                    resource_id_filter=resource_id_filter,
+                    change_kind_filter=change_kind_filter,
+                    resume_after_change_cursor=resume_after_change_cursor,
+                    has_more=has_more,
+                ),
             },
         }
 
