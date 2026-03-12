@@ -1097,7 +1097,7 @@ class LotusControlPlaneAPI:
         return []
 
     @staticmethod
-    def _operation_feed_item(receipt: OperationReceiptRecord) -> dict[str, object]:
+    def _operation_feed_item(receipt: OperationReceiptRecord, *, resource_changes: list[dict[str, object]] | None = None) -> dict[str, object]:
         return {
             "operation_id": receipt.operation_id,
             "request_id": receipt.request_id,
@@ -1108,16 +1108,36 @@ class LotusControlPlaneAPI:
             "last_replayed_at": receipt.last_replayed_at,
             "replay_count": receipt.replay_count,
             "response_payload_keys": sorted(receipt.response_payload.keys()),
-            "resource_changes": LotusControlPlaneAPI._operation_resource_changes(receipt),
+            "resource_changes": list(LotusControlPlaneAPI._operation_resource_changes(receipt) if resource_changes is None else resource_changes),
             "receipt_lotus_action": "show_operation_receipt",
             "receipt_http_path": f"/v1/lotus/operations/{receipt.operation_id}",
         }
+
+    @staticmethod
+    def _filter_operation_resource_changes(
+        resource_changes: list[dict[str, object]],
+        *,
+        resource_kind_filter: str,
+        resource_id_filter: str,
+        change_kind_filter: str,
+    ) -> list[dict[str, object]]:
+        filtered = list(resource_changes)
+        if resource_kind_filter:
+            filtered = [item for item in filtered if item.get("resource_kind") == resource_kind_filter]
+        if resource_id_filter:
+            filtered = [item for item in filtered if item.get("resource_id") == resource_id_filter]
+        if change_kind_filter:
+            filtered = [item for item in filtered if item.get("change_kind") == change_kind_filter]
+        return filtered
 
     def _list_operation_feed(self, *, bearer_token: str, payload: dict) -> dict:
         token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
         action_filter = ("" if payload.get("action") in (None, "") else str(payload.get("action"))).strip()
         operator_subject_filter = ("" if payload.get("operator_subject") in (None, "") else str(payload.get("operator_subject"))).strip()
         after_operation_id = ("" if payload.get("after_operation_id") in (None, "") else str(payload.get("after_operation_id"))).strip()
+        resource_kind_filter = ("" if payload.get("resource_kind") in (None, "") else str(payload.get("resource_kind"))).strip()
+        resource_id_filter = ("" if payload.get("resource_id") in (None, "") else str(payload.get("resource_id"))).strip()
+        change_kind_filter = ("" if payload.get("change_kind") in (None, "") else str(payload.get("change_kind"))).strip()
         limit = int(payload.get("limit", 50))
         if limit < 1 or limit > 200:
             raise ValueError(f"invalid_operation_feed_limit:{limit}")
@@ -1129,21 +1149,38 @@ class LotusControlPlaneAPI:
             receipts = [item for item in receipts if item.action == action_filter]
         if operator_subject_filter:
             receipts = [item for item in receipts if item.operator_subject == operator_subject_filter]
+        items = [
+            self._operation_feed_item(
+                receipt,
+                resource_changes=self._filter_operation_resource_changes(
+                    self._operation_resource_changes(receipt),
+                    resource_kind_filter=resource_kind_filter,
+                    resource_id_filter=resource_id_filter,
+                    change_kind_filter=change_kind_filter,
+                ),
+            )
+            for receipt in receipts
+        ]
+        if resource_kind_filter or resource_id_filter or change_kind_filter:
+            items = [item for item in items if item["resource_changes"]]
         if after_operation_id:
-            indexes = {item.operation_id: index for index, item in enumerate(receipts)}
+            indexes = {item["operation_id"]: index for index, item in enumerate(items)}
             if after_operation_id not in indexes:
                 raise ValueError(f"unknown_operation_feed_cursor:{after_operation_id}")
-            receipts = receipts[indexes[after_operation_id] + 1 :]
-        page = receipts[:limit]
-        has_more = len(receipts) > len(page)
-        next_after_operation_id = page[-1].operation_id if has_more and page else None
+            items = items[indexes[after_operation_id] + 1 :]
+        page = items[:limit]
+        has_more = len(items) > len(page)
+        next_after_operation_id = page[-1]["operation_id"] if has_more and page else None
         return {
             "token_id": token.token_id,
             "operation_feed": {
-                "items": [self._operation_feed_item(item) for item in page],
+                "items": page,
                 "filters": {
                     "action": action_filter or None,
                     "operator_subject": operator_subject_filter or None,
+                    "resource_kind": resource_kind_filter or None,
+                    "resource_id": resource_id_filter or None,
+                    "change_kind": change_kind_filter or None,
                 },
                 "page": {
                     "after_operation_id": after_operation_id or None,

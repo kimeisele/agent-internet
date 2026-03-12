@@ -185,6 +185,9 @@ class LotusApiDaemon:
                         "after_operation_id": _query_param(query, "after_operation_id"),
                         "action": _query_param(query, "action"),
                         "operator_subject": _query_param(query, "operator_subject"),
+                        "resource_kind": _query_param(query, "resource_kind"),
+                        "resource_id": _query_param(query, "resource_id"),
+                        "change_kind": _query_param(query, "change_kind"),
                     },
                 )
             if method == "GET" and path == "/v1/lotus/operations/by-request":

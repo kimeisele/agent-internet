@@ -155,6 +155,7 @@ def test_lotus_api_describes_capabilities_manifest():
     assert "release_space_claim" in payload["recoverability"]["request_id_supported_actions"]
     assert payload["parseability"]["operation_feed_http_path"] == "https://lotus.example/v1/lotus/operations"
     assert payload["parseability"]["operation_feed_response_fields"] == ["items", "filters", "page"]
+    assert payload["parseability"]["operation_feed_filter_fields"] == ["action", "operator_subject", "resource_kind", "resource_id", "change_kind"]
     assert "resource_changes" in payload["parseability"]["operation_feed_item_fields"]
     assert payload["parseability"]["operation_feed_resource_change_fields"][0] == "resource_kind"
     assert payload["parseability"]["operation_feed_page_fields"][0] == "after_operation_id"
@@ -1388,6 +1389,40 @@ def test_lotus_api_operation_feed_includes_typed_resource_changes_for_lifecycle_
     assert swept["grant_sweep"]["expired_space_claim_count"] == 1
     assert [item["resource_id"] for item in feed["operation_feed"]["items"][0]["resource_changes"]] == ["claim-due", "lease-due"]
     assert [item["change_kind"] for item in feed["operation_feed"]["items"][0]["resource_changes"]] == ["expire", "expire"]
+
+
+def test_lotus_api_filters_operation_feed_by_resource_kind_id_and_change_kind():
+    plane = AgentInternetControlPlane()
+    plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-1", source_intent_id="intent-space-1", subject_id="operator-1", space_id="space-1", granted_at=20.0))
+    plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-due", source_intent_id="intent-space-due", subject_id="operator-2", space_id="space-2", status=ClaimStatus.GRANTED, granted_at=21.0, expires_at=40.0))
+    plane.upsert_slot(SlotDescriptor(slot_id="slot-due", space_id="space-2", slot_kind="general", holder_subject_id="operator-2", status=SlotStatus.ACTIVE))
+    plane.upsert_slot_lease(SlotLeaseRecord(lease_id="lease-due", source_intent_id="intent-slot-due", holder_subject_id="operator-2", space_id="space-2", slot_id="slot-due", status=LeaseStatus.ACTIVE, granted_at=22.0, expires_at=40.0))
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(subject="governor", scopes=(LotusApiScope.CONTRACT_WRITE.value, LotusApiScope.READ.value), token_secret="filtered-feed-token", now=10.0)
+
+    release = api.call(bearer_token=issued.secret, action="release_space_claim", params={"request_id": "req-claim-1", "claim_id": "claim-1", "now": 30.0})
+    sweep = api.call(bearer_token=issued.secret, action="sweep_expired_grants", params={"request_id": "req-sweep-1", "now": 50.0})
+
+    by_kind = api.call(bearer_token=issued.secret, action="list_operation_feed", params={"resource_kind": "space_claim"})
+    by_id = api.call(bearer_token=issued.secret, action="list_operation_feed", params={"resource_id": "lease-due"})
+    by_change = api.call(bearer_token=issued.secret, action="list_operation_feed", params={"change_kind": "expire"})
+
+    assert [item["operation_id"] for item in by_kind["operation_feed"]["items"]] == [release["receipt"]["operation_id"], sweep["receipt"]["operation_id"]]
+    assert by_kind["operation_feed"]["filters"]["resource_kind"] == "space_claim"
+    assert [change["resource_kind"] for change in by_kind["operation_feed"]["items"][1]["resource_changes"]] == ["space_claim"]
+    assert [item["operation_id"] for item in by_id["operation_feed"]["items"]] == [sweep["receipt"]["operation_id"]]
+    assert by_id["operation_feed"]["items"][0]["resource_changes"] == [
+        {
+            "resource_kind": "slot_lease",
+            "resource_id": "lease-due",
+            "change_kind": "expire",
+            "source_operation_id": sweep["receipt"]["operation_id"],
+            "changed_fields": ["status", "expires_at"],
+            "new_status": LeaseStatus.EXPIRED.value,
+        }
+    ]
+    assert [item["operation_id"] for item in by_change["operation_feed"]["items"]] == [sweep["receipt"]["operation_id"]]
+    assert by_change["operation_feed"]["filters"]["change_kind"] == "expire"
 
 
 def test_lotus_api_preflights_publish_service_and_replay_state():

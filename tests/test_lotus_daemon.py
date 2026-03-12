@@ -422,6 +422,22 @@ def test_lotus_daemon_lists_operation_feed_with_cursor_and_structured_cursor_err
         assert [item["operation_id"] for item in page2["operation_feed"]["items"]] == [second["receipt"]["operation_id"]]
         assert page2["operation_feed"]["page"]["has_more"] is False
 
+        status3, filtered = _request_json(
+            daemon.base_url,
+            "/v1/lotus/operations?resource_kind=intent&resource_id=intent:daemon-2&change_kind=upsert",
+            token=operator_secret,
+        )
+        assert status3 == 200
+        assert [item["operation_id"] for item in filtered["operation_feed"]["items"]] == [second["receipt"]["operation_id"]]
+        assert filtered["operation_feed"]["filters"] == {
+            "action": None,
+            "operator_subject": None,
+            "resource_kind": "intent",
+            "resource_id": "intent:daemon-2",
+            "change_kind": "upsert",
+        }
+        assert filtered["operation_feed"]["items"][0]["resource_changes"][0]["resource_id"] == "intent:daemon-2"
+
         with pytest.raises(HTTPError) as exc_info:
             _request_json(daemon.base_url, "/v1/lotus/operations?after_operation_id=op-missing", token=operator_secret)
         assert exc_info.value.code == 404
