@@ -199,16 +199,170 @@ class LotusControlPlaneAPI:
         blockers: list[str] | None = None,
         preview: dict[str, object] | None = None,
     ) -> dict[str, object]:
+        blocker_list = list(blockers or ())
+        preview_payload = dict(preview or {})
         return {
             "kind": "lotus_mutation_preflight",
             "target_action": action,
             "ok": ok,
             "would_apply": would_apply,
             "effect_kind": effect_kind,
-            "blockers": list(blockers or ()),
+            "blockers": blocker_list,
             "idempotency": dict(idempotency),
-            "preview": dict(preview or {}),
+            "preview": preview_payload,
+            "remediation_hints": self._preflight_remediation_hints(
+                action=action,
+                effect_kind=effect_kind,
+                blockers=blocker_list,
+                idempotency=dict(idempotency),
+                preview=preview_payload,
+            ),
         }
+
+    @staticmethod
+    def _remediation_hint(
+        *,
+        hint_code: str,
+        summary: str,
+        lotus_action: str | None = None,
+        http_path: str | None = None,
+        params: dict[str, object] | None = None,
+        suggested_change: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        hint = {
+            "hint_code": hint_code,
+            "summary": summary,
+            "params": dict(params or {}),
+        }
+        if lotus_action:
+            hint["lotus_action"] = lotus_action
+        if http_path:
+            hint["http_path"] = http_path
+        if suggested_change is not None:
+            hint["suggested_change"] = dict(suggested_change)
+        return hint
+
+    def _preflight_remediation_hints(
+        self,
+        *,
+        action: str,
+        effect_kind: str,
+        blockers: list[str],
+        idempotency: dict[str, object],
+        preview: dict[str, object],
+    ) -> list[dict[str, object]]:
+        hints: list[dict[str, object]] = []
+        request_id = str(idempotency.get("request_id", "") or "")
+        operation_id = str(idempotency.get("operation_id", "") or "")
+        if effect_kind == "replay":
+            receipt_params = {"operation_id": operation_id} if operation_id else {"action": action, "request_id": request_id}
+            receipt_path = f"/v1/lotus/operations/{operation_id}" if operation_id else f"/v1/lotus/operations/by-request?action={action}&request_id={request_id}"
+            hints.append(
+                self._remediation_hint(
+                    hint_code="read_existing_receipt",
+                    summary="This request already maps to an applied operation; reuse the stored receipt and skip a duplicate write.",
+                    lotus_action="show_operation_receipt",
+                    http_path=receipt_path,
+                    params=receipt_params,
+                )
+            )
+            return hints
+        if effect_kind == "noop":
+            hints.append(
+                self._remediation_hint(
+                    hint_code=("no_expired_grants_detected" if action == "sweep_expired_grants" else "verify_current_state"),
+                    summary=(
+                        "No grants are currently due for expiry; skip the sweep mutation and retry later if new expirations appear."
+                        if action == "sweep_expired_grants"
+                        else "The requested state already matches the current control-plane state; no mutation is needed."
+                    ),
+                    lotus_action="show_state",
+                    http_path="/v1/lotus/state",
+                )
+            )
+        for blocker in blockers:
+            if blocker.startswith("idempotency_conflict:"):
+                hints.append(
+                    self._remediation_hint(
+                        hint_code="inspect_conflicting_receipt",
+                        summary="This request_id is already bound to a different payload. Inspect the existing receipt before deciding whether to reuse or replace the request.",
+                        lotus_action="show_operation_receipt",
+                        http_path=f"/v1/lotus/operations/by-request?action={action}&request_id={request_id}",
+                        params={"action": action, "request_id": request_id},
+                    )
+                )
+                hints.append(
+                    self._remediation_hint(
+                        hint_code="mint_new_request_id",
+                        summary="If you intend a different mutation payload, retry with a fresh request_id instead of reusing the conflicting one.",
+                        suggested_change={"field": "request_id", "strategy": "mint_new_unique_value"},
+                    )
+                )
+                continue
+            if blocker.startswith("unknown_space_claim:"):
+                hints.append(
+                    self._remediation_hint(
+                        hint_code="refresh_space_claim_inventory",
+                        summary="The referenced claim_id was not found. Refresh the claims inventory before retrying the lifecycle transition.",
+                        lotus_action="list_space_claims",
+                        http_path="/v1/lotus/space-claims",
+                    )
+                )
+                continue
+            if blocker.startswith("unknown_slot_lease:"):
+                hints.append(
+                    self._remediation_hint(
+                        hint_code="refresh_slot_lease_inventory",
+                        summary="The referenced lease_id was not found. Refresh the slot-lease inventory before retrying the lifecycle transition.",
+                        lotus_action="list_slot_leases",
+                        http_path="/v1/lotus/slot-leases",
+                    )
+                )
+                continue
+            if blocker.startswith("invalid_space_claim_transition:"):
+                current_status = str(preview.get("current_status", ""))
+                target_status = str(preview.get("target_status", ""))
+                hints.append(
+                    self._remediation_hint(
+                        hint_code=("skip_duplicate_transition" if current_status == target_status else "inspect_space_claim_status"),
+                        summary=(
+                            "The claim already has the requested target status; skip this duplicate transition and continue."
+                            if current_status == target_status
+                            else "The claim is not in a transitionable status. Inspect current claim state before choosing the next lifecycle action."
+                        ),
+                        lotus_action="list_space_claims",
+                        http_path="/v1/lotus/space-claims",
+                        params={"claim_id": preview.get("claim_id", "")},
+                    )
+                )
+                continue
+            if blocker.startswith("invalid_slot_lease_transition:"):
+                current_status = str(preview.get("current_status", ""))
+                target_status = str(preview.get("target_status", ""))
+                hints.append(
+                    self._remediation_hint(
+                        hint_code=("skip_duplicate_transition" if current_status == target_status else "inspect_slot_lease_status"),
+                        summary=(
+                            "The lease already has the requested target status; skip this duplicate transition and continue."
+                            if current_status == target_status
+                            else "The lease is not in a transitionable status. Inspect current lease state before choosing the next lifecycle action."
+                        ),
+                        lotus_action="list_slot_leases",
+                        http_path="/v1/lotus/slot-leases",
+                        params={"lease_id": preview.get("lease_id", "")},
+                    )
+                )
+                continue
+            if blocker.startswith("invalid_nadi_type:") or blocker.startswith("invalid_priority:"):
+                hints.append(
+                    self._remediation_hint(
+                        hint_code="read_steward_protocol_bindings",
+                        summary="The proposed route parameters do not match the steward protocol bindings. Read the current bindings and choose an allowed nadi type / priority.",
+                        lotus_action="show_steward_protocol",
+                        http_path="/v1/lotus/steward-protocol",
+                    )
+                )
+        return hints
 
     def _preflight_blocked(self, *, action: str, blocker: str, idempotency: dict[str, object] | None = None, preview: dict[str, object] | None = None) -> dict[str, object]:
         return self._preflight_result(
