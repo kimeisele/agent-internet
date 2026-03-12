@@ -484,6 +484,7 @@ def _render_authority_page(
     summary_registry = dict(artifacts_by_kind.get("public_summary_registry", {}))
     metadata_payload = dict(artifacts_by_kind.get("surface_metadata", {}))
     repo_graph = dict(artifacts_by_kind.get("repo_graph", {}))
+    federation_surface = _federation_surface_metadata(metadata_payload)
     source_records = _source_surface_records(source_registry)
     surface_registry = dict(metadata_payload.get("surface_registry", {}))
     lines = [
@@ -508,6 +509,19 @@ def _render_authority_page(
         lines.extend([empty_message, ""])
         return "\n".join(lines).rstrip() + "\n"
     lines.extend([f"This page is rendered from imported {label.lower()} source-authority artifacts.", ""])
+    if federation_surface:
+        lines.extend(["## Public Federation Surface", ""])
+        lines.append(f"- Surface Role: `{federation_surface['surface_role']}`")
+        lines.append(f"- Canonical for Public Federation: `{federation_surface['canonical_for_public_federation']}`")
+        if federation_surface["publication_model"]:
+            lines.append(f"- Publication Model: `{federation_surface['publication_model']}`")
+        if federation_surface["public_channels"]:
+            lines.append(f"- Public Channels: `{', '.join(federation_surface['public_channels'])}`")
+        if federation_surface["operator_companion_surfaces"]:
+            lines.append(f"- Authenticated Companion Surfaces: `{', '.join(federation_surface['operator_companion_surfaces'])}`")
+        if federation_surface["consumer_guidance"]:
+            lines.append(f"- Consumer Guidance: {federation_surface['consumer_guidance']}")
+        lines.append("")
     lines.extend(["## Imported Authority Exports", ""])
     for export_kind in sorted(exports_by_kind):
         export_record = exports_by_kind[export_kind]
@@ -541,14 +555,18 @@ def _render_canonical_surface_page(
     status_labels = dict(publication_status.get("labels", {})) if publication_status is not None else {}
     artifacts_by_kind = dict(authority_view.get("artifacts_by_kind", {}))
     canonical_payload = dict(artifacts_by_kind.get("canonical_surface", {}))
+    federation_surface = _federation_surface_metadata(dict(artifacts_by_kind.get("surface_metadata", {})))
     lines = [
         f"# {title}",
         "",
         f"- Source Repo: `{source_repo_id}`",
         f"- Source Export Version: `{status_labels.get('source_export_version', '')}`",
         f"- Source Bundle SHA: `{status_labels.get('authority_bundle_source_sha', '')}`",
+        f"- Canonical for Public Federation: `{federation_surface['canonical_for_public_federation']}`" if federation_surface else "",
+        f"- Publication Model: `{federation_surface['publication_model']}`" if federation_surface and federation_surface["publication_model"] else "",
         "",
     ]
+    lines = [line for line in lines if line != ""] + [""]
     documents = [record for record in list(canonical_payload.get("documents", [])) if isinstance(record, dict)]
     if not documents:
         lines.extend([empty_message, ""])
@@ -565,6 +583,28 @@ def _render_canonical_surface_page(
         if public_summary:
             lines.append(f"  - {public_summary}")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _federation_surface_metadata(metadata_payload: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(metadata_payload.get("federation_surface", {})) if isinstance(metadata_payload.get("federation_surface"), dict) else {}
+    public_surface = dict(metadata_payload.get("public_surface", {})) if isinstance(metadata_payload.get("public_surface"), dict) else {}
+    public_payload = dict(public_surface.get("federation_surface", {})) if isinstance(public_surface.get("federation_surface"), dict) else {}
+    merged = {**public_payload, **payload}
+    if not merged:
+        return {}
+    public_channels = [str(item).strip() for item in list(merged.get("public_channels") or ()) if str(item).strip()]
+    companion_surfaces = [str(item).strip() for item in list(merged.get("operator_companion_surfaces") or ()) if str(item).strip()]
+    single_companion = str(merged.get("operator_companion_surface") or "").strip()
+    if single_companion and single_companion not in companion_surfaces:
+        companion_surfaces.append(single_companion)
+    return {
+        "surface_role": str(merged.get("surface_role") or "unknown_public_surface"),
+        "canonical_for_public_federation": bool(merged.get("canonical_for_public_federation")),
+        "publication_model": str(merged.get("publication_model") or ""),
+        "public_channels": public_channels,
+        "operator_companion_surfaces": companion_surfaces,
+        "consumer_guidance": str(merged.get("consumer_guidance") or "").strip(),
+    }
 
 
 def _render_canonical_document_page(

@@ -3,6 +3,10 @@
 - Well-known file: `.well-known/agent-federation.json`
 - Purpose: let `agent-internet` auto-register a source repo's authority feed and public projection intent without downstream code edits
 
+The descriptor points at the **public authority publication surface** of a repo.
+It does not imply that an authenticated operator/control-plane API is the
+canonical public federation membrane.
+
 Minimal descriptor:
 
 ```json

@@ -35,6 +35,31 @@ Each source repo publishes a stable `latest-authority-manifest.json` plus immuta
 5. import the cached bundle into control-plane state
 6. publish wiki projection from imported state
 
+### Recommended `surface-metadata` alignment
+
+When a source repo publishes `.authority-exports/surface-metadata.json`, it should
+explicitly identify whether the exported feed/projection is part of the canonical
+public federation surface.
+
+Recommended shape:
+
+```json
+{
+  "kind": "surface_metadata",
+  "public_surface": {"repo_label": "Steward"},
+  "federation_surface": {
+    "surface_role": "canonical_public_source_authority",
+    "canonical_for_public_federation": true,
+    "publication_model": "github_authority_feed_plus_projected_wiki",
+    "public_channels": ["authority_feed_manifest", "canonical_surface", "public_summary_registry"],
+    "consumer_guidance": "Treat this authority feed and its projected wiki/agent-web pages as public federation truth; authenticated control planes are companion operator surfaces."
+  }
+}
+```
+
+This keeps public authority publication distinct from any authenticated operator
+or bridge API that may exist alongside it.
+
 ### Publication recording
 
 `agent-internet` records, per synced feed:
