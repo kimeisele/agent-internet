@@ -429,6 +429,8 @@ def test_lotus_daemon_preflights_publish_service_and_reports_conflict_state(tmp_
         assert conflict["preflight"]["ok"] is False
         assert conflict["preflight"]["effect_kind"] == "conflict"
         assert conflict["preflight"]["blockers"] == ["idempotency_conflict:publish_service:req-service-preflight-1"]
+        assert conflict["preflight"]["remediation_hints"][0]["hint_code"] == "inspect_conflicting_receipt"
+        assert conflict["preflight"]["remediation_hints"][1]["hint_code"] == "mint_new_request_id"
     finally:
         daemon.shutdown()
 

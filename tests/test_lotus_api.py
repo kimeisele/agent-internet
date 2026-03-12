@@ -155,6 +155,8 @@ def test_lotus_api_describes_capabilities_manifest():
     assert "release_space_claim" in payload["recoverability"]["request_id_supported_actions"]
     assert payload["parseability"]["operation_receipt_http_paths"][0] == "https://lotus.example/v1/lotus/operations/{operation_id}"
     assert payload["parseability"]["preflight_http_path"] == "https://lotus.example/v1/lotus/preflight"
+    assert "remediation_hints" in payload["parseability"]["preflight_response_fields"]
+    assert payload["parseability"]["preflight_remediation_hint_fields"][0] == "hint_code"
     assert "publish_service" in payload["recoverability"]["preflight_supported_actions"]
     assert payload["parseability"]["http_error_envelope_fields"] == ["error", "error_code", "error_kind", "recoverable", "retryable", "context"]
     assert any(item["lotus_action"] == "create_intent" for item in payload["capabilities"])
@@ -1306,6 +1308,8 @@ def test_lotus_api_preflights_publish_service_and_replay_state():
     assert after["preflight"]["effect_kind"] == "replay"
     assert after["preflight"]["idempotency"]["mode"] == "replay"
     assert after["preflight"]["idempotency"]["operation_id"] == created["receipt"]["operation_id"]
+    assert after["preflight"]["remediation_hints"][0]["hint_code"] == "read_existing_receipt"
+    assert after["preflight"]["remediation_hints"][0]["lotus_action"] == "show_operation_receipt"
 
 
 def test_lotus_api_preflights_claim_transition_blocker_and_sweep_preview():
@@ -1358,6 +1362,8 @@ def test_lotus_api_preflights_claim_transition_blocker_and_sweep_preview():
     assert blocked["preflight"]["ok"] is False
     assert blocked["preflight"]["effect_kind"] == "blocked"
     assert blocked["preflight"]["blockers"] == ["invalid_space_claim_transition:released->released"]
+    assert blocked["preflight"]["remediation_hints"][0]["hint_code"] == "skip_duplicate_transition"
+    assert blocked["preflight"]["remediation_hints"][0]["lotus_action"] == "list_space_claims"
     assert sweep["preflight"]["ok"] is True
     assert sweep["preflight"]["would_apply"] is True
     assert sweep["preflight"]["effect_kind"] == "sweep"
