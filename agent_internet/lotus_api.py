@@ -975,6 +975,128 @@ class LotusControlPlaneAPI:
         return {"token_id": token.token_id, "operation_receipt": asdict(receipt)}
 
     @staticmethod
+    def _resource_change(
+        *,
+        resource_kind: str,
+        resource_id: str,
+        change_kind: str,
+        source_operation_id: str,
+        changed_fields: list[str] | None = None,
+        new_status: str | None = None,
+    ) -> dict[str, object]:
+        change = {
+            "resource_kind": resource_kind,
+            "resource_id": resource_id,
+            "change_kind": change_kind,
+            "source_operation_id": source_operation_id,
+            "changed_fields": list(changed_fields or ()),
+        }
+        if new_status is not None:
+            change["new_status"] = new_status
+        return change
+
+    @classmethod
+    def _operation_resource_changes(cls, receipt: OperationReceiptRecord) -> list[dict[str, object]]:
+        payload = receipt.response_payload
+        operation_id = receipt.operation_id
+        if receipt.action == "create_intent" and isinstance(payload.get("intent"), dict):
+            intent = payload["intent"]
+            return [
+                cls._resource_change(
+                    resource_kind="intent",
+                    resource_id=str(intent.get("intent_id", "")),
+                    change_kind="upsert",
+                    source_operation_id=operation_id,
+                    changed_fields=["status", "title", "description", "updated_at"],
+                    new_status=str(intent.get("status", "")) or None,
+                )
+            ]
+        if receipt.action == "publish_endpoint" and isinstance(payload.get("hosted_endpoint"), dict):
+            endpoint = payload["hosted_endpoint"]
+            return [
+                cls._resource_change(
+                    resource_kind="hosted_endpoint",
+                    resource_id=str(endpoint.get("endpoint_id", "")),
+                    change_kind="upsert",
+                    source_operation_id=operation_id,
+                    changed_fields=["public_handle", "transport", "location", "visibility", "lease_expires_at"],
+                )
+            ]
+        if receipt.action == "publish_service" and isinstance(payload.get("service_address"), dict):
+            service = payload["service_address"]
+            return [
+                cls._resource_change(
+                    resource_kind="service_address",
+                    resource_id=str(service.get("service_id", "")),
+                    change_kind="upsert",
+                    source_operation_id=operation_id,
+                    changed_fields=["public_handle", "transport", "location", "visibility", "required_scopes", "lease_expires_at"],
+                )
+            ]
+        if receipt.action == "publish_route" and isinstance(payload.get("route"), dict):
+            route = payload["route"]
+            return [
+                cls._resource_change(
+                    resource_kind="route",
+                    resource_id=str(route.get("route_id", "")),
+                    change_kind="upsert",
+                    source_operation_id=operation_id,
+                    changed_fields=["destination_prefix", "target_city_id", "next_hop_city_id", "metric", "nadi_type", "priority", "lease_expires_at"],
+                )
+            ]
+        if receipt.action in {"release_space_claim", "expire_space_claim"} and isinstance(payload.get("space_claim"), dict):
+            claim = payload["space_claim"]
+            return [
+                cls._resource_change(
+                    resource_kind="space_claim",
+                    resource_id=str(claim.get("claim_id", "")),
+                    change_kind="transition",
+                    source_operation_id=operation_id,
+                    changed_fields=["status", "released_at" if receipt.action == "release_space_claim" else "expires_at"],
+                    new_status=str(claim.get("status", "")) or None,
+                )
+            ]
+        if receipt.action in {"release_slot_lease", "expire_slot_lease"} and isinstance(payload.get("slot_lease"), dict):
+            lease = payload["slot_lease"]
+            return [
+                cls._resource_change(
+                    resource_kind="slot_lease",
+                    resource_id=str(lease.get("lease_id", "")),
+                    change_kind="transition",
+                    source_operation_id=operation_id,
+                    changed_fields=["status", "released_at" if receipt.action == "release_slot_lease" else "expires_at"],
+                    new_status=str(lease.get("status", "")) or None,
+                )
+            ]
+        if receipt.action == "sweep_expired_grants" and isinstance(payload.get("grant_sweep"), dict):
+            sweep = payload["grant_sweep"]
+            changes: list[dict[str, object]] = []
+            for claim_id in sweep.get("expired_space_claim_ids", ()):
+                changes.append(
+                    cls._resource_change(
+                        resource_kind="space_claim",
+                        resource_id=str(claim_id),
+                        change_kind="expire",
+                        source_operation_id=operation_id,
+                        changed_fields=["status", "expires_at"],
+                        new_status=ClaimStatus.EXPIRED.value,
+                    )
+                )
+            for lease_id in sweep.get("expired_slot_lease_ids", ()):
+                changes.append(
+                    cls._resource_change(
+                        resource_kind="slot_lease",
+                        resource_id=str(lease_id),
+                        change_kind="expire",
+                        source_operation_id=operation_id,
+                        changed_fields=["status", "expires_at"],
+                        new_status=LeaseStatus.EXPIRED.value,
+                    )
+                )
+            return changes
+        return []
+
+    @staticmethod
     def _operation_feed_item(receipt: OperationReceiptRecord) -> dict[str, object]:
         return {
             "operation_id": receipt.operation_id,
@@ -986,6 +1108,7 @@ class LotusControlPlaneAPI:
             "last_replayed_at": receipt.last_replayed_at,
             "replay_count": receipt.replay_count,
             "response_payload_keys": sorted(receipt.response_payload.keys()),
+            "resource_changes": LotusControlPlaneAPI._operation_resource_changes(receipt),
             "receipt_lotus_action": "show_operation_receipt",
             "receipt_http_path": f"/v1/lotus/operations/{receipt.operation_id}",
         }
