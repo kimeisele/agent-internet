@@ -409,6 +409,8 @@ def test_lotus_daemon_lists_operation_feed_with_cursor_and_structured_cursor_err
         status, page1 = _request_json(daemon.base_url, "/v1/lotus/operations?limit=1", token=operator_secret)
         assert status == 200
         assert [item["operation_id"] for item in page1["operation_feed"]["items"]] == [first["receipt"]["operation_id"]]
+        assert page1["operation_feed"]["items"][0]["resource_changes"][0]["resource_kind"] == "intent"
+        assert page1["operation_feed"]["items"][0]["resource_changes"][0]["resource_id"] == "intent:daemon-1"
         assert page1["operation_feed"]["page"]["has_more"] is True
 
         status2, page2 = _request_json(
