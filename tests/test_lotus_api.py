@@ -149,6 +149,8 @@ def test_lotus_api_describes_capabilities_manifest():
 
     payload = manifest["lotus_capabilities"]
     assert payload["kind"] == "lotus_capability_manifest"
+    assert payload["federation_surface"]["surface_role"] == "operator_control_plane"
+    assert payload["federation_surface"]["canonical_for_public_federation"] is False
     assert payload["discovery"]["manifest_http_path"] == "https://lotus.example/v1/lotus/capabilities"
     assert payload["recoverability"]["manual_sweep_action"] == "sweep_expired_grants"
     assert "create_intent" in payload["recoverability"]["request_id_supported_actions"]
@@ -434,6 +436,8 @@ def test_lotus_api_returns_agent_web_manifest(tmp_path):
         params={"root": str(repo_root)},
     )
 
+    assert response["agent_web_manifest"]["federation_surface"]["surface_role"] == "canonical_public_membrane"
+    assert response["agent_web_manifest"]["federation_surface"]["canonical_for_public_federation"] is True
     assert response["agent_web_manifest"]["identity"]["city_id"] == "city-http"
     assert response["agent_web_manifest"]["campaigns"][0]["title"] == "Internet adaptation"
     assert response["agent_web_manifest"]["entrypoints"]["default"]["document_id"] == "agent_web"
@@ -442,11 +446,9 @@ def test_lotus_api_returns_agent_web_manifest(tmp_path):
     assert response["agent_web_manifest"]["entrypoints"]["semantic_contracts"]["document_id"] == "semantic_contracts"
     assert response["agent_web_manifest"]["entrypoints"]["repo_graph_capabilities"]["document_id"] == "repo_graph_capabilities"
     assert response["agent_web_manifest"]["entrypoints"]["repo_graph_contracts"]["document_id"] == "repo_graph_contracts"
-    assert response["agent_web_manifest"]["entrypoints"]["steward_authority"]["document_id"] == "steward_authority"
     assert any(document["document_id"] == "search_index" for document in response["agent_web_manifest"]["documents"])
     assert any(document["document_id"] == "repo_graph_capabilities" for document in response["agent_web_manifest"]["documents"])
     assert any(document["document_id"] == "assistant_surface" for document in response["agent_web_manifest"]["documents"])
-    assert any(document["document_id"] == "steward_authority" for document in response["agent_web_manifest"]["documents"])
     assert any(link["rel"] == "assistant_surface" for link in response["agent_web_manifest"]["links"])
 
     semantic = api.call(
@@ -454,7 +456,17 @@ def test_lotus_api_returns_agent_web_manifest(tmp_path):
         action="agent_web_semantic_capabilities",
         params={"base_url": "https://agent.example"},
     )
+    assert semantic["agent_web_semantic_capabilities"]["federation_surface"]["surface_role"] == "canonical_public_read_surface"
+    assert semantic["agent_web_semantic_capabilities"]["federation_surface"]["canonical_for_public_federation"] is True
     assert semantic["agent_web_semantic_capabilities"]["capabilities"][0]["http"]["href"].startswith("https://agent.example/")
+
+    contracts = api.call(
+        bearer_token=issued.secret,
+        action="agent_web_semantic_contracts",
+        params={"base_url": "https://agent.example"},
+    )
+    assert contracts["agent_web_semantic_contracts"]["federation_surface"]["surface_role"] == "canonical_public_read_contracts"
+    assert any(item["contract_id"] == "semantic_expand.v1" for item in contracts["agent_web_semantic_contracts"]["descriptors"])
 
     contracts = api.call(
         bearer_token=issued.secret,
@@ -499,7 +511,12 @@ def test_lotus_api_returns_repo_graph_surfaces(monkeypatch, tmp_path):
     )
 
     response = api.call(bearer_token=issued.secret, action="agent_web_repo_graph_capabilities", params={"base_url": "https://agent.example"})
+    assert response["agent_web_repo_graph_capabilities"]["federation_surface"]["surface_role"] == "canonical_public_read_surface"
     assert response["agent_web_repo_graph_capabilities"]["capabilities"][0]["capability_id"] == "repo_graph_snapshot"
+
+    response = api.call(bearer_token=issued.secret, action="agent_web_repo_graph_contracts", params={"base_url": "https://agent.example"})
+    assert response["agent_web_repo_graph_contracts"]["federation_surface"]["surface_role"] == "canonical_public_read_contracts"
+    assert any(item["contract_id"] == "repo_graph_neighbors.v1" for item in response["agent_web_repo_graph_contracts"]["descriptors"])
 
     response = api.call(bearer_token=issued.secret, action="agent_web_repo_graph_contracts", params={"contract_id": "repo_graph_neighbors.v1"})
     assert response["agent_web_repo_graph_contracts"]["capability_id"] == "repo_graph_neighbors"

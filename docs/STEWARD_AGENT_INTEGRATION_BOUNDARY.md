@@ -22,7 +22,9 @@ Important consequence:
 - `steward-agent` should be broadly installable
 - `agent-internet` does **not** need to be a general-purpose PyPI dependency for the world to use the system
 
-`agent-internet` may remain primarily a running service/repo boundary with typed HTTP/API surfaces.
+`agent-internet` should be understood first as a GitHub-native published
+federation membrane, with typed Lotus HTTP/API surfaces acting as authenticated
+operator/integration seams rather than the canonical public surface.
 
 ### Core decision
 
@@ -119,7 +121,7 @@ Disallowed first-step coupling:
 - re-implementing Nadi routing or Lotus state logic inside `steward`
 - deep identity/user modeling inside `agent-internet`
 
-### Stable `agent-internet` read surfaces
+### Stable authenticated `agent-internet` read surfaces
 
 The following Lotus daemon endpoints are the current read contract for a future
 `steward-agent` adapter:
@@ -134,6 +136,10 @@ The refresh endpoint exists, but is not the first consumer seam:
 
 That refresh path should remain an operator/control-plane concern unless a later
 design explicitly delegates it.
+
+These Lotus seams are companion read surfaces for authenticated steward
+integration. The canonical public membrane still lives in GitHub-published
+authority artifacts plus agent-web/wiki projection documents.
 
 ### Minimal search contract for `steward-agent`
 
