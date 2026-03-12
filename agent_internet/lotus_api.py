@@ -197,9 +197,11 @@ class LotusControlPlaneAPI:
         effect_kind: str,
         idempotency: dict[str, object],
         blockers: list[str] | None = None,
+        typed_blockers: list[dict[str, object]] | None = None,
         preview: dict[str, object] | None = None,
     ) -> dict[str, object]:
         blocker_list = list(blockers or ())
+        typed_blocker_list = [dict(item) for item in (typed_blockers or ())]
         preview_payload = dict(preview or {})
         return {
             "kind": "lotus_mutation_preflight",
@@ -208,12 +210,14 @@ class LotusControlPlaneAPI:
             "would_apply": would_apply,
             "effect_kind": effect_kind,
             "blockers": blocker_list,
+            "typed_blockers": typed_blocker_list,
             "idempotency": dict(idempotency),
             "preview": preview_payload,
             "remediation_hints": self._preflight_remediation_hints(
                 action=action,
                 effect_kind=effect_kind,
                 blockers=blocker_list,
+                typed_blockers=typed_blocker_list,
                 idempotency=dict(idempotency),
                 preview=preview_payload,
             ),
@@ -242,12 +246,22 @@ class LotusControlPlaneAPI:
             hint["suggested_change"] = dict(suggested_change)
         return hint
 
+    @staticmethod
+    def _typed_blocker(*, blocker_code: str, summary: str, **context: object) -> dict[str, object]:
+        blocker = {
+            "blocker_code": blocker_code,
+            "summary": summary,
+            "context": dict(context),
+        }
+        return blocker
+
     def _preflight_remediation_hints(
         self,
         *,
         action: str,
         effect_kind: str,
         blockers: list[str],
+        typed_blockers: list[dict[str, object]],
         idempotency: dict[str, object],
         preview: dict[str, object],
     ) -> list[dict[str, object]]:
@@ -280,8 +294,11 @@ class LotusControlPlaneAPI:
                     http_path="/v1/lotus/state",
                 )
             )
-        for blocker in blockers:
-            if blocker.startswith("idempotency_conflict:"):
+        blocker_details = typed_blockers or [self._typed_blocker(blocker_code=blocker.split(":", 1)[0], summary=blocker) for blocker in blockers]
+        for blocker in blocker_details:
+            blocker_code = str(blocker.get("blocker_code", ""))
+            context = dict(blocker.get("context", {}))
+            if blocker_code == "idempotency_conflict":
                 hints.append(
                     self._remediation_hint(
                         hint_code="inspect_conflicting_receipt",
@@ -299,29 +316,31 @@ class LotusControlPlaneAPI:
                     )
                 )
                 continue
-            if blocker.startswith("unknown_space_claim:"):
+            if blocker_code == "unknown_space_claim":
                 hints.append(
                     self._remediation_hint(
                         hint_code="refresh_space_claim_inventory",
                         summary="The referenced claim_id was not found. Refresh the claims inventory before retrying the lifecycle transition.",
                         lotus_action="list_space_claims",
                         http_path="/v1/lotus/space-claims",
+                        params={"claim_id": context.get("resource_id", "")},
                     )
                 )
                 continue
-            if blocker.startswith("unknown_slot_lease:"):
+            if blocker_code == "unknown_slot_lease":
                 hints.append(
                     self._remediation_hint(
                         hint_code="refresh_slot_lease_inventory",
                         summary="The referenced lease_id was not found. Refresh the slot-lease inventory before retrying the lifecycle transition.",
                         lotus_action="list_slot_leases",
                         http_path="/v1/lotus/slot-leases",
+                        params={"lease_id": context.get("resource_id", "")},
                     )
                 )
                 continue
-            if blocker.startswith("invalid_space_claim_transition:"):
-                current_status = str(preview.get("current_status", ""))
-                target_status = str(preview.get("target_status", ""))
+            if blocker_code == "invalid_space_claim_transition":
+                current_status = str(context.get("current_status", preview.get("current_status", "")))
+                target_status = str(context.get("target_status", preview.get("target_status", "")))
                 hints.append(
                     self._remediation_hint(
                         hint_code=("skip_duplicate_transition" if current_status == target_status else "inspect_space_claim_status"),
@@ -332,13 +351,13 @@ class LotusControlPlaneAPI:
                         ),
                         lotus_action="list_space_claims",
                         http_path="/v1/lotus/space-claims",
-                        params={"claim_id": preview.get("claim_id", "")},
+                        params={"claim_id": context.get("resource_id", preview.get("claim_id", ""))},
                     )
                 )
                 continue
-            if blocker.startswith("invalid_slot_lease_transition:"):
-                current_status = str(preview.get("current_status", ""))
-                target_status = str(preview.get("target_status", ""))
+            if blocker_code == "invalid_slot_lease_transition":
+                current_status = str(context.get("current_status", preview.get("current_status", "")))
+                target_status = str(context.get("target_status", preview.get("target_status", "")))
                 hints.append(
                     self._remediation_hint(
                         hint_code=("skip_duplicate_transition" if current_status == target_status else "inspect_slot_lease_status"),
@@ -349,11 +368,11 @@ class LotusControlPlaneAPI:
                         ),
                         lotus_action="list_slot_leases",
                         http_path="/v1/lotus/slot-leases",
-                        params={"lease_id": preview.get("lease_id", "")},
+                        params={"lease_id": context.get("resource_id", preview.get("lease_id", ""))},
                     )
                 )
                 continue
-            if blocker.startswith("invalid_nadi_type:") or blocker.startswith("invalid_priority:"):
+            if blocker_code in {"invalid_nadi_type", "invalid_priority"}:
                 hints.append(
                     self._remediation_hint(
                         hint_code="read_steward_protocol_bindings",
@@ -364,13 +383,27 @@ class LotusControlPlaneAPI:
                 )
         return hints
 
-    def _preflight_blocked(self, *, action: str, blocker: str, idempotency: dict[str, object] | None = None, preview: dict[str, object] | None = None) -> dict[str, object]:
+    def _preflight_blocked(
+        self,
+        *,
+        action: str,
+        blocker: str | None = None,
+        blockers: list[str] | None = None,
+        typed_blockers: list[dict[str, object]] | None = None,
+        idempotency: dict[str, object] | None = None,
+        preview: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        blocker_list = list(blockers or ())
+        if blocker is not None:
+            blocker_list.append(blocker)
+        typed_blocker_list = [dict(item) for item in (typed_blockers or ())]
         return self._preflight_result(
             action=action,
             ok=False,
             would_apply=False,
-            effect_kind=("conflict" if blocker.startswith("idempotency_conflict:") else "blocked"),
-            blockers=[blocker],
+            effect_kind=("conflict" if any(item.get("blocker_code") == "idempotency_conflict" for item in typed_blocker_list) or any(item.startswith("idempotency_conflict:") for item in blocker_list) else "blocked"),
+            blockers=blocker_list,
+            typed_blockers=typed_blocker_list,
             idempotency=(idempotency or {"mode": "absent", "request_id": ""}),
             preview=preview,
         )
@@ -417,7 +450,23 @@ class LotusControlPlaneAPI:
             requested_by_subject_id = delegated_subject
         idempotency = self._preflight_idempotency(action="create_intent", token=token, payload=payload)
         if idempotency["mode"] == "conflict":
-            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action="create_intent", blocker=str(idempotency["error"]), idempotency=idempotency)}
+            return {
+                "token_id": token.token_id,
+                "preflight": self._preflight_blocked(
+                    action="create_intent",
+                    blocker=str(idempotency["error"]),
+                    typed_blockers=[
+                        self._typed_blocker(
+                            blocker_code="idempotency_conflict",
+                            summary="This request_id is already bound to a different create_intent payload.",
+                            request_id=idempotency.get("request_id", ""),
+                            operation_id=idempotency.get("operation_id", ""),
+                            target_action="create_intent",
+                        )
+                    ],
+                    idempotency=idempotency,
+                ),
+            }
         if idempotency["mode"] == "replay":
             return {"token_id": token.token_id, "preflight": self._preflight_result(action="create_intent", ok=True, would_apply=False, effect_kind="replay", idempotency=idempotency, preview={"operation_id": idempotency["operation_id"]})}
         created_at = float(time.time() if payload.get("now") is None else payload["now"])
@@ -462,7 +511,23 @@ class LotusControlPlaneAPI:
         token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.ENDPOINT_WRITE.value,))
         idempotency = self._preflight_idempotency(action="publish_endpoint", token=token, payload=payload)
         if idempotency["mode"] == "conflict":
-            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action="publish_endpoint", blocker=str(idempotency["error"]), idempotency=idempotency)}
+            return {
+                "token_id": token.token_id,
+                "preflight": self._preflight_blocked(
+                    action="publish_endpoint",
+                    blocker=str(idempotency["error"]),
+                    typed_blockers=[
+                        self._typed_blocker(
+                            blocker_code="idempotency_conflict",
+                            summary="This request_id is already bound to a different publish_endpoint payload.",
+                            request_id=idempotency.get("request_id", ""),
+                            operation_id=idempotency.get("operation_id", ""),
+                            target_action="publish_endpoint",
+                        )
+                    ],
+                    idempotency=idempotency,
+                ),
+            }
         if idempotency["mode"] == "replay":
             return {"token_id": token.token_id, "preflight": self._preflight_result(action="publish_endpoint", ok=True, would_apply=False, effect_kind="replay", idempotency=idempotency, preview={"operation_id": idempotency["operation_id"]})}
         endpoint_id = str(payload.get("endpoint_id") or f"{payload['city_id']}:{payload['public_handle']}")
@@ -500,7 +565,23 @@ class LotusControlPlaneAPI:
         token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.SERVICE_WRITE.value,))
         idempotency = self._preflight_idempotency(action="publish_service", token=token, payload=payload)
         if idempotency["mode"] == "conflict":
-            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action="publish_service", blocker=str(idempotency["error"]), idempotency=idempotency)}
+            return {
+                "token_id": token.token_id,
+                "preflight": self._preflight_blocked(
+                    action="publish_service",
+                    blocker=str(idempotency["error"]),
+                    typed_blockers=[
+                        self._typed_blocker(
+                            blocker_code="idempotency_conflict",
+                            summary="This request_id is already bound to a different publish_service payload.",
+                            request_id=idempotency.get("request_id", ""),
+                            operation_id=idempotency.get("operation_id", ""),
+                            target_action="publish_service",
+                        )
+                    ],
+                    idempotency=idempotency,
+                ),
+            }
         if idempotency["mode"] == "replay":
             return {"token_id": token.token_id, "preflight": self._preflight_result(action="publish_service", ok=True, would_apply=False, effect_kind="replay", idempotency=idempotency, preview={"operation_id": idempotency["operation_id"]})}
         service_id = str(payload.get("service_id") or f"{payload['city_id']}:{payload['service_name']}")
@@ -542,17 +623,52 @@ class LotusControlPlaneAPI:
         token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.SERVICE_WRITE.value,))
         idempotency = self._preflight_idempotency(action="publish_route", token=token, payload=payload)
         if idempotency["mode"] == "conflict":
-            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action="publish_route", blocker=str(idempotency["error"]), idempotency=idempotency)}
+            return {
+                "token_id": token.token_id,
+                "preflight": self._preflight_blocked(
+                    action="publish_route",
+                    blocker=str(idempotency["error"]),
+                    typed_blockers=[
+                        self._typed_blocker(
+                            blocker_code="idempotency_conflict",
+                            summary="This request_id is already bound to a different publish_route payload.",
+                            request_id=idempotency.get("request_id", ""),
+                            operation_id=idempotency.get("operation_id", ""),
+                            target_action="publish_route",
+                        )
+                    ],
+                    idempotency=idempotency,
+                ),
+            }
         if idempotency["mode"] == "replay":
             return {"token_id": token.token_id, "preflight": self._preflight_result(action="publish_route", ok=True, would_apply=False, effect_kind="replay", idempotency=idempotency, preview={"operation_id": idempotency["operation_id"]})}
         bindings = load_steward_protocol_bindings()
         selected_nadi_type = str(payload.get("nadi_type", "") or bindings.default_route_nadi_type)
         selected_priority = str(payload.get("nadi_priority", payload.get("priority", "")) or bindings.default_route_priority)
         blockers: list[str] = []
+        typed_blockers: list[dict[str, object]] = []
         if selected_nadi_type not in bindings.allowed_nadi_types:
             blockers.append(f"invalid_nadi_type:{selected_nadi_type}")
+            typed_blockers.append(
+                self._typed_blocker(
+                    blocker_code="invalid_nadi_type",
+                    summary="The proposed route nadi type is not allowed by the steward protocol bindings.",
+                    field="nadi_type",
+                    value=selected_nadi_type,
+                    allowed_values=list(bindings.allowed_nadi_types),
+                )
+            )
         if selected_priority not in bindings.allowed_priorities:
             blockers.append(f"invalid_priority:{selected_priority}")
+            typed_blockers.append(
+                self._typed_blocker(
+                    blocker_code="invalid_priority",
+                    summary="The proposed route priority is not allowed by the steward protocol bindings.",
+                    field="priority",
+                    value=selected_priority,
+                    allowed_values=list(bindings.allowed_priorities),
+                )
+            )
         route_id = str(payload.get("route_id") or f"{payload['owner_city_id']}:{payload['destination_prefix']}")
         preview = {
             "route": {
@@ -568,7 +684,16 @@ class LotusControlPlaneAPI:
             },
         }
         if blockers:
-            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action="publish_route", blocker=blockers[0], idempotency=idempotency, preview=preview)}
+            return {
+                "token_id": token.token_id,
+                "preflight": self._preflight_blocked(
+                    action="publish_route",
+                    blockers=blockers,
+                    typed_blockers=typed_blockers,
+                    idempotency=idempotency,
+                    preview=preview,
+                ),
+            }
         existing = self.plane.registry.get_route(route_id)
         effect_kind = "create"
         would_apply = True
@@ -591,39 +716,161 @@ class LotusControlPlaneAPI:
         token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.CONTRACT_WRITE.value,))
         idempotency = self._preflight_idempotency(action=action, token=token, payload=payload)
         if idempotency["mode"] == "conflict":
-            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action=action, blocker=str(idempotency["error"]), idempotency=idempotency)}
+            return {
+                "token_id": token.token_id,
+                "preflight": self._preflight_blocked(
+                    action=action,
+                    blocker=str(idempotency["error"]),
+                    typed_blockers=[
+                        self._typed_blocker(
+                            blocker_code="idempotency_conflict",
+                            summary="This request_id is already bound to a different space-claim lifecycle payload.",
+                            request_id=idempotency.get("request_id", ""),
+                            operation_id=idempotency.get("operation_id", ""),
+                            target_action=action,
+                        )
+                    ],
+                    idempotency=idempotency,
+                ),
+            }
         if idempotency["mode"] == "replay":
             return {"token_id": token.token_id, "preflight": self._preflight_result(action=action, ok=True, would_apply=False, effect_kind="replay", idempotency=idempotency, preview={"operation_id": idempotency["operation_id"]})}
         claim = self.plane.registry.get_space_claim(str(payload["claim_id"]))
         preview = {"claim_id": str(payload["claim_id"]), "target_status": status.value}
         if claim is None:
-            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action=action, blocker=f"unknown_space_claim:{payload['claim_id']}", idempotency=idempotency, preview=preview)}
+            return {
+                "token_id": token.token_id,
+                "preflight": self._preflight_blocked(
+                    action=action,
+                    blocker=f"unknown_space_claim:{payload['claim_id']}",
+                    typed_blockers=[
+                        self._typed_blocker(
+                            blocker_code="unknown_space_claim",
+                            summary="The referenced space claim does not exist in the current registry snapshot.",
+                            resource_kind="space_claim",
+                            resource_id=str(payload["claim_id"]),
+                            target_action=action,
+                        )
+                    ],
+                    idempotency=idempotency,
+                    preview=preview,
+                ),
+            }
         allowed = status in {ClaimStatus.RELEASED, ClaimStatus.EXPIRED} and claim.status == ClaimStatus.GRANTED
         if not allowed:
-            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action=action, blocker=f"invalid_space_claim_transition:{claim.status.value}->{status.value}", idempotency=idempotency, preview={**preview, "current_status": claim.status.value})}
+            return {
+                "token_id": token.token_id,
+                "preflight": self._preflight_blocked(
+                    action=action,
+                    blocker=f"invalid_space_claim_transition:{claim.status.value}->{status.value}",
+                    typed_blockers=[
+                        self._typed_blocker(
+                            blocker_code="invalid_space_claim_transition",
+                            summary="The space claim is not currently in a transitionable status for this lifecycle action.",
+                            resource_kind="space_claim",
+                            resource_id=claim.claim_id,
+                            current_status=claim.status.value,
+                            target_status=status.value,
+                            allowed_from_statuses=[ClaimStatus.GRANTED.value],
+                            target_action=action,
+                        )
+                    ],
+                    idempotency=idempotency,
+                    preview={**preview, "current_status": claim.status.value},
+                ),
+            }
         return {"token_id": token.token_id, "preflight": self._preflight_result(action=action, ok=True, would_apply=True, effect_kind="transition", idempotency=idempotency, preview={**preview, "current_status": claim.status.value})}
 
     def _preflight_slot_lease_transition(self, *, action: str, bearer_token: str, payload: dict, status: LeaseStatus) -> dict:
         token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.CONTRACT_WRITE.value,))
         idempotency = self._preflight_idempotency(action=action, token=token, payload=payload)
         if idempotency["mode"] == "conflict":
-            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action=action, blocker=str(idempotency["error"]), idempotency=idempotency)}
+            return {
+                "token_id": token.token_id,
+                "preflight": self._preflight_blocked(
+                    action=action,
+                    blocker=str(idempotency["error"]),
+                    typed_blockers=[
+                        self._typed_blocker(
+                            blocker_code="idempotency_conflict",
+                            summary="This request_id is already bound to a different slot-lease lifecycle payload.",
+                            request_id=idempotency.get("request_id", ""),
+                            operation_id=idempotency.get("operation_id", ""),
+                            target_action=action,
+                        )
+                    ],
+                    idempotency=idempotency,
+                ),
+            }
         if idempotency["mode"] == "replay":
             return {"token_id": token.token_id, "preflight": self._preflight_result(action=action, ok=True, would_apply=False, effect_kind="replay", idempotency=idempotency, preview={"operation_id": idempotency["operation_id"]})}
         lease = self.plane.registry.get_slot_lease(str(payload["lease_id"]))
         preview = {"lease_id": str(payload["lease_id"]), "target_status": status.value}
         if lease is None:
-            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action=action, blocker=f"unknown_slot_lease:{payload['lease_id']}", idempotency=idempotency, preview=preview)}
+            return {
+                "token_id": token.token_id,
+                "preflight": self._preflight_blocked(
+                    action=action,
+                    blocker=f"unknown_slot_lease:{payload['lease_id']}",
+                    typed_blockers=[
+                        self._typed_blocker(
+                            blocker_code="unknown_slot_lease",
+                            summary="The referenced slot lease does not exist in the current registry snapshot.",
+                            resource_kind="slot_lease",
+                            resource_id=str(payload["lease_id"]),
+                            target_action=action,
+                        )
+                    ],
+                    idempotency=idempotency,
+                    preview=preview,
+                ),
+            }
         allowed = status in {LeaseStatus.RELEASED, LeaseStatus.EXPIRED} and lease.status == LeaseStatus.ACTIVE
         if not allowed:
-            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action=action, blocker=f"invalid_slot_lease_transition:{lease.status.value}->{status.value}", idempotency=idempotency, preview={**preview, "current_status": lease.status.value})}
+            return {
+                "token_id": token.token_id,
+                "preflight": self._preflight_blocked(
+                    action=action,
+                    blocker=f"invalid_slot_lease_transition:{lease.status.value}->{status.value}",
+                    typed_blockers=[
+                        self._typed_blocker(
+                            blocker_code="invalid_slot_lease_transition",
+                            summary="The slot lease is not currently in a transitionable status for this lifecycle action.",
+                            resource_kind="slot_lease",
+                            resource_id=lease.lease_id,
+                            current_status=lease.status.value,
+                            target_status=status.value,
+                            allowed_from_statuses=[LeaseStatus.ACTIVE.value],
+                            target_action=action,
+                        )
+                    ],
+                    idempotency=idempotency,
+                    preview={**preview, "current_status": lease.status.value},
+                ),
+            }
         return {"token_id": token.token_id, "preflight": self._preflight_result(action=action, ok=True, would_apply=True, effect_kind="transition", idempotency=idempotency, preview={**preview, "current_status": lease.status.value})}
 
     def _preflight_sweep_expired_grants(self, *, bearer_token: str, payload: dict) -> dict:
         token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.CONTRACT_WRITE.value,))
         idempotency = self._preflight_idempotency(action="sweep_expired_grants", token=token, payload=payload)
         if idempotency["mode"] == "conflict":
-            return {"token_id": token.token_id, "preflight": self._preflight_blocked(action="sweep_expired_grants", blocker=str(idempotency["error"]), idempotency=idempotency)}
+            return {
+                "token_id": token.token_id,
+                "preflight": self._preflight_blocked(
+                    action="sweep_expired_grants",
+                    blocker=str(idempotency["error"]),
+                    typed_blockers=[
+                        self._typed_blocker(
+                            blocker_code="idempotency_conflict",
+                            summary="This request_id is already bound to a different expired-grant sweep payload.",
+                            request_id=idempotency.get("request_id", ""),
+                            operation_id=idempotency.get("operation_id", ""),
+                            target_action="sweep_expired_grants",
+                        )
+                    ],
+                    idempotency=idempotency,
+                ),
+            }
         if idempotency["mode"] == "replay":
             return {"token_id": token.token_id, "preflight": self._preflight_result(action="sweep_expired_grants", ok=True, would_apply=False, effect_kind="replay", idempotency=idempotency, preview={"operation_id": idempotency["operation_id"]})}
         checked_at = float(time.time() if payload.get("now") is None else payload["now"])

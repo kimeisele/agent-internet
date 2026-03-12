@@ -41,7 +41,8 @@ def build_lotus_capability_manifest(*, base_url: str | None = None) -> dict:
             "state_http_path": _href(root, "/v1/lotus/state"),
             "operation_receipt_http_paths": [_href(root, "/v1/lotus/operations/{operation_id}"), _href(root, "/v1/lotus/operations/by-request?action=...&request_id=...")],
             "preflight_http_path": _href(root, "/v1/lotus/preflight"),
-            "preflight_response_fields": ["kind", "target_action", "ok", "would_apply", "effect_kind", "blockers", "idempotency", "preview", "remediation_hints"],
+            "preflight_response_fields": ["kind", "target_action", "ok", "would_apply", "effect_kind", "blockers", "typed_blockers", "idempotency", "preview", "remediation_hints"],
+            "preflight_typed_blocker_fields": ["blocker_code", "summary", "context"],
             "preflight_remediation_hint_fields": ["hint_code", "summary", "lotus_action?", "http_path?", "params", "suggested_change?"],
         },
         "recoverability": {
