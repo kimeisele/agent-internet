@@ -596,6 +596,15 @@ class SqliteCityRegistry:
             ),
         )
 
+    def get_operation_receipt_by_id(self, operation_id: str) -> OperationReceiptRecord | None:
+        row = self._execute_read_one(
+            "SELECT * FROM operation_receipts WHERE operation_id = ?",
+            (operation_id,),
+        )
+        if row is None:
+            return None
+        return self._row_to_operation_receipt(row)
+
     def get_operation_receipt(self, *, action: str, operator_subject: str, request_id: str) -> OperationReceiptRecord | None:
         row = self._execute_read_one(
             "SELECT * FROM operation_receipts WHERE action = ? AND operator_subject = ? AND request_id = ?",

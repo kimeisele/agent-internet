@@ -6,6 +6,7 @@ def build_lotus_capability_manifest(*, base_url: str | None = None) -> dict:
     capabilities = [
         _capability("control_plane_state", "Read the full persisted control-plane snapshot.", "GET", "/v1/lotus/state", "show_state", ["lotus.read"], "read_only", []),
         _capability("steward_protocol", "Read the steward-protocol-compatible summary of authority and routing bindings.", "GET", "/v1/lotus/steward-protocol", "show_steward_protocol", ["lotus.read"], "read_only", []),
+        _capability("operation_receipts", "Read a persisted mutation receipt by operation id or by action plus request id for replay-safe orchestration recovery.", "GET", "/v1/lotus/operations/{operation_id}", "show_operation_receipt", ["lotus.read"], "read_only_lookup", ["operation_id | (action + request_id)"]),
         _capability("commons_inventory", "List spaces, slots, claims, and leases from the typed commons model.", "GET", "/v1/lotus/space-claims", "list_space_claims", ["lotus.read"], "read_only", []),
         _capability("intent_workflow", "Create intents with optional request-id replay protection for AI-safe retries.", "POST", "/v1/lotus/intents", "create_intent", ["lotus.write.intent"], "request_id_replay_safe", ["request_id?", "intent_id", "intent_type", "title"]),
         _capability("claim_lifecycle", "Release or expire granted claims through typed lifecycle transitions with optional request-id replay protection.", "POST", "/v1/lotus/space-claims/{claim_id}/release", "release_space_claim", ["lotus.write.contract"], "request_id_replay_safe", ["request_id?", "claim_id", "now?"]),
@@ -37,6 +38,7 @@ def build_lotus_capability_manifest(*, base_url: str | None = None) -> dict:
             "http_error_envelope_fields": ["error", "error_code", "error_kind", "recoverable", "retryable", "context"],
             "health_http_path": _href(root, "/healthz"),
             "state_http_path": _href(root, "/v1/lotus/state"),
+            "operation_receipt_http_paths": [_href(root, "/v1/lotus/operations/{operation_id}"), _href(root, "/v1/lotus/operations/by-request?action=...&request_id=...")],
         },
         "recoverability": {
             "manual_sweep_action": "sweep_expired_grants",

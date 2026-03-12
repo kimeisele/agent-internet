@@ -176,6 +176,17 @@ class LotusApiDaemon:
                 return 200, self._call(token, "show_steward_protocol", {})
             if method == "GET" and path == "/v1/lotus/capabilities":
                 return 200, self._call(token, "lotus_capabilities", {"base_url": self.base_url})
+            if method == "GET" and path == "/v1/lotus/operations/by-request":
+                return 200, self._call(
+                    token,
+                    "show_operation_receipt",
+                    {"action": _require_query_param(query, "action"), "request_id": _require_query_param(query, "request_id")},
+                )
+            if method == "GET" and path.startswith("/v1/lotus/operations/"):
+                suffix = path.removeprefix("/v1/lotus/operations/")
+                if not suffix or "/" in suffix:
+                    return 404, _error_payload("not_found", error_kind="routing", recoverable=True, retryable=False, context={"path": path})
+                return 200, self._call(token, "show_operation_receipt", {"operation_id": unquote(suffix)})
             if method == "GET" and path == "/v1/lotus/spaces":
                 return 200, self._call(token, "list_spaces", {})
             if method == "GET" and path == "/v1/lotus/slots":

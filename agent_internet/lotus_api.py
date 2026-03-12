@@ -153,6 +153,27 @@ class LotusControlPlaneAPI:
             "replay_count": receipt.replay_count,
         }
 
+    def _show_operation_receipt(self, *, bearer_token: str, payload: dict) -> dict:
+        token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+        operation_id = str(payload.get("operation_id", "")).strip()
+        if operation_id:
+            receipt = self.plane.registry.get_operation_receipt_by_id(operation_id)
+            if receipt is None:
+                raise ValueError(f"unknown_operation_receipt:{operation_id}")
+            return {"token_id": token.token_id, "operation_receipt": asdict(receipt)}
+        action = str(payload.get("action", "")).strip()
+        request_id = self._request_id(payload)
+        if not action or not request_id:
+            raise ValueError("missing_operation_receipt_lookup")
+        receipt = self.plane.registry.get_operation_receipt(
+            action=action,
+            operator_subject=token.subject,
+            request_id=request_id,
+        )
+        if receipt is None:
+            raise ValueError(f"unknown_operation_receipt:{action}:{request_id}")
+        return {"token_id": token.token_id, "operation_receipt": asdict(receipt)}
+
     def _transition_intent(self, *, bearer_token: str, payload: dict, status: IntentStatus) -> dict:
         token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.INTENT_REVIEW.value,))
         updated_at = float(time.time() if payload.get("now") is None else payload["now"])
@@ -250,6 +271,8 @@ class LotusControlPlaneAPI:
         if action == "show_steward_protocol":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "bindings": summarize_steward_protocol_bindings()}
+        if action == "show_operation_receipt":
+            return self._show_operation_receipt(bearer_token=bearer_token, payload=payload)
         if action == "lotus_capabilities":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {

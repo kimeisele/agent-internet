@@ -293,6 +293,9 @@ class InMemoryCityRegistry:
         self._operation_receipts[receipt.operation_id] = receipt
         self._operation_receipt_request_index[(receipt.action, receipt.operator_subject, receipt.request_id)] = receipt.operation_id
 
+    def get_operation_receipt_by_id(self, operation_id: str) -> OperationReceiptRecord | None:
+        return self._operation_receipts.get(operation_id)
+
     def get_operation_receipt(self, *, action: str, operator_subject: str, request_id: str) -> OperationReceiptRecord | None:
         operation_id = self._operation_receipt_request_index.get((action, operator_subject, request_id))
         if operation_id is None:
