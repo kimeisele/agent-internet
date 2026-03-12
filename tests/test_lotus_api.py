@@ -156,6 +156,8 @@ def test_lotus_api_describes_capabilities_manifest():
     assert payload["parseability"]["operation_receipt_http_paths"][0] == "https://lotus.example/v1/lotus/operations/{operation_id}"
     assert payload["parseability"]["preflight_http_path"] == "https://lotus.example/v1/lotus/preflight"
     assert "remediation_hints" in payload["parseability"]["preflight_response_fields"]
+    assert "typed_blockers" in payload["parseability"]["preflight_response_fields"]
+    assert payload["parseability"]["preflight_typed_blocker_fields"] == ["blocker_code", "summary", "context"]
     assert payload["parseability"]["preflight_remediation_hint_fields"][0] == "hint_code"
     assert "publish_service" in payload["recoverability"]["preflight_supported_actions"]
     assert payload["parseability"]["http_error_envelope_fields"] == ["error", "error_code", "error_kind", "recoverable", "retryable", "context"]
@@ -1308,6 +1310,7 @@ def test_lotus_api_preflights_publish_service_and_replay_state():
     assert after["preflight"]["effect_kind"] == "replay"
     assert after["preflight"]["idempotency"]["mode"] == "replay"
     assert after["preflight"]["idempotency"]["operation_id"] == created["receipt"]["operation_id"]
+    assert after["preflight"]["typed_blockers"] == []
     assert after["preflight"]["remediation_hints"][0]["hint_code"] == "read_existing_receipt"
     assert after["preflight"]["remediation_hints"][0]["lotus_action"] == "show_operation_receipt"
 
@@ -1362,12 +1365,52 @@ def test_lotus_api_preflights_claim_transition_blocker_and_sweep_preview():
     assert blocked["preflight"]["ok"] is False
     assert blocked["preflight"]["effect_kind"] == "blocked"
     assert blocked["preflight"]["blockers"] == ["invalid_space_claim_transition:released->released"]
+    assert blocked["preflight"]["typed_blockers"][0]["blocker_code"] == "invalid_space_claim_transition"
+    assert blocked["preflight"]["typed_blockers"][0]["context"]["resource_kind"] == "space_claim"
+    assert blocked["preflight"]["typed_blockers"][0]["context"]["resource_id"] == "claim-1"
+    assert blocked["preflight"]["typed_blockers"][0]["context"]["current_status"] == ClaimStatus.RELEASED.value
+    assert blocked["preflight"]["typed_blockers"][0]["context"]["target_status"] == ClaimStatus.RELEASED.value
     assert blocked["preflight"]["remediation_hints"][0]["hint_code"] == "skip_duplicate_transition"
     assert blocked["preflight"]["remediation_hints"][0]["lotus_action"] == "list_space_claims"
     assert sweep["preflight"]["ok"] is True
     assert sweep["preflight"]["would_apply"] is True
     assert sweep["preflight"]["effect_kind"] == "sweep"
+    assert sweep["preflight"]["typed_blockers"] == []
     assert sweep["preflight"]["preview"]["expired_slot_lease_ids"] == ["lease-overdue"]
+
+
+def test_lotus_api_preflights_route_with_typed_parameter_blockers():
+    plane = AgentInternetControlPlane()
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(
+        subject="operator",
+        scopes=(LotusApiScope.SERVICE_WRITE.value,),
+        token_secret="route-preflight-token",
+        token_id="tok-route-preflight",
+        now=10.0,
+    )
+
+    response = api.call(
+        bearer_token=issued.secret,
+        action="preflight_mutation",
+        params={
+            "target_action": "publish_route",
+            "params": {
+                "owner_city_id": "city-a",
+                "destination_prefix": "lotus://city-b",
+                "target_city_id": "city-b",
+                "next_hop_city_id": "city-c",
+                "nadi_type": "invalid-nadi",
+                "priority": "invalid-priority",
+            },
+        },
+    )
+
+    assert response["preflight"]["ok"] is False
+    assert response["preflight"]["blockers"] == ["invalid_nadi_type:invalid-nadi", "invalid_priority:invalid-priority"]
+    assert [item["blocker_code"] for item in response["preflight"]["typed_blockers"]] == ["invalid_nadi_type", "invalid_priority"]
+    assert response["preflight"]["typed_blockers"][0]["context"]["field"] == "nadi_type"
+    assert "read_steward_protocol_bindings" in [item["hint_code"] for item in response["preflight"]["remediation_hints"]]
 
 
 def test_lotus_api_allows_delegated_intent_subject_with_explicit_scope():
