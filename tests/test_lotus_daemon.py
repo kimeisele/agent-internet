@@ -448,6 +448,77 @@ def test_lotus_daemon_lists_operation_feed_with_cursor_and_structured_cursor_err
         daemon.shutdown()
 
 
+def test_lotus_daemon_lists_resource_change_feed_with_cursor_and_structured_cursor_error(tmp_path):
+    store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
+
+    def _seed_plane(plane):
+        plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-1", source_intent_id="intent-space-1", subject_id="operator-1", space_id="space-1", granted_at=20.0))
+        plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-due", source_intent_id="intent-space-due", subject_id="operator-2", space_id="space-2", status=ClaimStatus.GRANTED, granted_at=21.0, expires_at=40.0))
+        plane.upsert_slot(SlotDescriptor(slot_id="slot-due", space_id="space-2", slot_kind="general", holder_subject_id="operator-2", status=SlotStatus.ACTIVE))
+        plane.upsert_slot_lease(SlotLeaseRecord(lease_id="lease-due", source_intent_id="intent-slot-due", holder_subject_id="operator-2", space_id="space-2", slot_id="slot-due", status=LeaseStatus.ACTIVE, granted_at=22.0, expires_at=40.0))
+        return LotusControlPlaneAPI(plane).issue_token(
+            subject="governor",
+            scopes=(LotusApiScope.READ.value, LotusApiScope.CONTRACT_WRITE.value),
+            token_secret="governor-secret",
+            token_id="tok-governor",
+        ).secret
+
+    operator_secret = store.update(_seed_plane)
+    daemon = LotusApiDaemon(state_path=store.path, port=0)
+    daemon.start_in_thread()
+
+    try:
+        _, released = _request_json(
+            daemon.base_url,
+            "/v1/lotus/space-claims/claim-1/release",
+            method="POST",
+            token=operator_secret,
+            payload={"request_id": "req-claim-1", "now": 30.0},
+        )
+        _, swept = _request_json(
+            daemon.base_url,
+            "/v1/lotus/grants/sweep-expired",
+            method="POST",
+            token=operator_secret,
+            payload={"request_id": "req-sweep-1", "now": 50.0},
+        )
+
+        status, page1 = _request_json(daemon.base_url, "/v1/lotus/resource-changes?limit=2", token=operator_secret)
+        assert status == 200
+        assert [item["change_cursor"] for item in page1["resource_change_feed"]["items"]] == [
+            f"{released['receipt']['operation_id']}:0",
+            f"{swept['receipt']['operation_id']}:0",
+        ]
+        assert page1["resource_change_feed"]["page"]["has_more"] is True
+
+        status2, page2 = _request_json(
+            daemon.base_url,
+            f"/v1/lotus/resource-changes?limit=2&after_change_cursor={page1['resource_change_feed']['page']['next_after_change_cursor']}",
+            token=operator_secret,
+        )
+        assert status2 == 200
+        assert [item["change_cursor"] for item in page2["resource_change_feed"]["items"]] == [f"{swept['receipt']['operation_id']}:1"]
+        assert page2["resource_change_feed"]["page"]["has_more"] is False
+
+        status3, filtered = _request_json(
+            daemon.base_url,
+            "/v1/lotus/resource-changes?resource_kind=slot_lease&resource_id=lease-due&change_kind=expire",
+            token=operator_secret,
+        )
+        assert status3 == 200
+        assert [item["change_cursor"] for item in filtered["resource_change_feed"]["items"]] == [f"{swept['receipt']['operation_id']}:1"]
+        assert filtered["resource_change_feed"]["items"][0]["resource_change"]["resource_id"] == "lease-due"
+
+        with pytest.raises(HTTPError) as exc_info:
+            _request_json(daemon.base_url, "/v1/lotus/resource-changes?after_change_cursor=op-missing:0", token=operator_secret)
+        assert exc_info.value.code == 404
+        payload = json.loads(exc_info.value.read().decode("utf-8"))
+        assert payload["error"] == "unknown_resource_change_feed_cursor:op-missing:0"
+        assert payload["error_kind"] == "not_found"
+    finally:
+        daemon.shutdown()
+
+
 def test_lotus_daemon_preflights_publish_service_and_reports_conflict_state(tmp_path):
     store = ControlPlaneStateStore(path=tmp_path / "state" / "control_plane.json")
     operator_secret = store.update(

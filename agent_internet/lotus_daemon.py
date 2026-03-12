@@ -190,6 +190,20 @@ class LotusApiDaemon:
                         "change_kind": _query_param(query, "change_kind"),
                     },
                 )
+            if method == "GET" and path == "/v1/lotus/resource-changes":
+                return 200, self._call(
+                    token,
+                    "list_resource_change_feed",
+                    {
+                        "limit": int(_query_param(query, "limit") or "50"),
+                        "after_change_cursor": _query_param(query, "after_change_cursor"),
+                        "action": _query_param(query, "action"),
+                        "operator_subject": _query_param(query, "operator_subject"),
+                        "resource_kind": _query_param(query, "resource_kind"),
+                        "resource_id": _query_param(query, "resource_id"),
+                        "change_kind": _query_param(query, "change_kind"),
+                    },
+                )
             if method == "GET" and path == "/v1/lotus/operations/by-request":
                 return 200, self._call(
                     token,

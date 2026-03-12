@@ -154,10 +154,14 @@ def test_lotus_api_describes_capabilities_manifest():
     assert "create_intent" in payload["recoverability"]["request_id_supported_actions"]
     assert "release_space_claim" in payload["recoverability"]["request_id_supported_actions"]
     assert payload["parseability"]["operation_feed_http_path"] == "https://lotus.example/v1/lotus/operations"
+    assert payload["parseability"]["resource_change_feed_http_path"] == "https://lotus.example/v1/lotus/resource-changes"
     assert payload["parseability"]["operation_feed_response_fields"] == ["items", "filters", "page"]
     assert payload["parseability"]["operation_feed_filter_fields"] == ["action", "operator_subject", "resource_kind", "resource_id", "change_kind"]
     assert "resource_changes" in payload["parseability"]["operation_feed_item_fields"]
     assert payload["parseability"]["operation_feed_resource_change_fields"][0] == "resource_kind"
+    assert payload["parseability"]["resource_change_feed_response_fields"] == ["items", "filters", "page"]
+    assert payload["parseability"]["resource_change_feed_item_fields"][0] == "change_cursor"
+    assert payload["parseability"]["resource_change_feed_page_fields"][0] == "after_change_cursor"
     assert payload["parseability"]["operation_feed_page_fields"][0] == "after_operation_id"
     assert payload["parseability"]["operation_receipt_http_paths"][0] == "https://lotus.example/v1/lotus/operations/{operation_id}"
     assert payload["parseability"]["preflight_http_path"] == "https://lotus.example/v1/lotus/preflight"
@@ -171,6 +175,7 @@ def test_lotus_api_describes_capabilities_manifest():
     assert payload["parseability"]["http_error_envelope_fields"] == ["error", "error_code", "error_kind", "recoverable", "retryable", "context"]
     assert any(item["lotus_action"] == "create_intent" for item in payload["capabilities"])
     assert any(item["lotus_action"] == "list_operation_feed" for item in payload["capabilities"])
+    assert any(item["lotus_action"] == "list_resource_change_feed" for item in payload["capabilities"])
     assert any(item["lotus_action"] == "show_operation_receipt" for item in payload["capabilities"])
     assert any(item["lotus_action"] == "preflight_mutation" for item in payload["capabilities"])
 
@@ -1423,6 +1428,70 @@ def test_lotus_api_filters_operation_feed_by_resource_kind_id_and_change_kind():
     ]
     assert [item["operation_id"] for item in by_change["operation_feed"]["items"]] == [sweep["receipt"]["operation_id"]]
     assert by_change["operation_feed"]["filters"]["change_kind"] == "expire"
+
+
+def test_lotus_api_lists_resource_change_feed_with_cursor_and_filters():
+    plane = AgentInternetControlPlane()
+    plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-1", source_intent_id="intent-space-1", subject_id="operator-1", space_id="space-1", granted_at=20.0))
+    plane.upsert_space_claim(SpaceClaimRecord(claim_id="claim-due", source_intent_id="intent-space-due", subject_id="operator-2", space_id="space-2", status=ClaimStatus.GRANTED, granted_at=21.0, expires_at=40.0))
+    plane.upsert_slot(SlotDescriptor(slot_id="slot-due", space_id="space-2", slot_kind="general", holder_subject_id="operator-2", status=SlotStatus.ACTIVE))
+    plane.upsert_slot_lease(SlotLeaseRecord(lease_id="lease-due", source_intent_id="intent-slot-due", holder_subject_id="operator-2", space_id="space-2", slot_id="slot-due", status=LeaseStatus.ACTIVE, granted_at=22.0, expires_at=40.0))
+    api = LotusControlPlaneAPI(plane)
+    issued = api.issue_token(subject="governor", scopes=(LotusApiScope.CONTRACT_WRITE.value, LotusApiScope.READ.value), token_secret="resource-change-token", now=10.0)
+
+    released = api.call(bearer_token=issued.secret, action="release_space_claim", params={"request_id": "req-claim-1", "claim_id": "claim-1", "now": 30.0})
+    swept = api.call(bearer_token=issued.secret, action="sweep_expired_grants", params={"request_id": "req-sweep-1", "now": 50.0})
+
+    page1 = api.call(bearer_token=issued.secret, action="list_resource_change_feed", params={"limit": 2})
+    page2 = api.call(
+        bearer_token=issued.secret,
+        action="list_resource_change_feed",
+        params={"limit": 2, "after_change_cursor": page1["resource_change_feed"]["page"]["next_after_change_cursor"]},
+    )
+    filtered = api.call(
+        bearer_token=issued.secret,
+        action="list_resource_change_feed",
+        params={"resource_kind": "slot_lease", "resource_id": "lease-due", "change_kind": "expire"},
+    )
+
+    assert [item["change_cursor"] for item in page1["resource_change_feed"]["items"]] == [
+        f"{released['receipt']['operation_id']}:0",
+        f"{swept['receipt']['operation_id']}:0",
+    ]
+    assert page1["resource_change_feed"]["items"][0]["resource_change"]["resource_id"] == "claim-1"
+    assert page1["resource_change_feed"]["page"]["has_more"] is True
+    assert [item["change_cursor"] for item in page2["resource_change_feed"]["items"]] == [f"{swept['receipt']['operation_id']}:1"]
+    assert page2["resource_change_feed"]["page"]["has_more"] is False
+    assert filtered["resource_change_feed"]["filters"] == {
+        "action": None,
+        "operator_subject": None,
+        "resource_kind": "slot_lease",
+        "resource_id": "lease-due",
+        "change_kind": "expire",
+    }
+    assert filtered["resource_change_feed"]["items"] == [
+        {
+            "change_cursor": f"{swept['receipt']['operation_id']}:1",
+            "operation_id": swept["receipt"]["operation_id"],
+            "request_id": "req-sweep-1",
+            "action": "sweep_expired_grants",
+            "operator_subject": "governor",
+            "status": "applied",
+            "created_at": swept["receipt"]["created_at"],
+            "last_replayed_at": None,
+            "replay_count": 0,
+            "resource_change": {
+                "resource_kind": "slot_lease",
+                "resource_id": "lease-due",
+                "change_kind": "expire",
+                "source_operation_id": swept["receipt"]["operation_id"],
+                "changed_fields": ["status", "expires_at"],
+                "new_status": LeaseStatus.EXPIRED.value,
+            },
+            "receipt_lotus_action": "show_operation_receipt",
+            "receipt_http_path": f"/v1/lotus/operations/{swept['receipt']['operation_id']}",
+        }
+    ]
 
 
 def test_lotus_api_preflights_publish_service_and_replay_state():
