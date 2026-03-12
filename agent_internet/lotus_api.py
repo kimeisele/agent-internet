@@ -1130,6 +1130,114 @@ class LotusControlPlaneAPI:
             filtered = [item for item in filtered if item.get("change_kind") == change_kind_filter]
         return filtered
 
+    @staticmethod
+    def _resource_change_matches_filters(
+        resource_change: dict[str, object],
+        *,
+        resource_kind_filter: str,
+        resource_id_filter: str,
+        change_kind_filter: str,
+    ) -> bool:
+        if resource_kind_filter and resource_change.get("resource_kind") != resource_kind_filter:
+            return False
+        if resource_id_filter and resource_change.get("resource_id") != resource_id_filter:
+            return False
+        if change_kind_filter and resource_change.get("change_kind") != change_kind_filter:
+            return False
+        return True
+
+    @staticmethod
+    def _resource_change_cursor(*, operation_id: str, resource_index: int) -> str:
+        return f"{operation_id}:{resource_index}"
+
+    @classmethod
+    def _resource_change_feed_item(
+        cls,
+        *,
+        receipt: OperationReceiptRecord,
+        resource_change: dict[str, object],
+        resource_index: int,
+    ) -> dict[str, object]:
+        return {
+            "change_cursor": cls._resource_change_cursor(operation_id=receipt.operation_id, resource_index=resource_index),
+            "operation_id": receipt.operation_id,
+            "request_id": receipt.request_id,
+            "action": receipt.action,
+            "operator_subject": receipt.operator_subject,
+            "status": receipt.status,
+            "created_at": receipt.created_at,
+            "last_replayed_at": receipt.last_replayed_at,
+            "replay_count": receipt.replay_count,
+            "resource_change": dict(resource_change),
+            "receipt_lotus_action": "show_operation_receipt",
+            "receipt_http_path": f"/v1/lotus/operations/{receipt.operation_id}",
+        }
+
+    def _list_resource_change_feed(self, *, bearer_token: str, payload: dict) -> dict:
+        token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
+        action_filter = ("" if payload.get("action") in (None, "") else str(payload.get("action"))).strip()
+        operator_subject_filter = ("" if payload.get("operator_subject") in (None, "") else str(payload.get("operator_subject"))).strip()
+        after_change_cursor = ("" if payload.get("after_change_cursor") in (None, "") else str(payload.get("after_change_cursor"))).strip()
+        resource_kind_filter = ("" if payload.get("resource_kind") in (None, "") else str(payload.get("resource_kind"))).strip()
+        resource_id_filter = ("" if payload.get("resource_id") in (None, "") else str(payload.get("resource_id"))).strip()
+        change_kind_filter = ("" if payload.get("change_kind") in (None, "") else str(payload.get("change_kind"))).strip()
+        limit = int(payload.get("limit", 50))
+        if limit < 1 or limit > 200:
+            raise ValueError(f"invalid_resource_change_feed_limit:{limit}")
+        receipts = sorted(
+            self.plane.registry.list_operation_receipts(),
+            key=lambda item: ((-1.0 if item.created_at is None else float(item.created_at)), item.operation_id),
+        )
+        if action_filter:
+            receipts = [item for item in receipts if item.action == action_filter]
+        if operator_subject_filter:
+            receipts = [item for item in receipts if item.operator_subject == operator_subject_filter]
+        items: list[dict[str, object]] = []
+        for receipt in receipts:
+            for resource_index, resource_change in enumerate(self._operation_resource_changes(receipt)):
+                if not self._resource_change_matches_filters(
+                    resource_change,
+                    resource_kind_filter=resource_kind_filter,
+                    resource_id_filter=resource_id_filter,
+                    change_kind_filter=change_kind_filter,
+                ):
+                    continue
+                items.append(
+                    self._resource_change_feed_item(
+                        receipt=receipt,
+                        resource_change=resource_change,
+                        resource_index=resource_index,
+                    )
+                )
+        if after_change_cursor:
+            indexes = {item["change_cursor"]: index for index, item in enumerate(items)}
+            if after_change_cursor not in indexes:
+                raise ValueError(f"unknown_resource_change_feed_cursor:{after_change_cursor}")
+            items = items[indexes[after_change_cursor] + 1 :]
+        page = items[:limit]
+        has_more = len(items) > len(page)
+        next_after_change_cursor = page[-1]["change_cursor"] if has_more and page else None
+        return {
+            "token_id": token.token_id,
+            "resource_change_feed": {
+                "items": page,
+                "filters": {
+                    "action": action_filter or None,
+                    "operator_subject": operator_subject_filter or None,
+                    "resource_kind": resource_kind_filter or None,
+                    "resource_id": resource_id_filter or None,
+                    "change_kind": change_kind_filter or None,
+                },
+                "page": {
+                    "after_change_cursor": after_change_cursor or None,
+                    "limit": limit,
+                    "returned_count": len(page),
+                    "has_more": has_more,
+                    "next_after_change_cursor": next_after_change_cursor,
+                },
+            },
+        }
+
     def _list_operation_feed(self, *, bearer_token: str, payload: dict) -> dict:
         token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
         action_filter = ("" if payload.get("action") in (None, "") else str(payload.get("action"))).strip()
@@ -1289,6 +1397,8 @@ class LotusControlPlaneAPI:
         if action == "show_steward_protocol":
             token = self.authenticate(bearer_token, required_scopes=(LotusApiScope.READ.value,))
             return {"token_id": token.token_id, "bindings": summarize_steward_protocol_bindings()}
+        if action == "list_resource_change_feed":
+            return self._list_resource_change_feed(bearer_token=bearer_token, payload=payload)
         if action == "list_operation_feed":
             return self._list_operation_feed(bearer_token=bearer_token, payload=payload)
         if action == "preflight_mutation":
