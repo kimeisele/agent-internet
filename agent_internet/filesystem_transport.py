@@ -50,6 +50,32 @@ class FilesystemFederationTransport:
         self.contract.ensure_dirs()
         write_locked_json_value(self.contract.nadi_outbox, [_coerce_dict(message) for message in messages])
 
+    def remove_from_outbox(self, envelope_ids: set[str]) -> int:
+        """Atomically remove messages whose envelope/correlation id is in *envelope_ids*.
+
+        Messages added to the outbox after the pump's initial read are
+        preserved because this operates on the current file contents under
+        an exclusive lock, not on a stale in-memory snapshot.
+        """
+        if not envelope_ids:
+            return 0
+        removed: list[int] = [0]
+
+        def _remove(raw: object) -> list[dict]:
+            current = _coerce_json_list(raw, self.contract.nadi_outbox)
+            kept: list[dict] = []
+            for msg in current:
+                msg_id = str(msg.get("envelope_id", "")) or str(msg.get("correlation_id", ""))
+                if msg_id in envelope_ids:
+                    removed[0] += 1
+                else:
+                    kept.append(msg)
+            return kept
+
+        self.contract.ensure_dirs()
+        update_locked_json_value(self.contract.nadi_outbox, default=[], updater=_remove)
+        return removed[0]
+
     def read_inbox(self) -> list[dict]:
         raw = read_locked_json_value(self.contract.nadi_inbox, default=[])
         return _coerce_json_list(raw, self.contract.nadi_inbox)
