@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,8 +27,13 @@ class OutboxRelayPump:
         raw_messages = transport.read_outbox()
         receipts: list[DeliveryReceipt] = []
         remaining: list[dict] = []
+        relay_at = time.time()
 
         for message in raw_messages:
+            # TTL clock starts at relay time, not message write time.
+            # Without this, every message written more than ~24 s ago
+            # (the default Nadi TTL) would expire before the relay even
+            # attempts delivery.
             receipt = self.plane.relay_envelope(
                 DeliveryEnvelope(
                     source_city_id=str(message.get("source", "")),
@@ -36,7 +42,7 @@ class OutboxRelayPump:
                     payload=dict(message.get("payload", {})),
                     envelope_id=str(message.get("envelope_id", "")) or str(message.get("correlation_id", "")),
                     correlation_id=str(message.get("correlation_id", "")),
-                    created_at=float(message.get("timestamp", 0.0)) or 0.0,
+                    created_at=relay_at,
                     ttl_s=float(message.get("ttl_s", 0.0)) or None,
                     nadi_type=str(message.get("nadi_type", "")),
                     nadi_op=str(message.get("nadi_op", "")),
