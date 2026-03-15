@@ -29,7 +29,10 @@ class OutboxRelayPump:
         remaining: list[dict] = []
         relay_at = time.time()
 
+        delivered_ids: set[str] = set()
+
         for message in raw_messages:
+            envelope_id = str(message.get("envelope_id", "")) or str(message.get("correlation_id", ""))
             # TTL clock starts at relay time, not message write time.
             # Without this, every message written more than ~24 s ago
             # (the default Nadi TTL) would expire before the relay even
@@ -40,7 +43,7 @@ class OutboxRelayPump:
                     target_city_id=str(message.get("target", "")),
                     operation=str(message.get("operation", "")),
                     payload=dict(message.get("payload", {})),
-                    envelope_id=str(message.get("envelope_id", "")) or str(message.get("correlation_id", "")),
+                    envelope_id=envelope_id,
                     correlation_id=str(message.get("correlation_id", "")),
                     created_at=relay_at,
                     ttl_s=float(message.get("ttl_s", 0.0)) or None,
@@ -52,10 +55,14 @@ class OutboxRelayPump:
                 ),
             )
             receipts.append(receipt)
-            if not (drain_delivered and receipt.status in _DRAINABLE_SUCCESS):
-                remaining.append(message)
+            if receipt.status in _DRAINABLE_SUCCESS and envelope_id:
+                delivered_ids.add(envelope_id)
 
-        if drain_delivered:
-            transport.replace_outbox(remaining)
+        # Atomic drain: remove only delivered messages from the current
+        # outbox contents.  Messages that arrived after our initial read
+        # are preserved because remove_from_outbox re-reads the file
+        # under an exclusive lock.
+        if drain_delivered and delivered_ids:
+            transport.remove_from_outbox(delivered_ids)
 
         return receipts

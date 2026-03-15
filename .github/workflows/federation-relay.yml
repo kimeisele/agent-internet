@@ -19,7 +19,7 @@ permissions:
 
 concurrency:
   group: federation-relay
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   relay:
