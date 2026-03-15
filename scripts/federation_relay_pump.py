@@ -22,7 +22,7 @@ if str(_repo_root) not in sys.path:
 
 from agent_internet.control_plane import AgentInternetControlPlane
 from agent_internet.filesystem_message_transport import AgentCityFilesystemMessageTransport
-from agent_internet.models import CityEndpoint, CityIdentity, CityPresence, HealthStatus, TrustLevel, TrustRecord
+from agent_internet.models import TrustLevel, TrustRecord
 from agent_internet.pump import OutboxRelayPump
 from agent_internet.transport import TransportScheme
 
@@ -63,62 +63,29 @@ def _discover_peer_root(sibling_dir: str) -> Path | None:
     return candidate if candidate.is_dir() else None
 
 
-def _register_peer(
-    plane: AgentInternetControlPlane,
-    peer: dict,
-    *,
-    root: Path | None,
-) -> None:
-    """Register a non-steward federation peer."""
-    city_id = peer["city_id"]
-    transport_value = TransportScheme.FILESYSTEM.value if root else "https"
-    location = str(root) if root else f"https://github.com/{peer['repo']}"
-
-    plane.register_city(
-        CityIdentity(
-            city_id=city_id,
-            slug=peer["slug"],
-            repo=peer["repo"],
-            labels=peer.get("labels", {}),
-        ),
-        CityEndpoint(city_id=city_id, transport=transport_value, location=location),
-    )
-    plane.record_trust(TrustRecord(
-        source_city_id="agent-internet",
-        target_city_id=city_id,
-        level=TrustLevel.VERIFIED,
-        reason=f"federation-peer:{peer['repo']}",
-    ))
-    plane.announce_city(CityPresence(
-        city_id=city_id,
-        health=HealthStatus.HEALTHY if root else HealthStatus.UNKNOWN,
-        last_seen_at=time.time(),
-        heartbeat=1,
-        capabilities=peer.get("capabilities", ()),
-    ))
-
-
 def _register_all_peers(
     plane: AgentInternetControlPlane,
     discovered_roots: dict[str, Path],
 ) -> None:
-    """Register all federation peers, using the dedicated steward method."""
+    """Register all federation peers via the generic control plane method."""
     for peer in FEDERATION_PEERS:
         city_id = peer["city_id"]
         root = discovered_roots.get(city_id)
         transport_value = TransportScheme.FILESYSTEM.value if root else "https"
         location = str(root) if root else f"https://github.com/{peer['repo']}"
 
-        if city_id == "steward":
-            plane.register_federation_steward(
-                transport=transport_value,
-                location=location,
-            )
-        else:
-            _register_peer(plane, peer, root=root)
+        plane.register_federation_peer(
+            city_id=city_id,
+            slug=peer["slug"],
+            repo=peer["repo"],
+            transport=transport_value,
+            location=location,
+            capabilities=peer.get("capabilities", ()),
+            labels=peer.get("labels", {}),
+            publish_nadi_service=True,
+        )
 
-    # Establish bidirectional trust and routes between all peers so the relay
-    # can deliver messages from any peer to any other peer.
+    # Bidirectional trust + routes so the relay can deliver cross-peer.
     all_city_ids = [p["city_id"] for p in FEDERATION_PEERS] + ["agent-internet"]
     for source in all_city_ids:
         for target in all_city_ids:
@@ -128,7 +95,7 @@ def _register_all_peers(
                 source_city_id=source,
                 target_city_id=target,
                 level=TrustLevel.VERIFIED,
-                reason="federation-mesh-peer",
+                reason="federation-mesh",
             ))
             plane.publish_route(
                 owner_city_id="agent-internet",
@@ -136,7 +103,7 @@ def _register_all_peers(
                 target_city_id=target,
                 next_hop_city_id=target,
                 metric=100,
-                labels={"origin": "federation-relay-pump"},
+                labels={"origin": "relay-pump"},
             )
 
 
@@ -206,12 +173,14 @@ def main() -> int:
     )
 
     # Register agent-internet itself.
-    _register_peer(plane, {
-        "city_id": "agent-internet",
-        "slug": "agent-internet",
-        "repo": "kimeisele/agent-internet",
-        "labels": {"role": "control-plane", "layer": "internet"},
-    }, root=_repo_root)
+    plane.register_federation_peer(
+        city_id="agent-internet",
+        slug="agent-internet",
+        repo="kimeisele/agent-internet",
+        transport=TransportScheme.FILESYSTEM.value,
+        location=str(_repo_root),
+        labels={"role": "control-plane", "layer": "internet"},
+    )
 
     # Discover sibling repos.
     discovered_roots: dict[str, Path] = {}
