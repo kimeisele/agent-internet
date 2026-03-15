@@ -92,8 +92,8 @@ def _register_all_peers(
             if source == target:
                 continue
             plane.record_trust(TrustRecord(
-                source_city_id=source,
-                target_city_id=target,
+                issuer_city_id=source,
+                subject_city_id=target,
                 level=TrustLevel.VERIFIED,
                 reason="federation-mesh",
             ))
