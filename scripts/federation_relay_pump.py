@@ -1,8 +1,9 @@
-"""Federation Relay Pump — read outboxes from all federation repos and route messages.
+"""Federation Relay Pump — discover peers dynamically, pump Nadi outboxes.
 
-Bootstraps the control plane, registers all federation peers (steward gets
-full Lotus addressing via register_federation_steward), pumps Nadi outboxes,
-and optionally refreshes the federated index.
+No hardcoded peer lists. Discovery uses three layers:
+1. GitHub Topic search (global — finds any repo tagged agent-federation-node)
+2. Filesystem beacons (local — sibling repos that announced themselves)
+3. Descriptor fetch + validation (verifies each discovered node is real)
 
 Usage:
     python scripts/federation_relay_pump.py [--drain-delivered] [--refresh-index]
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 import time
 from pathlib import Path
@@ -21,86 +23,163 @@ if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
 from agent_internet.control_plane import AgentInternetControlPlane
+from agent_internet.discovery_bootstrap import DiscoveryBootstrapService, FilesystemBeaconScanner
+from agent_internet.federation_descriptor import load_federation_descriptor
 from agent_internet.filesystem_message_transport import AgentCityFilesystemMessageTransport
+from agent_internet.github_topic_discovery import discover_federation_descriptors_by_github_topic
 from agent_internet.models import TrustLevel, TrustRecord
 from agent_internet.pump import OutboxRelayPump
 from agent_internet.transport import TransportScheme
 
-# ---------------------------------------------------------------------------
-# Federation peer definitions
-# ---------------------------------------------------------------------------
+logger = logging.getLogger(__name__)
 
-FEDERATION_PEERS: list[dict] = [
-    {
-        "city_id": "steward",
-        "slug": "steward",
-        "repo": "kimeisele/steward",
-        "sibling_dir": "steward",
-        "capabilities": (
-            "federation",
-            "heartbeat",
-            "healing",
-            "immune-system",
-            "cross-repo-diagnostic",
-        ),
-        "labels": {"role": "operator", "layer": "operator"},
-    },
-    {
-        "city_id": "steward-protocol",
-        "slug": "steward-protocol",
-        "repo": "kimeisele/steward-protocol",
-        "sibling_dir": "steward-protocol",
-        "capabilities": ("federation", "substrate", "kernel"),
-        "labels": {"role": "substrate", "layer": "substrate"},
-    },
-    {
-        "city_id": "agent-city",
-        "slug": "agent-city",
-        "repo": "kimeisele/agent-city",
-        "sibling_dir": "agent-city",
-        "capabilities": ("federation", "governance", "city-runtime"),
-        "labels": {"role": "city-runtime", "layer": "runtime"},
-    },
-    {
-        "city_id": "agent-world",
-        "slug": "agent-world",
-        "repo": "kimeisele/agent-world",
-        "sibling_dir": "agent-world",
-        "capabilities": ("federation", "world-registry", "agent-registry"),
-        "labels": {"role": "world-governance", "layer": "governance"},
-    },
-]
+# Cache file so we don't hit GitHub API every single cycle
+_PEER_CACHE_PATH = _repo_root / "data" / "federation" / "discovered_peers.json"
+_CACHE_TTL_S = 900  # 15 minutes — matches the relay pump cycle
 
 
-def _discover_peer_root(sibling_dir: str) -> Path | None:
-    candidate = _repo_root.parent / sibling_dir
+def _discover_peers_via_github_topic() -> list[dict]:
+    """Global discovery: find all repos tagged agent-federation-node on GitHub."""
+    try:
+        results = discover_federation_descriptors_by_github_topic(limit=100)
+    except Exception as exc:
+        logger.warning("GitHub topic discovery failed: %s", exc)
+        return []
+
+    peers = []
+    for result in results:
+        repo = result.repository_full_name
+        repo_id = repo.split("/", 1)[1] if "/" in repo else repo
+        # Skip ourselves
+        if repo_id == "agent-internet":
+            continue
+        peers.append({
+            "city_id": repo_id,
+            "slug": repo_id,
+            "repo": repo,
+            "descriptor_url": result.descriptor_url,
+            "description": result.description,
+        })
+    return peers
+
+
+def _fetch_descriptor_metadata(peer: dict) -> dict:
+    """Fetch .well-known/agent-federation.json to get capabilities, role, status."""
+    try:
+        descriptor, _source = load_federation_descriptor(peer["descriptor_url"])
+        peer["status"] = descriptor.status.value
+        peer["display_name"] = descriptor.display_name
+        peer["owner_boundary"] = descriptor.owner_boundary
+    except Exception as exc:
+        logger.warning("Failed to fetch descriptor for %s: %s", peer["city_id"], exc)
+        peer["status"] = "unknown"
+    return peer
+
+
+def _discover_local_sibling(city_id: str) -> Path | None:
+    """Check if a peer repo exists as a sibling directory."""
+    candidate = _repo_root.parent / city_id
     return candidate if candidate.is_dir() else None
 
 
-def _register_all_peers(
+def _load_cached_peers() -> list[dict] | None:
+    """Load cached peer list if fresh enough."""
+    if not _PEER_CACHE_PATH.exists():
+        return None
+    try:
+        data = json.loads(_PEER_CACHE_PATH.read_text())
+        cached_at = data.get("cached_at", 0)
+        if time.time() - cached_at > _CACHE_TTL_S:
+            return None
+        return data.get("peers", [])
+    except Exception:
+        return None
+
+
+def _save_peer_cache(peers: list[dict]) -> None:
+    """Cache discovered peers to avoid hitting GitHub API every cycle."""
+    _PEER_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _PEER_CACHE_PATH.write_text(json.dumps({
+        "cached_at": time.time(),
+        "peers": peers,
+    }, indent=2, default=str))
+
+
+def _discover_all_peers() -> list[dict]:
+    """Full discovery: cache → GitHub Topics → descriptor validation → local siblings."""
+    # Try cache first
+    cached = _load_cached_peers()
+    if cached is not None:
+        logger.info("Using cached peer list (%d peers)", len(cached))
+        return cached
+
+    # Global discovery via GitHub Topics
+    peers = _discover_peers_via_github_topic()
+    logger.info("GitHub topic discovery found %d peers", len(peers))
+
+    # Also scan local beacons for peers that might not have the topic yet
+    beacon_scanner = FilesystemBeaconScanner(
+        beacon_dir=_repo_root / ".agent-internet" / "beacons"
+    )
+    for ann in beacon_scanner.scan():
+        if ann.city_id == "agent-internet":
+            continue
+        if not any(p["city_id"] == ann.city_id for p in peers):
+            peers.append({
+                "city_id": ann.city_id,
+                "slug": ann.slug or ann.city_id,
+                "repo": ann.repo,
+                "descriptor_url": "",
+                "description": "",
+                "capabilities": list(ann.capabilities),
+                "labels": dict(ann.labels),
+            })
+            logger.info("Beacon discovery added: %s", ann.city_id)
+
+    # Fetch descriptors to validate and enrich
+    validated = []
+    for peer in peers:
+        if peer.get("descriptor_url"):
+            peer = _fetch_descriptor_metadata(peer)
+        # Only include active nodes
+        if peer.get("status", "active") in ("active", "unknown"):
+            validated.append(peer)
+
+    # Cache for next cycle
+    _save_peer_cache(validated)
+
+    return validated
+
+
+def _register_discovered_peers(
     plane: AgentInternetControlPlane,
-    discovered_roots: dict[str, Path],
-) -> None:
-    """Register all federation peers via the generic control plane method."""
-    for peer in FEDERATION_PEERS:
+    peers: list[dict],
+) -> dict[str, Path]:
+    """Register all discovered peers and return their local roots."""
+    discovered_roots: dict[str, Path] = {}
+
+    for peer in peers:
         city_id = peer["city_id"]
-        root = discovered_roots.get(city_id)
-        transport_value = TransportScheme.FILESYSTEM.value if root else "https"
-        location = str(root) if root else f"https://github.com/{peer['repo']}"
+        local_root = _discover_local_sibling(city_id)
+        if local_root:
+            discovered_roots[city_id] = local_root
+
+        transport_value = TransportScheme.FILESYSTEM.value if local_root else "https"
+        location = str(local_root) if local_root else f"https://github.com/{peer['repo']}"
 
         plane.register_federation_peer(
             city_id=city_id,
-            slug=peer["slug"],
-            repo=peer["repo"],
+            slug=peer.get("slug", city_id),
+            repo=peer.get("repo", ""),
             transport=transport_value,
             location=location,
-            capabilities=peer.get("capabilities", ()),
+            capabilities=tuple(peer.get("capabilities", ())),
             labels=peer.get("labels", {}),
             publish_nadi_service=True,
         )
 
-    # Bidirectional trust + routes so the relay can deliver cross-peer.
-    all_city_ids = [p["city_id"] for p in FEDERATION_PEERS] + ["agent-internet"]
+    # Bidirectional trust + routes
+    all_city_ids = [p["city_id"] for p in peers] + ["agent-internet"]
     for source in all_city_ids:
         for target in all_city_ids:
             if source == target:
@@ -121,6 +200,8 @@ def _register_all_peers(
                 metric=100,
                 labels={"origin": "relay-pump"},
             )
+
+    return discovered_roots
 
 
 def _pump_peer(
@@ -167,7 +248,9 @@ def _pump_peer(
 
 
 def _refresh_federated_index(
-    plane: AgentInternetControlPlane, discovered_roots: dict[str, Path]
+    plane: AgentInternetControlPlane,
+    discovered_roots: dict[str, Path],
+    peers: list[dict],
 ) -> dict:
     from agent_internet.agent_web_federated_index import (
         DEFAULT_AGENT_WEB_FEDERATED_INDEX_PATH,
@@ -179,9 +262,7 @@ def _refresh_federated_index(
         peer_descriptor = root / "data" / "federation" / "peer.json"
         if not peer_descriptor.exists():
             continue
-        peer_info = next(
-            (p for p in FEDERATION_PEERS if p["city_id"] == city_id), FEDERATION_PEERS[0]
-        )
+        peer_info = next((p for p in peers if p["city_id"] == city_id), {})
         upsert_agent_web_source_registry_entry(
             root=root,
             source_id=city_id,
@@ -209,7 +290,11 @@ def main() -> int:
     parser.add_argument("--drain-delivered", action="store_true")
     parser.add_argument("--refresh-index", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--force-discover", action="store_true",
+                        help="Ignore cache, force fresh GitHub API discovery")
     args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     plane = AgentInternetControlPlane()
     plane.register_transport(
@@ -227,15 +312,14 @@ def main() -> int:
         labels={"role": "control-plane", "layer": "internet"},
     )
 
-    # Discover sibling repos.
-    discovered_roots: dict[str, Path] = {}
-    for peer in FEDERATION_PEERS:
-        root = _discover_peer_root(peer["sibling_dir"])
-        if root:
-            discovered_roots[peer["city_id"]] = root
+    # Dynamic peer discovery — no hardcoded list
+    if args.force_discover and _PEER_CACHE_PATH.exists():
+        _PEER_CACHE_PATH.unlink()
 
-    # Register all peers (steward via dedicated method, others generically).
-    _register_all_peers(plane, discovered_roots)
+    peers = _discover_all_peers()
+
+    # Register and discover local roots
+    discovered_roots = _register_discovered_peers(plane, peers)
 
     # Pump outboxes.
     pump = OutboxRelayPump(plane)
@@ -243,18 +327,16 @@ def main() -> int:
     total_pumped = 0
     total_delivered = 0
 
-    for peer in FEDERATION_PEERS:
+    all_peer_ids = [p["city_id"] for p in peers] + ["agent-internet"]
+
+    for peer in peers:
         city_id = peer["city_id"]
         root = discovered_roots.get(city_id)
         if root is None:
             all_receipts[city_id] = [
-                {
-                    "status": "skipped",
-                    "detail": f"not found at {_repo_root.parent / peer['sibling_dir']}",
-                }
+                {"status": "skipped", "detail": "no local sibling found"}
             ]
             continue
-        all_peer_ids = [p["city_id"] for p in FEDERATION_PEERS] + ["agent-internet"]
         receipts = _pump_peer(
             pump, root, drain_delivered=args.drain_delivered, all_peer_ids=all_peer_ids
         )
@@ -266,22 +348,25 @@ def main() -> int:
     index_result = None
     if args.refresh_index and discovered_roots:
         try:
-            index_result = _refresh_federated_index(plane, discovered_roots)
+            index_result = _refresh_federated_index(plane, discovered_roots, peers)
         except Exception as exc:
             index_result = {"error": f"{type(exc).__name__}: {exc}"}
 
+    peer_ids = [p["city_id"] for p in peers]
     result = {
         "kind": "federation_relay_pump_result",
-        "version": 1,
+        "version": 2,
         "timestamp": time.time(),
-        "peers_registered": [p["city_id"] for p in FEDERATION_PEERS],
-        "peers_discovered": list(discovered_roots.keys()),
+        "discovery": "dynamic",
+        "peers_registered": peer_ids,
+        "peers_discovered_locally": list(discovered_roots.keys()),
         "receipts": all_receipts,
         "stats": {
+            "total_peers": len(peers),
             "total_pumped": total_pumped,
             "total_delivered": total_delivered,
             "peers_with_outbox": len(discovered_roots),
-            "peers_skipped": len(FEDERATION_PEERS) - len(discovered_roots),
+            "peers_remote_only": len(peers) - len(discovered_roots),
         },
     }
     if index_result is not None:
@@ -301,9 +386,10 @@ def main() -> int:
     if args.json:
         print(json.dumps(result, indent=2, default=str))
     else:
-        print(f"Federation Relay Pump @ {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}")
-        print(f"  registered: {', '.join(p['city_id'] for p in FEDERATION_PEERS)}")
-        print(f"  discovered: {', '.join(discovered_roots.keys()) or '(none)'}")
+        print(f"Federation Relay Pump v2 @ {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}")
+        print(f"  discovery: dynamic (topic + beacons)")
+        print(f"  peers: {', '.join(peer_ids) or '(none)'}")
+        print(f"  local: {', '.join(discovered_roots.keys()) or '(none)'}")
         print(f"  pumped: {total_pumped}  delivered: {total_delivered}")
         for city_id, receipts in all_receipts.items():
             if receipts:
