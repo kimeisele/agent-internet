@@ -168,7 +168,8 @@ def _build_steward_federation_records(state_snapshot: dict, *, refreshed_at: flo
     source_repo = "kimeisele/steward-protocol"
 
     # Health reports from city presences.
-    for presence in state_snapshot.get("presences", []):
+    # snapshot_control_plane() uses "presence" (not "presences").
+    for presence in state_snapshot.get("presence", []):
         if not isinstance(presence, dict):
             continue
         city_id = str(presence.get("city_id", ""))
@@ -189,7 +190,8 @@ def _build_steward_federation_records(state_snapshot: dict, *, refreshed_at: flo
         })
 
     # Immune stats from trust records.
-    trust_records = [r for r in state_snapshot.get("trust_records", []) if isinstance(r, dict)]
+    # snapshot_control_plane() uses "trust" (not "trust_records").
+    trust_records = [r for r in state_snapshot.get("trust", []) if isinstance(r, dict)]
     if trust_records:
         trust_levels: dict[str, int] = {}
         for record in trust_records:

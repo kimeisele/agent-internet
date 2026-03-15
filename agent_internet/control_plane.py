@@ -209,7 +209,8 @@ class AgentInternetControlPlane:
     ) -> tuple[LotusLinkAddress, LotusNetworkAddress, LotusServiceAddress, HostedEndpoint]:
         """Register steward as a first-class federation peer with full Lotus addressing.
 
-        Returns the assigned link address, network address, service address and
+        Calls register_city (which already assigns Lotus link+network addresses),
+        then adds trust, presence, a nadi-relay service address and a federation
         hosted endpoint so that Nadi messages can be routed to and from steward.
         """
         identity = CityIdentity(
@@ -236,7 +237,9 @@ class AgentInternetControlPlane:
             capabilities=capabilities,
         ))
 
-        link_addr, net_addr = self.assign_lotus_addresses(city_id)
+        # register_city already assigned addresses — read them back.
+        link_addr = self.registry.get_link_address(city_id)
+        net_addr = self.registry.get_network_address(city_id)
 
         service = self.publish_service_address(
             owner_city_id=city_id,
