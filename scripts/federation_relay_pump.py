@@ -128,7 +128,32 @@ def _pump_peer(
     root: Path,
     *,
     drain_delivered: bool,
+    all_peer_ids: list[str] | None = None,
 ) -> list[dict]:
+    """Pump a peer's outbox. Resolves broadcast (*) to unicast before relay."""
+    from agent_internet.agent_city_contract import AgentCityFilesystemContract
+    from agent_internet.filesystem_transport import FilesystemFederationTransport
+
+    transport = FilesystemFederationTransport(AgentCityFilesystemContract(root=Path(root)))
+    raw_messages = transport.read_outbox()
+
+    # Resolve broadcast: replace target=* with individual unicast messages
+    expanded: list[dict] = []
+    for msg in raw_messages:
+        if msg.get("target") == "*" and all_peer_ids:
+            source = msg.get("source", "")
+            for peer_id in all_peer_ids:
+                if peer_id != source:
+                    unicast = dict(msg)
+                    unicast["target"] = peer_id
+                    expanded.append(unicast)
+        else:
+            expanded.append(msg)
+
+    # Write expanded messages back and pump
+    if expanded != raw_messages:
+        transport.replace_outbox(expanded)
+
     receipts = pump.pump_city_root(root, drain_delivered=drain_delivered)
     return [
         {
@@ -229,7 +254,10 @@ def main() -> int:
                 }
             ]
             continue
-        receipts = _pump_peer(pump, root, drain_delivered=args.drain_delivered)
+        all_peer_ids = [p["city_id"] for p in FEDERATION_PEERS] + ["agent-internet"]
+        receipts = _pump_peer(
+            pump, root, drain_delivered=args.drain_delivered, all_peer_ids=all_peer_ids
+        )
         all_receipts[city_id] = receipts
         total_pumped += len(receipts)
         total_delivered += sum(1 for r in receipts if r["status"] in ("DELIVERED", "DUPLICATE"))
