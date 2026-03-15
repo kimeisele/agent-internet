@@ -41,6 +41,7 @@ def refresh_agent_web_federated_index(
     )
     refreshed_at = float(time.time() if now is None else now)
     records = [dict(item) for item in crawl.get("aggregate_index", {}).get("records", [])]
+    records.extend(_build_federation_snapshot_records(state_snapshot, refreshed_at=refreshed_at))
     payload = _normalize_federated_index(
         {
             "kind": "agent_web_federated_index",
@@ -154,6 +155,101 @@ def search_agent_web_federated_index_from_path(
         semantic_overlay=overlay,
         wordnet_bridge=load_agent_web_wordnet_bridge(wordnet_bridge_path),
     )
+
+
+def _build_federation_snapshot_records(state_snapshot: dict, *, refreshed_at: float) -> list[dict]:
+    """Build index records from the control plane snapshot.
+
+    Peer-agnostic: indexes ALL registered presences, trust relationships,
+    identities, and service addresses — no hardcoded city knowledge.
+    """
+    records: list[dict] = []
+
+    # Per-city health reports from presences.
+    # Key is "presence" in snapshot_control_plane().
+    for presence in state_snapshot.get("presence", []):
+        if not isinstance(presence, dict):
+            continue
+        city_id = str(presence.get("city_id", ""))
+        if not city_id:
+            continue
+        health = str(presence.get("health", "unknown"))
+        heartbeat = int(presence.get("heartbeat", 0) or 0)
+        capabilities = [str(c) for c in presence.get("capabilities", [])]
+        records.append({
+            "record_id": f"federation:health:{city_id}",
+            "kind": "federation_health_report",
+            "title": f"Health: {city_id}",
+            "summary": f"{city_id} health={health} heartbeat={heartbeat} caps={','.join(capabilities)}",
+            "tags": ["health", "federation", health, city_id, *capabilities],
+            "terms": ["health", "heartbeat", "federation", city_id, health, *capabilities],
+            "source_city_id": city_id,
+            "source_id": "federation-snapshot",
+            "indexed_at": refreshed_at,
+        })
+
+    # Trust distribution — aggregate, not per-peer.
+    # Key is "trust" in snapshot_control_plane().
+    trust_rows = [r for r in state_snapshot.get("trust", []) if isinstance(r, dict)]
+    if trust_rows:
+        levels: dict[str, int] = {}
+        peers_seen: set[str] = set()
+        for row in trust_rows:
+            level = str(row.get("level", "unknown"))
+            levels[level] = levels.get(level, 0) + 1
+            peers_seen.add(str(row.get("subject_city_id", "")))
+        level_summary = ", ".join(f"{k}={v}" for k, v in sorted(levels.items()))
+        records.append({
+            "record_id": "federation:trust-summary",
+            "kind": "federation_trust_summary",
+            "title": "Federation Trust Summary",
+            "summary": f"{len(trust_rows)} trust links across {len(peers_seen)} peers: {level_summary}",
+            "tags": ["trust", "federation", "security", *list(levels.keys())],
+            "terms": ["trust", "federation", "security", "verification", *list(levels.keys()), *sorted(peers_seen)],
+            "source_city_id": "federation",
+            "source_id": "federation-snapshot",
+            "indexed_at": refreshed_at,
+        })
+
+    # Peer registry — one record with all registered identities.
+    identities = [r for r in state_snapshot.get("identities", []) if isinstance(r, dict)]
+    if identities:
+        city_ids = sorted(str(r.get("city_id", "")) for r in identities if str(r.get("city_id", "")))
+        records.append({
+            "record_id": "federation:peer-registry",
+            "kind": "federation_peer_registry",
+            "title": "Federation Peer Registry",
+            "summary": f"{len(city_ids)} peers: {', '.join(city_ids)}",
+            "tags": ["peers", "federation", "registry", *city_ids],
+            "terms": ["peer", "registry", "federation", *city_ids],
+            "source_city_id": "federation",
+            "source_id": "federation-snapshot",
+            "indexed_at": refreshed_at,
+        })
+
+    # Per-city Lotus service addresses.
+    services_by_city: dict[str, list[str]] = {}
+    for svc in state_snapshot.get("service_addresses", []):
+        if not isinstance(svc, dict):
+            continue
+        owner = str(svc.get("owner_city_id", ""))
+        name = str(svc.get("service_name", ""))
+        if owner and name:
+            services_by_city.setdefault(owner, []).append(name)
+    for city_id, svc_names in sorted(services_by_city.items()):
+        records.append({
+            "record_id": f"federation:lotus-services:{city_id}",
+            "kind": "federation_lotus_services",
+            "title": f"Lotus Services: {city_id}",
+            "summary": f"{city_id} services: {', '.join(sorted(svc_names))}",
+            "tags": ["lotus", "service", "federation", city_id, *svc_names],
+            "terms": ["lotus", "service", "address", "federation", city_id, *svc_names],
+            "source_city_id": city_id,
+            "source_id": "federation-snapshot",
+            "indexed_at": refreshed_at,
+        })
+
+    return records
 
 
 def _default_federated_index() -> dict:

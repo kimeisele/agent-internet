@@ -28,6 +28,7 @@ from .models import (
     CityEndpoint,
     CityIdentity,
     CityPresence,
+    HealthStatus,
     EndpointVisibility,
     ForkLineageRecord,
     HostedEndpoint,
@@ -195,6 +196,73 @@ class AgentInternetControlPlane:
         self.registry.upsert_identity(identity)
         self.registry.upsert_endpoint(endpoint)
         self.assign_lotus_addresses(identity.city_id)
+
+    def register_federation_peer(
+        self,
+        *,
+        city_id: str,
+        slug: str,
+        repo: str,
+        transport: str,
+        location: str,
+        capabilities: tuple[str, ...] = (),
+        labels: dict[str, str] | None = None,
+        publish_nadi_service: bool = False,
+        now: float | None = None,
+    ) -> tuple[LotusLinkAddress, LotusNetworkAddress]:
+        """Register any federation peer with identity, trust, presence and Lotus addressing.
+
+        If *publish_nadi_service* is True the peer also receives a
+        ``nadi-relay`` service address and a ``federation`` hosted endpoint
+        so that Nadi messages can be routed to it.
+        """
+        identity = CityIdentity(
+            city_id=city_id,
+            slug=slug,
+            repo=repo,
+            labels=dict(labels or {}),
+        )
+        endpoint = CityEndpoint(city_id=city_id, transport=transport, location=location)
+        self.register_city(identity, endpoint)
+
+        self.record_trust(TrustRecord(
+            issuer_city_id="agent-internet",
+            subject_city_id=city_id,
+            level=TrustLevel.VERIFIED,
+            reason="federation-peer-registration",
+        ))
+
+        self.announce_city(CityPresence(
+            city_id=city_id,
+            health=HealthStatus.HEALTHY,
+            last_seen_at=float(time.time() if now is None else now),
+            heartbeat=1,
+            capabilities=capabilities,
+        ))
+
+        link_addr = self.registry.get_link_address(city_id)
+        net_addr = self.registry.get_network_address(city_id)
+
+        if publish_nadi_service:
+            self.publish_service_address(
+                owner_city_id=city_id,
+                service_name="nadi-relay",
+                public_handle=f"{city_id}.nadi-relay.lotus",
+                transport=transport,
+                location=location,
+                labels={"protocol": "nadi"},
+                now=now,
+            )
+            self.publish_hosted_endpoint(
+                owner_city_id=city_id,
+                public_handle=f"{city_id}.federation.lotus",
+                transport=transport,
+                location=location,
+                labels={"protocol": "federation"},
+                now=now,
+            )
+
+        return link_addr, net_addr
 
     def announce_city(self, presence: CityPresence) -> None:
         self.registry.announce(presence)
