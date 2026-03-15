@@ -2,7 +2,6 @@ name: Federation Relay Pump
 
 on:
   schedule:
-    # Run every 15 minutes to drain outboxes from all federation repos.
     - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
@@ -32,12 +31,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          path: agent-internet
 
       - name: Checkout steward-protocol
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/steward-protocol
-          path: ../steward-protocol
+          path: steward-protocol
           fetch-depth: 1
         continue-on-error: true
 
@@ -45,7 +45,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/agent-city
-          path: ../agent-city
+          path: agent-city
           fetch-depth: 1
         continue-on-error: true
 
@@ -53,7 +53,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/agent-world
-          path: ../agent-world
+          path: agent-world
           fetch-depth: 1
         continue-on-error: true
 
@@ -63,20 +63,22 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
+        working-directory: agent-internet
         run: python -m pip install -e .[dev]
 
       - name: Discover federation peers
         run: |
           echo '## Federation Peer Discovery' >> "$GITHUB_STEP_SUMMARY"
           for repo in steward-protocol agent-city agent-world; do
-            if [ -d "../$repo" ]; then
-              echo "- **$repo**: discovered at ../$repo" >> "$GITHUB_STEP_SUMMARY"
+            if [ -d "$repo" ]; then
+              echo "- **$repo**: discovered" >> "$GITHUB_STEP_SUMMARY"
             else
               echo "- **$repo**: not available" >> "$GITHUB_STEP_SUMMARY"
             fi
           done
 
       - name: Run federation relay pump
+        working-directory: agent-internet
         run: |
           mkdir -p .agent_internet
           DRAIN_FLAG=""
@@ -91,11 +93,10 @@ jobs:
             $DRAIN_FLAG \
             $INDEX_FLAG \
             --json | tee .agent_internet/relay-result.json
-        env:
-          PYTHONPATH: ${{ github.workspace }}
 
       - name: Summarize relay result
         if: always()
+        working-directory: agent-internet
         run: |
           echo '## Federation Relay Pump Result' >> "$GITHUB_STEP_SUMMARY"
           if [ -f .agent_internet/relay-result.json ]; then
@@ -106,13 +107,14 @@ jobs:
 
       - name: Commit updated state
         if: success()
+        working-directory: agent-internet
         run: |
-          git config --global user.name "agent-internet-bot"
-          git config --global user.email "bot@agent-internet"
+          git config user.name "agent-internet-bot"
+          git config user.email "bot@agent-internet"
           git add -A data/control_plane/ || true
           if git diff --cached --quiet; then
             echo "No state changes to commit."
           else
-            git commit -m "federation-relay: pump outboxes and refresh index"
+            git commit -m "relay: pump outboxes and refresh index"
             git push
           fi
