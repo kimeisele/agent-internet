@@ -34,10 +34,24 @@ FEDERATION_PEERS: list[dict] = [
     {
         "city_id": "steward",
         "slug": "steward",
+        "repo": "kimeisele/steward",
+        "sibling_dir": "steward",
+        "capabilities": (
+            "federation",
+            "heartbeat",
+            "healing",
+            "immune-system",
+            "cross-repo-diagnostic",
+        ),
+        "labels": {"role": "operator", "layer": "operator"},
+    },
+    {
+        "city_id": "steward-protocol",
+        "slug": "steward-protocol",
         "repo": "kimeisele/steward-protocol",
         "sibling_dir": "steward-protocol",
-        "capabilities": ("federation", "heartbeat", "immune-stats", "peer-status", "nadi-protocol"),
-        "labels": {"role": "protocol-steward", "layer": "substrate"},
+        "capabilities": ("federation", "substrate", "kernel"),
+        "labels": {"role": "substrate", "layer": "substrate"},
     },
     {
         "city_id": "agent-city",
@@ -91,12 +105,14 @@ def _register_all_peers(
         for target in all_city_ids:
             if source == target:
                 continue
-            plane.record_trust(TrustRecord(
-                issuer_city_id=source,
-                subject_city_id=target,
-                level=TrustLevel.VERIFIED,
-                reason="federation-mesh",
-            ))
+            plane.record_trust(
+                TrustRecord(
+                    issuer_city_id=source,
+                    subject_city_id=target,
+                    level=TrustLevel.VERIFIED,
+                    reason="federation-mesh",
+                )
+            )
             plane.publish_route(
                 owner_city_id="agent-internet",
                 destination_prefix=target,
@@ -125,7 +141,9 @@ def _pump_peer(
     ]
 
 
-def _refresh_federated_index(plane: AgentInternetControlPlane, discovered_roots: dict[str, Path]) -> dict:
+def _refresh_federated_index(
+    plane: AgentInternetControlPlane, discovered_roots: dict[str, Path]
+) -> dict:
     from agent_internet.agent_web_federated_index import (
         DEFAULT_AGENT_WEB_FEDERATED_INDEX_PATH,
         refresh_agent_web_federated_index_for_plane,
@@ -136,7 +154,9 @@ def _refresh_federated_index(plane: AgentInternetControlPlane, discovered_roots:
         peer_descriptor = root / "data" / "federation" / "peer.json"
         if not peer_descriptor.exists():
             continue
-        peer_info = next((p for p in FEDERATION_PEERS if p["city_id"] == city_id), FEDERATION_PEERS[0])
+        peer_info = next(
+            (p for p in FEDERATION_PEERS if p["city_id"] == city_id), FEDERATION_PEERS[0]
+        )
         upsert_agent_web_source_registry_entry(
             root=root,
             source_id=city_id,
@@ -202,7 +222,12 @@ def main() -> int:
         city_id = peer["city_id"]
         root = discovered_roots.get(city_id)
         if root is None:
-            all_receipts[city_id] = [{"status": "skipped", "detail": f"not found at {_repo_root.parent / peer['sibling_dir']}"}]
+            all_receipts[city_id] = [
+                {
+                    "status": "skipped",
+                    "detail": f"not found at {_repo_root.parent / peer['sibling_dir']}",
+                }
+            ]
             continue
         receipts = _pump_peer(pump, root, drain_delivered=args.drain_delivered)
         all_receipts[city_id] = receipts
@@ -234,9 +259,15 @@ def main() -> int:
     if index_result is not None:
         result["federated_index"] = {
             "refreshed": "error" not in index_result,
-            "record_count": index_result.get("stats", {}).get("record_count", 0) if isinstance(index_result, dict) else 0,
-            "source_count": index_result.get("stats", {}).get("source_count", 0) if isinstance(index_result, dict) else 0,
-            "error": index_result.get("error") if isinstance(index_result, dict) and "error" in index_result else None,
+            "record_count": index_result.get("stats", {}).get("record_count", 0)
+            if isinstance(index_result, dict)
+            else 0,
+            "source_count": index_result.get("stats", {}).get("source_count", 0)
+            if isinstance(index_result, dict)
+            else 0,
+            "error": index_result.get("error")
+            if isinstance(index_result, dict) and "error" in index_result
+            else None,
         }
 
     if args.json:
@@ -248,7 +279,9 @@ def main() -> int:
         print(f"  pumped: {total_pumped}  delivered: {total_delivered}")
         for city_id, receipts in all_receipts.items():
             if receipts:
-                print(f"  [{city_id}] {len(receipts)} msg: {', '.join(r['status'] for r in receipts)}")
+                print(
+                    f"  [{city_id}] {len(receipts)} msg: {', '.join(r['status'] for r in receipts)}"
+                )
         if index_result and "error" not in index_result:
             print(f"  index: {index_result.get('stats', {}).get('record_count', 0)} records")
 
