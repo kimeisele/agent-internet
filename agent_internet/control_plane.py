@@ -28,6 +28,7 @@ from .models import (
     CityEndpoint,
     CityIdentity,
     CityPresence,
+    HealthStatus,
     EndpointVisibility,
     ForkLineageRecord,
     HostedEndpoint,
@@ -225,8 +226,8 @@ class AgentInternetControlPlane:
         self.register_city(identity, endpoint)
 
         self.record_trust(TrustRecord(
-            source_city_id="agent-internet",
-            target_city_id=city_id,
+            issuer_city_id="agent-internet",
+            subject_city_id=city_id,
             level=TrustLevel.VERIFIED,
             reason="federation-peer-registration",
         ))

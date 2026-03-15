@@ -197,7 +197,7 @@ def _build_federation_snapshot_records(state_snapshot: dict, *, refreshed_at: fl
         for row in trust_rows:
             level = str(row.get("level", "unknown"))
             levels[level] = levels.get(level, 0) + 1
-            peers_seen.add(str(row.get("target_city_id", "")))
+            peers_seen.add(str(row.get("subject_city_id", "")))
         level_summary = ", ".join(f"{k}={v}" for k, v in sorted(levels.items()))
         records.append({
             "record_id": "federation:trust-summary",
