@@ -122,6 +122,22 @@ from .discovery_bootstrap import (
 from .operator_status import OperatorDashboard, build_operator_dashboard, format_dashboard_text
 from .sqlite_registry import SqliteCityRegistry
 
+# --- Agent Web Repo Graph (federation surface) ---
+from .agent_web_repo_graph import (
+    build_agent_web_repo_graph_snapshot,
+    read_agent_web_repo_graph_context,
+    read_agent_web_repo_graph_neighbors,
+)
+from .agent_web_repo_graph_capabilities import (
+    build_agent_web_repo_graph_capability_manifest,
+    render_agent_web_repo_graph_capability_page,
+)
+from .agent_web_repo_graph_contracts import (
+    build_agent_web_repo_graph_contract_manifest,
+    read_agent_web_repo_graph_contract_descriptor,
+    render_agent_web_repo_graph_contract_page,
+)
+
 __all__ = [
     "AgentCityDirectiveFactory",
     "AgentCityDirectiveExecutionAdapter",
@@ -246,4 +262,13 @@ __all__ = [
     "build_operator_dashboard",
     "format_dashboard_text",
     "SqliteCityRegistry",
+    # --- Agent Web Repo Graph (federation surface) ---
+    "build_agent_web_repo_graph_snapshot",
+    "read_agent_web_repo_graph_context",
+    "read_agent_web_repo_graph_neighbors",
+    "build_agent_web_repo_graph_capability_manifest",
+    "render_agent_web_repo_graph_capability_page",
+    "build_agent_web_repo_graph_contract_manifest",
+    "read_agent_web_repo_graph_contract_descriptor",
+    "render_agent_web_repo_graph_contract_page",
 ]
