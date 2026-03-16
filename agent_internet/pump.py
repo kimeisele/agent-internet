@@ -27,14 +27,28 @@ class OutboxRelayPump:
     ) -> list[DeliveryReceipt]:
         transport = FilesystemFederationTransport(AgentCityFilesystemContract(root=Path(root)))
         raw_messages = transport.read_outbox()
-        receipts: list[DeliveryReceipt] = []
-        remaining: list[dict] = []
-        relay_at = time.time()
+        if not raw_messages:
+            return []
 
+        # Assign envelope_ids to messages that don't have one, then persist
+        # back so remove_from_outbox can match them during drain.
+        enriched = False
+        for message in raw_messages:
+            existing_id = str(message.get("envelope_id", "")) or str(message.get("correlation_id", ""))
+            if not existing_id:
+                generated = str(uuid.uuid4())
+                message["envelope_id"] = generated
+                message["correlation_id"] = generated
+                enriched = True
+        if enriched:
+            transport.replace_outbox(raw_messages)
+
+        receipts: list[DeliveryReceipt] = []
+        relay_at = time.time()
         delivered_ids: set[str] = set()
 
         for message in raw_messages:
-            envelope_id = str(message.get("envelope_id", "")) or str(message.get("correlation_id", "")) or str(uuid.uuid4())
+            envelope_id = str(message.get("envelope_id", "")) or str(message.get("correlation_id", ""))
             # TTL clock starts at relay time, not message write time.
             # Without this, every message written more than ~24 s ago
             # (the default Nadi TTL) would expire before the relay even
