@@ -1,0 +1,26 @@
+{
+  "identity": {
+    "city_id": "agent-internet",
+    "slug": "agent-internet",
+    "repo": "kimeisele/agent-internet",
+    "public_key": ""
+  },
+  "endpoint": {
+    "city_id": "agent-internet",
+    "transport": "filesystem",
+    "location": "data/federation"
+  },
+  "capabilities": [
+    "nadi-relay",
+    "federation-discovery",
+    "lotus-addressing",
+    "semantic-search",
+    "authority-projection"
+  ],
+  "nadi": {
+    "outbox": "data/federation/nadi_outbox.json",
+    "inbox": "data/federation/nadi_inbox.json",
+    "reports": "data/federation/reports/",
+    "directives": "data/federation/directives/"
+  }
+}

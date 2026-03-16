@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +23,7 @@ class OutboxRelayPump:
         root: Path | str,
         *,
         drain_delivered: bool = False,
+        source_city_id: str = "",
     ) -> list[DeliveryReceipt]:
         transport = FilesystemFederationTransport(AgentCityFilesystemContract(root=Path(root)))
         raw_messages = transport.read_outbox()
@@ -32,14 +34,18 @@ class OutboxRelayPump:
         delivered_ids: set[str] = set()
 
         for message in raw_messages:
-            envelope_id = str(message.get("envelope_id", "")) or str(message.get("correlation_id", ""))
+            envelope_id = str(message.get("envelope_id", "")) or str(message.get("correlation_id", "")) or str(uuid.uuid4())
             # TTL clock starts at relay time, not message write time.
             # Without this, every message written more than ~24 s ago
             # (the default Nadi TTL) would expire before the relay even
             # attempts delivery.
+            # Use explicit source_city_id when provided — message "source"
+            # field may contain internal identifiers (e.g. MURALI phase
+            # names like "moksha") instead of the federation city_id.
+            effective_source = source_city_id or str(message.get("source", ""))
             receipt = self.plane.relay_envelope(
                 DeliveryEnvelope(
-                    source_city_id=str(message.get("source", "")),
+                    source_city_id=effective_source,
                     target_city_id=str(message.get("target", "")),
                     operation=str(message.get("operation", "")),
                     payload=dict(message.get("payload", {})),

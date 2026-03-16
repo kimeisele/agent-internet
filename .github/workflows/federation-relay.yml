@@ -33,12 +33,22 @@ jobs:
           fetch-depth: 1
           path: agent-internet
 
+      - name: Checkout steward
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/steward
+          path: steward
+          fetch-depth: 1
+          token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
       - name: Checkout steward-protocol
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/steward-protocol
           path: steward-protocol
           fetch-depth: 1
+          token: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
       - name: Checkout agent-city
@@ -47,6 +57,7 @@ jobs:
           repository: ${{ github.repository_owner }}/agent-city
           path: agent-city
           fetch-depth: 1
+          token: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
       - name: Checkout agent-world
@@ -55,6 +66,7 @@ jobs:
           repository: ${{ github.repository_owner }}/agent-world
           path: agent-world
           fetch-depth: 1
+          token: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
       - name: Setup Python
@@ -69,7 +81,7 @@ jobs:
       - name: Discover federation peers
         run: |
           echo '## Federation Peer Discovery' >> "$GITHUB_STEP_SUMMARY"
-          for repo in steward-protocol agent-city agent-world; do
+          for repo in steward steward-protocol agent-city agent-world; do
             if [ -d "$repo" ]; then
               echo "- **$repo**: discovered" >> "$GITHUB_STEP_SUMMARY"
             else
@@ -105,16 +117,37 @@ jobs:
             echo 'No relay result file generated.' >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Commit updated state
+      - name: Commit agent-internet state
         if: success()
         working-directory: agent-internet
         run: |
           git config user.name "agent-internet-bot"
           git config user.email "bot@agent-internet"
-          git add -A data/control_plane/ || true
+          git add -A data/control_plane/ data/federation/ || true
           if git diff --cached --quiet; then
-            echo "No state changes to commit."
+            echo "No agent-internet state changes."
           else
             git commit -m "relay: pump outboxes and refresh index"
             git push
           fi
+
+      - name: Push federation state to peer repos
+        if: success()
+        run: |
+          for repo in steward steward-protocol agent-city agent-world; do
+            if [ ! -d "$repo" ]; then
+              echo "[$repo] not checked out, skipping."
+              continue
+            fi
+            cd "$repo"
+            git config user.name "agent-internet-bot"
+            git config user.email "bot@agent-internet"
+            git add -A data/federation/ || true
+            if git diff --cached --quiet; then
+              echo "[$repo] no federation state changes."
+            else
+              git commit -m "relay: federation sync from agent-internet pump"
+              git push && echo "[$repo] pushed." || echo "[$repo] push failed (non-fatal)."
+            fi
+            cd ..
+          done
