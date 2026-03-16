@@ -305,6 +305,15 @@ def main() -> int:
         AgentCityFilesystemMessageTransport(),
     )
 
+    # GitHub API transport for remote peers (no local clone needed)
+    from agent_internet.github_api_transport import GitHubApiTransport
+    github_transport = GitHubApiTransport()
+    if github_transport.available:
+        plane.register_transport(TransportScheme.HTTPS.value, github_transport)
+        logger.info("GitHub API transport registered (remote delivery enabled)")
+    else:
+        logger.warning("No GitHub token — remote peers will be skipped")
+
     # Register agent-internet itself.
     plane.register_federation_peer(
         city_id="agent-internet",
