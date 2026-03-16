@@ -58,19 +58,27 @@ def _descriptor_default_display_name(repo_id: str) -> str:
 def parse_federation_descriptor(payload: dict[str, object]) -> FederationDescriptor:
     if str(payload.get("kind", "")).strip() != FEDERATION_DESCRIPTOR_KIND:
         raise ValueError("invalid_federation_descriptor_kind")
-    version = int(payload.get("version", 0))
-    if version != FEDERATION_DESCRIPTOR_VERSION:
-        raise ValueError(f"unsupported_federation_descriptor_version:{version}")
+    raw_version = payload.get("version", 0)
+    try:
+        version = int(raw_version)
+    except (ValueError, TypeError):
+        # Tolerate semver strings like "0.1.0" — extract major version
+        version = int(str(raw_version).split(".")[0]) if str(raw_version).split(".")[0].isdigit() else 0
+    if version < 1:
+        raise ValueError(f"unsupported_federation_descriptor_version:{raw_version}")
     repo_id = str(payload.get("repo_id", "")).strip()
     manifest_url = str(payload.get("authority_feed_manifest_url", "")).strip()
-    if not repo_id or not manifest_url:
+    if not repo_id:
         raise ValueError("invalid_federation_descriptor_required_fields")
     intents_payload = payload.get("projection_intents", [FederationProjectionIntent.PUBLIC_AUTHORITY_PAGE.value])
     if not isinstance(intents_payload, list):
         raise TypeError("invalid_federation_descriptor_projection_intents")
     projection_intents: list[FederationProjectionIntent] = []
     for item in intents_payload:
-        intent = FederationProjectionIntent(str(item))
+        try:
+            intent = FederationProjectionIntent(str(item))
+        except ValueError:
+            continue  # Skip unknown intents — federation evolves
         if intent not in projection_intents:
             projection_intents.append(intent)
     if not projection_intents:
