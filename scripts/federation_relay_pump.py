@@ -208,6 +208,7 @@ def _pump_peer(
     pump: OutboxRelayPump,
     root: Path,
     *,
+    city_id: str,
     drain_delivered: bool,
     all_peer_ids: list[str] | None = None,
 ) -> list[dict]:
@@ -224,7 +225,7 @@ def _pump_peer(
         if msg.get("target") == "*" and all_peer_ids:
             source = msg.get("source", "")
             for peer_id in all_peer_ids:
-                if peer_id != source:
+                if peer_id != source and peer_id != city_id:
                     unicast = dict(msg)
                     unicast["target"] = peer_id
                     expanded.append(unicast)
@@ -235,7 +236,9 @@ def _pump_peer(
     if expanded != raw_messages:
         transport.replace_outbox(expanded)
 
-    receipts = pump.pump_city_root(root, drain_delivered=drain_delivered)
+    # Use city_id as source — message "source" field may contain internal
+    # identifiers (e.g. MURALI phase names) instead of the federation identity.
+    receipts = pump.pump_city_root(root, drain_delivered=drain_delivered, source_city_id=city_id)
     return [
         {
             "envelope_id": receipt.target_city_id,
@@ -338,7 +341,7 @@ def main() -> int:
             ]
             continue
         receipts = _pump_peer(
-            pump, root, drain_delivered=args.drain_delivered, all_peer_ids=all_peer_ids
+            pump, root, city_id=city_id, drain_delivered=args.drain_delivered, all_peer_ids=all_peer_ids
         )
         all_receipts[city_id] = receipts
         total_pumped += len(receipts)

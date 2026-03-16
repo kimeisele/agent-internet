@@ -276,15 +276,18 @@ class LocalDualCityLab:
         ttl_ms: int | None = None,
         maha_header_hex: str = "",
     ) -> int:
+        import uuid
+
         bindings = load_steward_substrate()
         transport = FilesystemFederationTransport(self.contract(source_city_id))
+        effective_id = correlation_id or str(uuid.uuid4())
         envelope = DeliveryEnvelope(
             source_city_id=source_city_id,
             target_city_id=target_city_id,
             operation=operation,
             payload=dict(payload),
-            envelope_id=correlation_id,
-            correlation_id=correlation_id,
+            envelope_id=effective_id,
+            correlation_id=effective_id,
             ttl_s=ttl_s,
             nadi_type=nadi_type,
             nadi_op=nadi_op,
@@ -300,12 +303,11 @@ class LocalDualCityLab:
             operation=operation,
             payload=dict(payload),
             priority=raw_priority,
-            correlation_id=correlation_id,
+            correlation_id=effective_id,
             ttl_s=semantics.ttl_s,
         )
         raw_message = message.to_dict()
-        if correlation_id:
-            raw_message["envelope_id"] = correlation_id
+        raw_message["envelope_id"] = effective_id
         raw_message["nadi_type"] = semantics.nadi_type
         raw_message["nadi_op"] = semantics.nadi_op
         raw_message["nadi_priority"] = semantics.priority
@@ -321,7 +323,7 @@ class LocalDualCityLab:
         return transport.append_to_outbox([raw_message])
 
     def pump_outbox(self, city_id: str, *, drain_delivered: bool = False) -> list[DeliveryReceipt]:
-        return self.outbox_pump.pump_city_root(self.city_root(city_id), drain_delivered=drain_delivered)
+        return self.outbox_pump.pump_city_root(self.city_root(city_id), drain_delivered=drain_delivered, source_city_id=city_id)
 
     def sync_once(self, *, drain_delivered: bool = True, cycle: int = 1):
         from .sync_worker import BidirectionalSyncWorker
