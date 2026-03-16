@@ -39,7 +39,7 @@ jobs:
           repository: ${{ github.repository_owner }}/steward
           path: steward
           fetch-depth: 1
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
       - name: Checkout steward-protocol
@@ -48,7 +48,7 @@ jobs:
           repository: ${{ github.repository_owner }}/steward-protocol
           path: steward-protocol
           fetch-depth: 1
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
       - name: Checkout agent-city
@@ -57,7 +57,7 @@ jobs:
           repository: ${{ github.repository_owner }}/agent-city
           path: agent-city
           fetch-depth: 1
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
       - name: Checkout agent-world
@@ -66,7 +66,7 @@ jobs:
           repository: ${{ github.repository_owner }}/agent-world
           path: agent-world
           fetch-depth: 1
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
       - name: Setup Python
@@ -91,6 +91,8 @@ jobs:
 
       - name: Run federation relay pump
         working-directory: agent-internet
+        env:
+          GITHUB_TOKEN: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p .agent_internet
           DRAIN_FLAG=""
