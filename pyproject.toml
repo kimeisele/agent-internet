@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [{name = "agents"}]
 keywords = ["agents", "federation", "network", "mesh", "control-plane"]
-dependencies = ["city", "city", "city", "city", "city", "city", "city", "city", "city", "city", "city", "city"]
+dependencies = []
 
 [project.optional-dependencies]
 substrate = ["steward-protocol[web,crypto]"]
