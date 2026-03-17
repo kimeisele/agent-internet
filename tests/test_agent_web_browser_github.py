@@ -18,6 +18,8 @@ from agent_internet.agent_web_browser_github import (
     _PULL_PAT,
     _TREE_PAT,
     _BLOB_PAT,
+    _WIKI_PAT,
+    _WIKI_PAGE_PAT,
     _USER_PAT,
     create_github_browser,
 )
@@ -404,3 +406,120 @@ def test_github_skips_non_user_paths():
     page = source.fetch("https://github.com/settings", config=BrowserConfig())
     assert not page.ok
     assert "Not a user path" in page.error
+
+
+# ---------------------------------------------------------------------------
+# Wiki URL patterns
+# ---------------------------------------------------------------------------
+
+def test_wiki_pattern():
+    m = _WIKI_PAT.match("/owner/repo/wiki")
+    assert m
+    assert m.group(1) == "owner"
+    assert m.group(2) == "repo"
+
+
+def test_wiki_page_pattern():
+    m = _WIKI_PAGE_PAT.match("/owner/repo/wiki/Getting-Started")
+    assert m
+    assert m.group(3) == "Getting-Started"
+
+
+def test_wiki_page_pattern_nested():
+    m = _WIKI_PAGE_PAT.match("/owner/repo/wiki/docs/setup")
+    assert m
+    assert m.group(3) == "docs/setup"
+
+
+# ---------------------------------------------------------------------------
+# Wiki fetch (mocked API)
+# ---------------------------------------------------------------------------
+
+def test_fetch_wiki_listing():
+    source = _MockGitHubSource({
+        "/repos/octo/cat": (200, {
+            "full_name": "octo/cat",
+            "has_wiki": True,
+        }),
+        "/repos/octo/cat.wiki/git/trees/master?recursive=1": (200, {
+            "tree": [
+                {"path": "Home.md", "type": "blob"},
+                {"path": "Setup.md", "type": "blob"},
+                {"path": "API-Reference.md", "type": "blob"},
+                {"path": "_Sidebar.md", "type": "blob"},
+            ],
+        }),
+    })
+    page = source.fetch("https://github.com/octo/cat/wiki", config=BrowserConfig())
+    assert page.ok
+    assert "Wiki" in page.title
+    assert "4 wiki pages" in page.content_text
+    assert any(link.text == "Home" for link in page.links)
+    assert any(link.text == "API Reference" for link in page.links)
+
+
+def test_fetch_wiki_page():
+    source = _MockGitHubSource({})
+    # Override _api_get_raw to return wiki content
+    original_raw = source._api_get_raw
+
+    def mock_raw(endpoint, *, config):
+        if "cat.wiki" in endpoint:
+            return (200, "# Getting Started\n\nWelcome to the wiki.\n\n## Setup\n\nInstall with pip.\n")
+        return original_raw(endpoint, config=config)
+
+    source._api_get_raw = mock_raw
+
+    page = source.fetch("https://github.com/octo/cat/wiki/Getting-Started", config=BrowserConfig())
+    assert page.ok
+    assert "Getting Started" in page.title
+    assert "wiki" in page.title.lower() or "Wiki" in page.title
+    assert "Welcome" in page.content_text
+    assert page.content_type == "text/markdown"
+
+
+def test_fetch_wiki_no_wiki():
+    source = _MockGitHubSource({
+        "/repos/octo/cat": (200, {"full_name": "octo/cat", "has_wiki": False}),
+    })
+    page = source.fetch("https://github.com/octo/cat/wiki", config=BrowserConfig())
+    assert not page.ok
+    assert "not enabled" in page.error
+
+
+# ---------------------------------------------------------------------------
+# Semantic Depth: repo structure in _fetch_repo
+# ---------------------------------------------------------------------------
+
+def test_repo_shows_structure():
+    source = _MockGitHubSource({
+        "/repos/octo/cat": (200, {
+            "full_name": "octo/cat",
+            "description": "A test repo",
+            "language": "Python",
+            "stargazers_count": 10,
+            "forks_count": 2,
+            "open_issues_count": 3,
+            "default_branch": "main",
+            "topics": ["test"],
+            "has_wiki": True,
+        }),
+        "/repos/octo/cat/readme": (200, "# Hello"),
+        "/repos/octo/cat/git/trees/main": (200, {
+            "tree": [
+                {"path": "src", "type": "tree"},
+                {"path": "tests", "type": "tree"},
+                {"path": "pyproject.toml", "type": "blob"},
+                {"path": "README.md", "type": "blob"},
+                {"path": "main.py", "type": "blob"},
+            ],
+        }),
+    })
+    page = source.fetch("https://github.com/octo/cat", config=BrowserConfig())
+    assert page.ok
+    assert "Structure" in page.content_text
+    assert "📁 src/" in page.content_text
+    assert "📁 tests/" in page.content_text
+    assert "📄 pyproject.toml" in page.content_text
+    # Wiki link should be present since has_wiki=True
+    assert any(link.text == "Wiki" for link in page.links)
