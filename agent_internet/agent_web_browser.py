@@ -175,6 +175,28 @@ class BrowserTab:
         self.cursor = len(self.history) - 1
 
 
+@dataclass(frozen=True, slots=True)
+class Bookmark:
+    """A saved bookmark."""
+
+    url: str
+    title: str
+    folder: str = ""
+    tags: tuple[str, ...] = ()
+    added_at: float = 0.0
+    notes: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class HistoryEntry:
+    """A single browsing history entry."""
+
+    url: str
+    title: str
+    visited_at: float = 0.0
+    status_code: int = 200
+
+
 # ---------------------------------------------------------------------------
 # HTML Parser
 # ---------------------------------------------------------------------------
@@ -830,6 +852,9 @@ class AgentWebBrowser:
     _page_cache: dict[str, BrowserPage] = field(default_factory=dict)
     _sources: list[PageSource] = field(default_factory=list)
     _request_count: int = 0
+    _bookmarks: list[Bookmark] = field(default_factory=list)
+    _history: list[HistoryEntry] = field(default_factory=list)
+    _max_history: int = 500
 
     def __post_init__(self) -> None:
         if not self._tabs:
@@ -919,6 +944,7 @@ class AgentWebBrowser:
         tab = self.active_tab
         tab.push_url(url)
         tab.current_page = page
+        self._record_history(page)
         logger.info("open %s → %d %s", url, page.status_code, page.title[:60])
         return page
 
@@ -1048,6 +1074,248 @@ class AgentWebBrowser:
             return page.find_links(query)
         return page.links
 
+    # -- Bookmarks --
+
+    def bookmark(
+        self,
+        url: str = "",
+        *,
+        title: str = "",
+        folder: str = "",
+        tags: tuple[str, ...] | list[str] = (),
+        notes: str = "",
+    ) -> Bookmark:
+        """Add a bookmark.  Defaults to current page if no URL given."""
+        if not url:
+            page = self.current_page
+            if page is None:
+                raise ValueError("no_current_page")
+            url = page.url
+            title = title or page.title
+
+        # Deduplicate by URL
+        self._bookmarks = [bm for bm in self._bookmarks if bm.url != url]
+        bm = Bookmark(
+            url=url,
+            title=title or url,
+            folder=folder,
+            tags=tuple(tags),
+            added_at=time.time(),
+            notes=notes,
+        )
+        self._bookmarks.append(bm)
+        return bm
+
+    def remove_bookmark(self, url: str) -> bool:
+        """Remove a bookmark by URL.  Returns True if found."""
+        before = len(self._bookmarks)
+        self._bookmarks = [bm for bm in self._bookmarks if bm.url != url]
+        return len(self._bookmarks) < before
+
+    def list_bookmarks(self, *, folder: str = "", query: str = "") -> list[Bookmark]:
+        """List bookmarks, optionally filtered by folder or search query."""
+        results = self._bookmarks
+        if folder:
+            results = [bm for bm in results if bm.folder == folder]
+        if query:
+            q = query.lower()
+            results = [
+                bm for bm in results
+                if q in bm.title.lower() or q in bm.url.lower()
+                or any(q in t.lower() for t in bm.tags)
+                or q in bm.notes.lower()
+            ]
+        return results
+
+    def bookmark_folders(self) -> list[str]:
+        """Return sorted unique bookmark folder names."""
+        return sorted({bm.folder for bm in self._bookmarks if bm.folder})
+
+    @property
+    def bookmark_count(self) -> int:
+        return len(self._bookmarks)
+
+    # -- History --
+
+    def _record_history(self, page: BrowserPage) -> None:
+        """Record a page visit in history."""
+        entry = HistoryEntry(
+            url=page.url,
+            title=page.title,
+            visited_at=time.time(),
+            status_code=page.status_code,
+        )
+        self._history.append(entry)
+        # Trim to max
+        if len(self._history) > self._max_history:
+            self._history = self._history[-self._max_history:]
+
+    def history(self, *, limit: int = 50, query: str = "") -> list[HistoryEntry]:
+        """Return browsing history, most recent first."""
+        entries = list(reversed(self._history))
+        if query:
+            q = query.lower()
+            entries = [e for e in entries if q in e.title.lower() or q in e.url.lower()]
+        return entries[:limit]
+
+    def clear_history(self) -> int:
+        """Clear all history.  Returns count of entries cleared."""
+        count = len(self._history)
+        self._history.clear()
+        return count
+
+    @property
+    def history_count(self) -> int:
+        return len(self._history)
+
+    # -- Reader mode --
+
+    def reader(self, *, token_budget: int = 1024) -> BrowserPage:
+        """Return current page in reader mode — stripped to pure content.
+
+        Aggressive compression: removes all nav, sidebars, ads, footers.
+        Only keeps the main content + title + description.
+        """
+        page = self.current_page
+        if page is None:
+            raise ValueError("no_current_page")
+        return compress_page(page, token_budget=token_budget, link_budget=5, keep_meta=True)
+
+    # -- Web search --
+
+    def search(self, query: str, *, engine: str = "duckduckgo") -> BrowserPage:
+        """Search the web using a search engine.
+
+        Supported engines: ``duckduckgo`` (default), ``google``.
+        Returns the search results page.
+        """
+        from urllib.parse import quote_plus
+        if engine == "google":
+            url = f"https://www.google.com/search?q={quote_plus(query)}"
+        else:
+            # DuckDuckGo HTML-only (no JS required)
+            url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+        return self.open(url)
+
+    # -- Session save/restore --
+
+    def save_session(self, path: str) -> dict:
+        """Save browser state (bookmarks, history, tabs) to a JSON file.
+
+        Does NOT save page cache or raw HTML — only navigational state.
+        """
+        from pathlib import Path
+        session = {
+            "kind": "agent_web_browser_session",
+            "version": 1,
+            "saved_at": time.time(),
+            "config": {
+                "token_budget": self.config.token_budget,
+                "compress_links": self.config.compress_links,
+                "user_agent": self.config.user_agent,
+            },
+            "bookmarks": [
+                {
+                    "url": bm.url,
+                    "title": bm.title,
+                    "folder": bm.folder,
+                    "tags": list(bm.tags),
+                    "added_at": bm.added_at,
+                    "notes": bm.notes,
+                }
+                for bm in self._bookmarks
+            ],
+            "history": [
+                {
+                    "url": e.url,
+                    "title": e.title,
+                    "visited_at": e.visited_at,
+                    "status_code": e.status_code,
+                }
+                for e in self._history
+            ],
+            "tabs": [
+                {
+                    "tab_id": tab.tab_id,
+                    "label": tab.label,
+                    "history": tab.history,
+                    "cursor": tab.cursor,
+                }
+                for tab in self._tabs.values()
+            ],
+            "active_tab_id": self._active_tab_id,
+            "request_count": self._request_count,
+        }
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(session, indent=2, default=str), encoding="utf-8")
+        return {"saved": True, "path": str(p), "bookmarks": len(self._bookmarks), "history": len(self._history)}
+
+    def restore_session(self, path: str) -> dict:
+        """Restore browser state from a saved session file."""
+        from pathlib import Path
+        p = Path(path)
+        if not p.exists():
+            return {"restored": False, "error": "file_not_found"}
+
+        data = json.loads(p.read_text(encoding="utf-8"))
+        if data.get("kind") != "agent_web_browser_session":
+            return {"restored": False, "error": "invalid_session_file"}
+
+        # Restore bookmarks
+        self._bookmarks = [
+            Bookmark(
+                url=bm["url"],
+                title=bm.get("title", ""),
+                folder=bm.get("folder", ""),
+                tags=tuple(bm.get("tags", ())),
+                added_at=bm.get("added_at", 0.0),
+                notes=bm.get("notes", ""),
+            )
+            for bm in data.get("bookmarks", [])
+        ]
+
+        # Restore history
+        self._history = [
+            HistoryEntry(
+                url=e["url"],
+                title=e.get("title", ""),
+                visited_at=e.get("visited_at", 0.0),
+                status_code=e.get("status_code", 200),
+            )
+            for e in data.get("history", [])
+        ]
+
+        # Restore tabs
+        self._tabs.clear()
+        for tab_data in data.get("tabs", []):
+            tab = BrowserTab(
+                tab_id=tab_data["tab_id"],
+                label=tab_data.get("label", ""),
+                history=tab_data.get("history", []),
+                cursor=tab_data.get("cursor", -1),
+            )
+            self._tabs[tab.tab_id] = tab
+
+        self._active_tab_id = data.get("active_tab_id", "")
+        if self._active_tab_id not in self._tabs and self._tabs:
+            self._active_tab_id = next(iter(self._tabs))
+
+        # Ensure at least one tab
+        if not self._tabs:
+            tab = BrowserTab(tab_id=f"tab_{token_hex(4)}", label="main")
+            self._tabs[tab.tab_id] = tab
+            self._active_tab_id = tab.tab_id
+
+        self._request_count = data.get("request_count", 0)
+
+        return {
+            "restored": True,
+            "bookmarks": len(self._bookmarks),
+            "history": len(self._history),
+            "tabs": len(self._tabs),
+        }
+
     # -- Snapshot / serialization --
 
     def snapshot(self) -> dict:
@@ -1059,6 +1327,8 @@ class AgentWebBrowser:
             "request_count": self._request_count,
             "cache_size": len(self._page_cache),
             "tabs": self.list_tabs(),
+            "bookmark_count": len(self._bookmarks),
+            "history_count": len(self._history),
         }
 
     # -- Internal --
@@ -1177,6 +1447,64 @@ class AgentWebBrowser:
 
             return BrowserPage(
                 url=url, status_code=200, title="Federation — Agent Web Browser",
+                content_text="\n".join(text_parts), links=tuple(links),
+                forms=(), meta=PageMeta(), fetched_at=time.time(),
+            )
+
+        if page_name == "bookmarks":
+            text_parts = ["# Bookmarks", ""]
+            links: list[PageLink] = []
+            if not self._bookmarks:
+                text_parts.append("(no bookmarks saved)")
+            else:
+                folders = self.bookmark_folders()
+                if folders:
+                    for folder in folders:
+                        text_parts.append(f"## {folder}")
+                        for bm in self._bookmarks:
+                            if bm.folder == folder:
+                                text_parts.append(f"  [{bm.title}]({bm.url})")
+                                if bm.tags:
+                                    text_parts.append(f"    tags: {', '.join(bm.tags)}")
+                                links.append(PageLink(href=bm.url, text=bm.title, index=len(links)))
+                        text_parts.append("")
+                # Unfiled bookmarks
+                unfiled = [bm for bm in self._bookmarks if not bm.folder]
+                if unfiled:
+                    if folders:
+                        text_parts.append("## Unfiled")
+                    for bm in unfiled:
+                        text_parts.append(f"  [{bm.title}]({bm.url})")
+                        if bm.tags:
+                            text_parts.append(f"    tags: {', '.join(bm.tags)}")
+                        links.append(PageLink(href=bm.url, text=bm.title, index=len(links)))
+
+                text_parts.append("")
+                text_parts.append(f"Total: {len(self._bookmarks)} bookmarks")
+
+            return BrowserPage(
+                url=url, status_code=200, title="Bookmarks — Agent Web Browser",
+                content_text="\n".join(text_parts), links=tuple(links),
+                forms=(), meta=PageMeta(), fetched_at=time.time(),
+            )
+
+        if page_name == "history":
+            text_parts = ["# Browsing History", ""]
+            links: list[PageLink] = []
+            entries = self.history(limit=100)
+            if not entries:
+                text_parts.append("(no history)")
+            else:
+                for entry in entries:
+                    ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(entry.visited_at))
+                    text_parts.append(f"  {ts}  [{entry.status_code}] {entry.title[:60]}")
+                    text_parts.append(f"         {entry.url}")
+                    links.append(PageLink(href=entry.url, text=entry.title, index=len(links)))
+                text_parts.append("")
+                text_parts.append(f"Total: {len(self._history)} entries")
+
+            return BrowserPage(
+                url=url, status_code=200, title="History — Agent Web Browser",
                 content_text="\n".join(text_parts), links=tuple(links),
                 forms=(), meta=PageMeta(), fetched_at=time.time(),
             )
