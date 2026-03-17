@@ -2281,6 +2281,27 @@ def main(argv: list[str] | None = None) -> int:
     verify_cmd.add_argument("--state-path", default="data/control_plane/state.json")
     verify_cmd.add_argument("--city-id", default="")
 
+    # --- Agent Web Browser ---
+    browse_cmd = sub.add_parser("web-browse", help="Browse a URL and print agent-readable content")
+    browse_cmd.add_argument("url", help="URL to browse")
+    browse_cmd.add_argument("--format", choices=["text", "json", "summary"], default="text")
+    browse_cmd.add_argument("--max-text", type=int, default=0, help="Truncate text output (0=unlimited)")
+    browse_cmd.add_argument("--github", action="store_true", help="Enable GitHub API source")
+    browse_cmd.add_argument("--show-links", action="store_true", help="Also print extracted links")
+    browse_cmd.add_argument("--show-forms", action="store_true", help="Also print extracted forms")
+
+    browse_links_cmd = sub.add_parser("web-links", help="Extract and print links from a URL")
+    browse_links_cmd.add_argument("url", help="URL to extract links from")
+    browse_links_cmd.add_argument("--query", default="", help="Filter links by text or href")
+    browse_links_cmd.add_argument("--github", action="store_true", help="Enable GitHub API source")
+
+    browse_search_cmd = sub.add_parser(
+        "web-search-page", help="Search current page links by keyword",
+    )
+    browse_search_cmd.add_argument("url", help="URL to search")
+    browse_search_cmd.add_argument("query", help="Search query")
+    browse_search_cmd.add_argument("--github", action="store_true", help="Enable GitHub API source")
+
     args = parser.parse_args(argv)
     if args.command == "publish-agent-city-peer":
         return cmd_publish_agent_city_peer(args)
@@ -2434,8 +2455,97 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_intent_actuate(args)
     if args.command == "contract-verify":
         return cmd_contract_verify(args)
+    if args.command == "web-browse":
+        return cmd_web_browse(args)
+    if args.command == "web-links":
+        return cmd_web_links(args)
+    if args.command == "web-search-page":
+        return cmd_web_search_page(args)
     parser.error(f"Unknown command: {args.command}")
     return 2
+
+
+# ---------------------------------------------------------------------------
+# Agent Web Browser commands
+# ---------------------------------------------------------------------------
+
+def cmd_web_browse(args: argparse.Namespace) -> int:
+    from .agent_web_browser import AgentWebBrowser
+    from .agent_web_browser_github import GitHubBrowserSource
+
+    browser = AgentWebBrowser()
+    if args.github:
+        browser.register_source(GitHubBrowserSource())
+
+    page = browser.open(args.url, use_cache=False)
+    if args.format == "json":
+        print(json.dumps(page.summary(), indent=2))
+    elif args.format == "summary":
+        s = page.summary(max_text=args.max_text or 500)
+        print(f"URL:    {s['url']}")
+        print(f"Title:  {s['title']}")
+        print(f"Status: {s['status']}  OK: {s['ok']}")
+        if s.get("error"):
+            print(f"Error:  {s['error']}")
+        if s.get("meta_description"):
+            print(f"Desc:   {s['meta_description']}")
+        print(f"Links:  {s['link_count']}  Forms: {s['form_count']}")
+        print()
+        print(s["text_preview"])
+    else:
+        text = page.content_text
+        if args.max_text > 0:
+            text = text[: args.max_text]
+        print(text)
+
+    if args.show_links and page.links:
+        print("\n--- Links ---")
+        for link in page.links:
+            print(f"  [{link.index}] {link.text}  →  {link.href}")
+
+    if args.show_forms and page.forms:
+        print("\n--- Forms ---")
+        for form in page.forms:
+            fields = ", ".join(f.name for f in form.fields if f.name)
+            print(f"  [{form.index}] {form.method} {form.action}  fields: {fields}")
+
+    return 0 if page.ok else 1
+
+
+def cmd_web_links(args: argparse.Namespace) -> int:
+    from .agent_web_browser import AgentWebBrowser
+    from .agent_web_browser_github import GitHubBrowserSource
+
+    browser = AgentWebBrowser()
+    if args.github:
+        browser.register_source(GitHubBrowserSource())
+
+    page = browser.open(args.url, use_cache=False)
+    links = page.find_links(args.query) if args.query else page.links
+    result = [
+        {"index": link.index, "text": link.text, "href": link.href, "rel": link.rel}
+        for link in links
+    ]
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_web_search_page(args: argparse.Namespace) -> int:
+    from .agent_web_browser import AgentWebBrowser
+    from .agent_web_browser_github import GitHubBrowserSource
+
+    browser = AgentWebBrowser()
+    if args.github:
+        browser.register_source(GitHubBrowserSource())
+
+    page = browser.open(args.url, use_cache=False)
+    matches = page.find_links(args.query)
+    result = [
+        {"index": link.index, "text": link.text, "href": link.href}
+        for link in matches
+    ]
+    print(json.dumps(result, indent=2))
+    return 0
 
 
 if __name__ == "__main__":
