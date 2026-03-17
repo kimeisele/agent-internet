@@ -384,3 +384,228 @@ def test_navigate_routes_to_city():
     cp_link = next(l for l in routes.links if l.href.startswith("cp://cities/"))
     detail = browser.open(cp_link.href)
     assert detail.ok
+
+
+# ---------------------------------------------------------------------------
+# Forms: pages should expose forms
+# ---------------------------------------------------------------------------
+
+def test_cities_page_has_register_form():
+    browser = _make_browser()
+    page = browser.open("about:cities")
+    assert len(page.forms) == 1
+    form = page.forms[0]
+    assert form.form_id == "register_city"
+    assert form.action == "cp://cities/register"
+    assert form.method == "POST"
+    field_names = [f.name for f in form.fields]
+    assert "city_id" in field_names
+    assert "location" in field_names
+
+
+def test_trust_page_has_record_form():
+    browser = _make_browser()
+    page = browser.open("about:trust")
+    assert len(page.forms) == 1
+    assert page.forms[0].form_id == "record_trust"
+
+
+def test_routes_page_has_publish_form():
+    browser = _make_browser()
+    page = browser.open("about:routes")
+    assert len(page.forms) == 1
+    assert page.forms[0].form_id == "publish_route"
+
+
+def test_spaces_page_has_claim_and_lease_forms():
+    browser = _make_browser()
+    page = browser.open("about:spaces")
+    assert len(page.forms) == 2
+    form_ids = {f.form_id for f in page.forms}
+    assert "claim_space" in form_ids
+    assert "request_slot_lease" in form_ids
+
+
+def test_intents_page_has_submit_form():
+    browser = _make_browser()
+    page = browser.open("about:intents")
+    assert len(page.forms) == 1
+    assert page.forms[0].form_id == "submit_intent"
+
+
+# ---------------------------------------------------------------------------
+# Form submission roundtrips — submit → verify in control plane → verify in page
+# ---------------------------------------------------------------------------
+
+def test_submit_register_city():
+    """Register a new city via form and verify it appears."""
+    browser = _make_browser()
+    browser.open("about:cities")
+
+    result = browser.submit_form("register_city", values={
+        "city_id": "new-city",
+        "slug": "new-city",
+        "repo": "kimeisele/new-city",
+        "transport": "https",
+        "location": "https://github.com/kimeisele/new-city",
+    })
+    assert result.ok
+    # Should redirect to city detail
+    assert "new-city" in result.content_text
+    assert "kimeisele/new-city" in result.content_text
+
+    # Verify in cities list (bypass cache to see the update)
+    cities = browser.open("about:cities", use_cache=False)
+    assert "Total: 6" in cities.content_text
+    assert "new-city" in cities.content_text
+
+
+def test_submit_register_city_missing_fields():
+    """Missing required fields should return error, not crash."""
+    browser = _make_browser()
+    browser.open("about:cities")
+
+    result = browser.submit_form("register_city", values={
+        "city_id": "x",
+        # location is missing
+    })
+    assert not result.ok
+    assert "Missing required fields" in result.error
+
+
+def test_submit_record_trust():
+    """Record trust between two cities via form."""
+    browser = _make_browser()
+    browser.open("about:trust")
+
+    result = browser.submit_form("record_trust", values={
+        "issuer_city_id": "agent-city",
+        "subject_city_id": "agent-world",
+        "level": "trusted",
+        "reason": "test trust",
+    })
+    assert result.ok
+    # Should show updated trust
+    assert "TRUSTED" in result.content_text
+
+
+def test_submit_record_trust_invalid_level():
+    browser = _make_browser()
+    browser.open("about:trust")
+
+    result = browser.submit_form("record_trust", values={
+        "issuer_city_id": "agent-city",
+        "subject_city_id": "agent-world",
+        "level": "invalid_level",
+    })
+    assert not result.ok
+    assert "Invalid trust level" in result.error
+
+
+def test_submit_publish_route():
+    """Publish a route via form and verify it appears."""
+    browser = _make_browser()
+    browser.open("about:routes")
+
+    result = browser.submit_form("publish_route", values={
+        "owner_city_id": "agent-world",
+        "destination_prefix": "service:steward/",
+        "target_city_id": "steward",
+        "next_hop_city_id": "steward",
+        "metric": "50",
+    })
+    assert result.ok
+    assert "Total: 3" in result.content_text
+    assert "steward" in result.content_text
+
+
+def test_submit_claim_space():
+    """Claim a space via form and verify it appears."""
+    browser = _make_browser()
+    browser.open("about:spaces")
+
+    result = browser.submit_form("claim_space", values={
+        "space_id": "space:federation-commons",
+        "subject_id": "agent-world",
+    })
+    assert result.ok
+    assert "agent-world" in result.content_text
+    assert "Claims: 1" in result.content_text or "Active Claims" in result.content_text
+
+
+def test_submit_slot_lease():
+    """Request a slot lease via form."""
+    browser = _make_browser()
+    browser.open("about:spaces")
+
+    result = browser.submit_form("request_slot_lease", values={
+        "slot_id": "slot:steward-protocol-bridge",
+        "space_id": "space:federation-commons",
+        "holder_subject_id": "agent-city",
+    })
+    assert result.ok
+    assert "Active Leases" in result.content_text
+    assert "agent-city" in result.content_text
+
+
+def test_submit_intent():
+    """Submit an intent via form and verify it appears."""
+    browser = _make_browser()
+    browser.open("about:intents")
+
+    result = browser.submit_form("submit_intent", values={
+        "intent_type": "request_space_claim",
+        "title": "Give me a space",
+        "requested_by_subject_id": "agent-42",
+        "city_id": "agent-internet",
+    })
+    assert result.ok
+    # Should now have 2 intents (1 from setup + 1 new)
+    assert "Intents: 2" in result.content_text
+    assert "Give me a space" in result.content_text
+
+
+def test_submit_intent_invalid_type():
+    browser = _make_browser()
+    browser.open("about:intents")
+
+    result = browser.submit_form("submit_intent", values={
+        "intent_type": "does_not_exist",
+        "title": "Bad intent",
+        "requested_by_subject_id": "agent-42",
+    })
+    assert not result.ok
+    assert "Invalid intent_type" in result.error
+
+
+# ---------------------------------------------------------------------------
+# Submit without control plane
+# ---------------------------------------------------------------------------
+
+def test_submit_without_control_plane():
+    """Submitting a cp:// form without control plane gives clear error."""
+    from agent_internet.agent_web_browser import FormField, PageForm
+
+    browser = AgentWebBrowser()
+    # Manually set a page with a cp:// form so we can submit it
+    from agent_internet.agent_web_browser import BrowserPage, PageMeta
+    import time
+    fake_page = BrowserPage(
+        url="about:cities", status_code=200, title="Test",
+        content_text="test", links=(), meta=PageMeta(), headers={},
+        fetched_at=time.time(), content_type="text/html", encoding="utf-8",
+        raw_html="", error="",
+        forms=(PageForm(
+            action="cp://cities/register", method="POST", form_id="test",
+            fields=(FormField(name="city_id"), FormField(name="location")),
+        ),),
+    )
+    tab = browser.active_tab
+    tab.current_page = fake_page
+    tab.push_url("about:cities")
+
+    result = browser.submit_form("test", values={
+        "city_id": "x", "location": "y",
+    })
+    assert not result.ok
+    assert result.status_code == 503
