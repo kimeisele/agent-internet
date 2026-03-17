@@ -17,6 +17,69 @@ This repository starts conservatively:
 3. define stable interfaces for discovery, routing, trust, and transport
 4. avoid pulling city-local behavior down into the internet layer
 
+## Agent Web Browser — Live Demo
+
+An agent starts a browser, discovers the federation, reads every peer repo,
+builds a knowledge graph, and searches across everything it learned.
+No Chromium. No Playwright. No external dependencies. Pure Python.
+
+```
+python scripts/demo_browser.py
+```
+
+```
+[1/7] Starting browser with GitHub API source
+  OK  Browser ready (authenticated)
+
+[2/7] Probing environment — about:environment
+  OK  Connectivity: Internet: yes
+  OK  GitHub: Authenticated: yes
+
+[3/7] Discovering federation peers — about:federation
+  OK  Found 5 federation peers
+  ..  Agent Internet Control Plane
+  ..  Steward Protocol
+  ..  Agent City
+  ..  Agent World
+  ..  Steward — Autonomous Superagent
+
+[4/7] Reading peer repos (auto-ingest into semantic index)
+  OK  [200] kimeisele/agent-internet — GitHub  (6 links, 4,511 chars)
+  OK  [200] kimeisele/steward-protocol — GitHub  (6 links, 4,855 chars)
+  OK  [200] kimeisele/agent-city — GitHub  (6 links, 4,388 chars)
+  OK  [200] kimeisele/agent-world — GitHub  (6 links, 3,588 chars)
+  OK  [200] kimeisele/steward — GitHub  (6 links, 4,614 chars)
+
+[5/7] Checking peer wikis
+  ..  No wikis with content found (repos have READMEs instead)
+
+[6/7] Searching — about:search?q=federation+routing
+  OK  Results: 4
+  ..    1. [5.000] kimeisele/agent-internet — GitHub
+  ..    2. [2.500] kimeisele/agent-city — GitHub
+  ..    3. [1.500] kimeisele/steward-protocol — GitHub
+  ..    4. [1.500] kimeisele/agent-world — GitHub
+
+[7/7] Knowledge graph — about:graph
+  OK  Nodes: 10  Edges: 25  Connected: 10
+
+  Summary
+  Pages read:       10
+  Graph nodes:      10
+  Graph edges:      25
+  Connected nodes:  10
+  Federation peers: 5
+  Time:             7.0s
+  External deps:    0
+  Browser engine:   Python stdlib (urllib + html.parser)
+```
+
+What happened: the browser discovered 5 federation peers via `about:federation`,
+read each repo via the GitHub API (structured, not scraped), auto-ingested every
+page into a semantic index, searched for "federation routing" and ranked results
+by term relevance, then built a knowledge graph showing how all pages relate.
+7 seconds. Zero dependencies beyond Python's standard library.
+
 ## Phase 0 scope
 
 Phase 0 does **not** replace the existing city runtime.
