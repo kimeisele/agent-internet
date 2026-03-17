@@ -156,6 +156,12 @@ from .agent_web_browser import (
     probe_environment,
 )
 from .agent_web_browser_github import GitHubBrowserSource, create_github_browser
+from .agent_web_browser_semantic import (
+    BrowsedPageIndex,
+    build_browser_semantic_capability_manifest,
+    page_to_semantic_record,
+    pages_to_semantic_records,
+)
 
 __all__ = [
     "AgentCityDirectiveFactory",
@@ -304,6 +310,10 @@ __all__ = [
     "PageSource",
     "build_browser_capability_manifest",
     "create_github_browser",
+    "BrowsedPageIndex",
+    "build_browser_semantic_capability_manifest",
+    "page_to_semantic_record",
+    "pages_to_semantic_records",
     "fetch_url",
     "parse_html",
     "probe_environment",

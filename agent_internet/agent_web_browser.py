@@ -485,6 +485,12 @@ def fetch_url(
 
     cfg = config or BrowserConfig()
 
+    # Validate URL before attempting network I/O
+    if not url or not url.strip():
+        return _error_page(url, 0, "empty_url")
+    if not url.startswith(("http://", "https://")):
+        return _error_page(url, 0, f"unsupported_scheme:{url.split(':')[0] if ':' in url else 'none'}")
+
     request_headers = {
         "User-Agent": cfg.user_agent,
         "Accept": cfg.accept,
@@ -882,12 +888,124 @@ class AgentWebBrowser:
     # -- Internal --
 
     def _fetch(self, url: str) -> BrowserPage:
-        """Fetch a URL, trying registered sources first."""
+        """Fetch a URL, trying about: pages, registered sources, then HTTP."""
         self._request_count += 1
+
+        # Handle about: protocol — built-in browser pages
+        if url.startswith("about:"):
+            return self._handle_about(url)
+
         for source in self._sources:
             if source.can_handle(url):
                 return source.fetch(url, config=self.config)
         return fetch_url(url, config=self.config)
+
+    def _handle_about(self, url: str) -> BrowserPage:
+        """Render built-in about: pages for agent self-knowledge."""
+        page_name = url.removeprefix("about:").strip().lower()
+
+        if page_name in ("", "blank"):
+            return BrowserPage(
+                url=url, status_code=200, title="about:blank",
+                content_text="", links=(), forms=(), meta=PageMeta(),
+                fetched_at=time.time(),
+            )
+
+        if page_name == "environment":
+            env = self.environment()
+            conn = env.get("connectivity", {})
+            gh = env.get("github", {})
+            rt = env.get("runtime", {})
+            text = "\n".join([
+                "# Agent Web Browser — Environment",
+                "",
+                "## Connectivity",
+                f"  Internet: {'yes' if conn.get('has_internet') else 'NO'}",
+                f"  Proxy: {conn.get('proxy_endpoint') or 'none'}",
+                "",
+                "## GitHub",
+                f"  Authenticated: {'yes' if gh.get('authenticated') else 'no'}",
+                f"  User: {gh.get('user') or 'anonymous'}",
+                f"  API: {'reachable' if gh.get('api_reachable') else 'unreachable'}",
+                "",
+                "## Sources",
+                *[f"  - {s}" for s in env.get("sources", [])],
+                "",
+                "## Runtime",
+                f"  Python: {rt.get('python', '?')}",
+                f"  Platform: {rt.get('platform', '?')}",
+                f"  CWD: {rt.get('cwd', '?')}",
+            ])
+            links = (
+                PageLink(href="about:capabilities", text="Capabilities", index=0),
+                PageLink(href="about:federation", text="Federation", index=1),
+            )
+            return BrowserPage(
+                url=url, status_code=200, title="Environment — Agent Web Browser",
+                content_text=text, links=links, forms=(), meta=PageMeta(),
+                fetched_at=time.time(),
+            )
+
+        if page_name == "capabilities":
+            manifest = self.capability_manifest()
+            text_parts = [
+                "# Agent Web Browser — Capabilities",
+                f"Standard: {manifest['standard_profile']['profile_id']}",
+                f"GAD: {manifest['standard_profile']['gad_conformance']}",
+                "",
+            ]
+            for cap in manifest.get("capabilities", []):
+                text_parts.append(f"## {cap['capability_id']}")
+                text_parts.append(f"  {cap['summary']}")
+                text_parts.append(f"  Mode: {cap['mode']}  Contract: v{cap['contract_version']}")
+                text_parts.append("")
+            return BrowserPage(
+                url=url, status_code=200, title="Capabilities — Agent Web Browser",
+                content_text="\n".join(text_parts), links=(
+                    PageLink(href="about:environment", text="Environment", index=0),
+                    PageLink(href="about:federation", text="Federation", index=1),
+                ), forms=(), meta=PageMeta(), fetched_at=time.time(),
+            )
+
+        if page_name == "federation":
+            text_parts = [
+                "# Agent Web Browser — Federation Discovery",
+                "",
+                "Scanning known federation peers...",
+                "",
+            ]
+            links: list[PageLink] = []
+            descriptors = _discover_federation_descriptors(config=self.config)
+            for desc in descriptors:
+                text_parts.append(f"## {desc.get('display_name', desc.get('repo_id', '?'))}")
+                text_parts.append(f"  Repo: {desc.get('repo_id', '?')}")
+                text_parts.append(f"  Layer: {desc.get('layer', '?')}")
+                text_parts.append(f"  Status: {desc.get('status', '?')}")
+                caps = desc.get("capabilities", [])
+                if caps:
+                    text_parts.append(f"  Capabilities: {', '.join(caps)}")
+                text_parts.append("")
+                repo_id = desc.get("repo_id", "")
+                if repo_id:
+                    links.append(PageLink(
+                        href=f"https://github.com/{repo_id}",
+                        text=desc.get("display_name", repo_id),
+                        index=len(links),
+                    ))
+
+            if not descriptors:
+                text_parts.append("(no federation peers discovered)")
+
+            links.append(PageLink(href="about:environment", text="Environment", index=len(links)))
+            links.append(PageLink(href="about:capabilities", text="Capabilities", index=len(links)))
+
+            return BrowserPage(
+                url=url, status_code=200, title="Federation — Agent Web Browser",
+                content_text="\n".join(text_parts), links=tuple(links),
+                forms=(), meta=PageMeta(), fetched_at=time.time(),
+            )
+
+        return _error_page(url, 404, f"unknown_about_page:{page_name}")
 
     def _cache_page(self, url: str, page: BrowserPage) -> None:
         """Add a page to the LRU cache."""
@@ -1213,3 +1331,67 @@ def build_browser_capability_manifest(
         ],
         "stats": {"capability_count": len(capabilities)},
     }
+
+
+# ---------------------------------------------------------------------------
+# Federation discovery — scan known peers for agent-federation.json
+# ---------------------------------------------------------------------------
+
+_FEDERATION_DESCRIPTOR_SEEDS = (
+    "kimeisele/agent-internet",
+    "kimeisele/steward-protocol",
+    "kimeisele/agent-city",
+    "kimeisele/agent-world",
+    "kimeisele/steward",
+)
+
+
+def _discover_federation_descriptors(*, config: BrowserConfig | None = None) -> list[dict]:
+    """Fetch .well-known/agent-federation.json from known federation peers.
+
+    Used by ``about:federation`` to give agents a live map of the ecosystem.
+    """
+    cfg = config or BrowserConfig()
+    descriptors: list[dict] = []
+
+    # Also try loading local seeds
+    try:
+        from pathlib import Path
+        seed_path = Path("data/federation/authority-descriptor-seeds.json")
+        if seed_path.exists():
+            seed_data = json.loads(seed_path.read_text())
+            if isinstance(seed_data, list):
+                for seed in seed_data:
+                    url = seed.get("descriptor_url", "") if isinstance(seed, dict) else ""
+                    if url and "/agent-federation.json" in url:
+                        # Extract repo_id from URL
+                        parts = url.split("githubusercontent.com/")
+                        if len(parts) > 1:
+                            repo_parts = parts[1].split("/")
+                            if len(repo_parts) >= 2:
+                                repo_id = f"{repo_parts[0]}/{repo_parts[1]}"
+                                if repo_id not in _FEDERATION_DESCRIPTOR_SEEDS:
+                                    _fetch_descriptor(url, repo_id, descriptors, cfg)
+    except Exception:
+        pass
+
+    for repo_id in _FEDERATION_DESCRIPTOR_SEEDS:
+        url = f"https://raw.githubusercontent.com/{repo_id}/main/.well-known/agent-federation.json"
+        _fetch_descriptor(url, repo_id, descriptors, cfg)
+
+    return descriptors
+
+
+def _fetch_descriptor(url: str, repo_id: str, descriptors: list[dict], cfg: BrowserConfig) -> None:
+    """Fetch a single federation descriptor and append to the list."""
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": cfg.user_agent})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if isinstance(data, dict) and data.get("kind") == "agent_federation_descriptor":
+                data.setdefault("repo_id", repo_id)
+                descriptors.append(data)
+    except Exception:
+        pass

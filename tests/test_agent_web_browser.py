@@ -672,3 +672,79 @@ def test_environment_probe_dataclass():
     assert probe.has_internet is True
     assert probe.github_user == "testuser"
     assert probe.registered_sources == ("GitHubBrowserSource",)
+
+
+# ---------------------------------------------------------------------------
+# URL validation edge cases
+# ---------------------------------------------------------------------------
+
+def test_empty_url_returns_error_page():
+    browser = AgentWebBrowser()
+    page = browser.open("")
+    assert not page.ok
+    assert "empty_url" in page.error
+
+
+def test_whitespace_url_returns_error_page():
+    browser = AgentWebBrowser()
+    page = browser.open("   ")
+    assert not page.ok
+    assert "empty_url" in page.error
+
+
+def test_ftp_url_returns_unsupported_scheme():
+    browser = AgentWebBrowser()
+    page = browser.open("ftp://example.com")
+    assert not page.ok
+    assert "unsupported_scheme" in page.error
+
+
+def test_no_scheme_url_returns_error():
+    browser = AgentWebBrowser()
+    page = browser.open("example.com")
+    assert not page.ok
+
+
+# ---------------------------------------------------------------------------
+# about: protocol
+# ---------------------------------------------------------------------------
+
+def test_about_blank():
+    browser = AgentWebBrowser()
+    page = browser.open("about:blank")
+    assert page.ok
+    assert page.title == "about:blank"
+    assert page.content_text == ""
+
+
+def test_about_environment():
+    browser = AgentWebBrowser()
+    page = browser.open("about:environment")
+    assert page.ok
+    assert "Environment" in page.title
+    assert "Python" in page.content_text
+    assert "Platform" in page.content_text
+
+
+def test_about_capabilities():
+    browser = AgentWebBrowser()
+    page = browser.open("about:capabilities")
+    assert page.ok
+    assert "Capabilities" in page.title
+    assert "gad_000" in page.content_text.lower() or "GAD" in page.content_text
+    assert "web_browse" in page.content_text
+
+
+def test_about_unknown_returns_error():
+    browser = AgentWebBrowser()
+    page = browser.open("about:foobar")
+    assert not page.ok
+    assert "unknown_about_page" in page.error
+
+
+def test_about_federation():
+    """about:federation should return a page (may have no peers in test env)."""
+    browser = AgentWebBrowser()
+    page = browser.open("about:federation")
+    assert page.ok
+    assert "Federation" in page.title
