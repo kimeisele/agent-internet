@@ -5,6 +5,7 @@ Provides:
   and renders data from ``AgentInternetControlPlane``.
 - ``render_about_*`` helpers that power the ``about:cities``, ``about:trust``,
   ``about:routes``, ``about:spaces``, and ``about:intents`` pages.
+- ``handle_cp_submit`` — routes form submissions to control plane writes.
 
 The browser SHOWS, the control plane KNOWS.  This module is the lens.
 """
@@ -12,23 +13,36 @@ The browser SHOWS, the control plane KNOWS.  This module is the lens.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
+from secrets import token_hex
 
 logger = logging.getLogger("AGENT_INTERNET.WEB_BROWSER.CONTROL_PLANE")
 
+# Local type alias — keeps render functions decoupled from browser imports.
+# Each renderer returns (title, text, links, forms).
+_Links = list[tuple[str, str]]
+
+
+def _F(name: str, *, required: bool = True, value: str = "",
+       field_type: str = "text") -> dict:
+    """Shorthand for form field dicts (converted to FormField in _build_page)."""
+    return {"name": name, "field_type": field_type, "value": value,
+            "required": required}
+
 
 # ---------------------------------------------------------------------------
-# about: page renderers — each ≤ 50 lines of rendering code
+# about: page renderers — each returns (title, text, links, forms)
 # ---------------------------------------------------------------------------
 
-def render_about_cities(cp: object) -> tuple[str, str, list[tuple[str, str]]]:
-    """Render about:cities content.  Returns (title, text, [(href, label)])."""
+def render_about_cities(cp: object) -> tuple[str, str, _Links, list[dict]]:
+    """Render about:cities with a Register City form."""
     identities = cp.registry.list_identities()  # type: ignore[attr-defined]
     endpoints = {e.city_id: e for e in cp.registry.list_endpoints()}  # type: ignore[attr-defined]
     presences = {p.city_id: p for p in cp.registry.list_cities()}  # type: ignore[attr-defined]
 
     parts = ["# Registered Cities", "", f"Total: {len(identities)}", ""]
-    links: list[tuple[str, str]] = []
+    links: _Links = []
 
     for ident in identities:
         cid = ident.city_id
@@ -48,7 +62,6 @@ def render_about_cities(cp: object) -> tuple[str, str, list[tuple[str, str]]]:
             if pr.capabilities:
                 parts.append(f"  Capabilities: {', '.join(pr.capabilities)}")
         parts.append("")
-
         links.append((f"cp://cities/{cid}", cid))
         links.append((f"about:trust?city={cid}", f"Trust: {cid}"))
 
@@ -56,14 +69,25 @@ def render_about_cities(cp: object) -> tuple[str, str, list[tuple[str, str]]]:
     links.append(("about:spaces", "Spaces"))
     links.append(("about:intents", "Intents"))
     links.append(("about:environment", "Environment"))
-    return "Cities — Agent Web Browser", "\n".join(parts), links
+
+    forms = [{
+        "action": "cp://cities/register", "method": "POST",
+        "form_id": "register_city",
+        "fields": [
+            _F("city_id"), _F("slug", required=False),
+            _F("repo", required=False),
+            _F("transport", value="https"), _F("location"),
+        ],
+    }]
+    return "Cities — Agent Web Browser", "\n".join(parts), links, forms
 
 
-def render_about_city_detail(cp: object, city_id: str) -> tuple[str, str, list[tuple[str, str]]]:
+def render_about_city_detail(cp: object, city_id: str) -> tuple[str, str, _Links, list[dict]]:
     """Render detail for a single city."""
     ident = cp.registry.get_identity(city_id)  # type: ignore[attr-defined]
     if not ident:
-        return f"City Not Found: {city_id}", f"# City Not Found\n\nNo city with ID: {city_id}", []
+        return (f"City Not Found: {city_id}",
+                f"# City Not Found\n\nNo city with ID: {city_id}", [], [])
 
     ep = cp.registry.get_endpoint(city_id)  # type: ignore[attr-defined]
     pr = cp.registry.get_presence(city_id)  # type: ignore[attr-defined]
@@ -77,54 +101,52 @@ def render_about_city_detail(cp: object, city_id: str) -> tuple[str, str, list[t
         parts.append(f"Repo: {ident.repo}")
     if ident.labels:
         parts.append(f"Labels: {', '.join(f'{k}={v}' for k, v in ident.labels.items())}")
-
     if ep:
-        parts.extend(["", "## Endpoint", f"  Transport: {ep.transport}", f"  Location: {ep.location}"])
-
+        parts.extend(["", "## Endpoint",
+                       f"  Transport: {ep.transport}", f"  Location: {ep.location}"])
     if pr:
         parts.extend(["", "## Presence",
                        f"  Health: {pr.health.name if hasattr(pr.health, 'name') else pr.health}"])
         if pr.capabilities:
             parts.append(f"  Capabilities: {', '.join(pr.capabilities)}")
-
     if link_addr:
         parts.extend(["", "## Lotus Link Address",
-                       f"  MAC: {link_addr.mac_address}", f"  Interface: {link_addr.interface}"])
+                       f"  MAC: {link_addr.mac_address}",
+                       f"  Interface: {link_addr.interface}"])
     if net_addr:
         parts.extend(["", "## Lotus Network Address",
                        f"  IP: {net_addr.ip_address}/{net_addr.prefix_length}"])
 
-    # Trust this city has with others
     all_identities = cp.registry.list_identities()  # type: ignore[attr-defined]
     trust_parts = []
     for other in all_identities:
         if other.city_id == city_id:
             continue
         level = cp.trust_engine.evaluate(city_id, other.city_id)  # type: ignore[attr-defined]
-        trust_parts.append(f"  {city_id} → {other.city_id}: {level.name if hasattr(level, 'name') else level}")
+        trust_parts.append(f"  {city_id} → {other.city_id}: "
+                           f"{level.name if hasattr(level, 'name') else level}")
     if trust_parts:
         parts.extend(["", "## Trust Relationships", *trust_parts])
 
     parts.append("")
-    links: list[tuple[str, str]] = []
+    links: _Links = []
     if ident.repo:
         links.append((f"https://github.com/{ident.repo}", f"GitHub: {ident.repo}"))
     links.append(("about:cities", "All Cities"))
     links.append(("about:routes", "Routes"))
     links.append(("about:trust", "Trust"))
-    return f"City: {city_id}", "\n".join(parts), links
+    return f"City: {city_id}", "\n".join(parts), links, []
 
 
-def render_about_trust(cp: object, city_filter: str = "") -> tuple[str, str, list[tuple[str, str]]]:
-    """Render about:trust — trust matrix between known cities."""
+def render_about_trust(cp: object, city_filter: str = "") -> tuple[str, str, _Links, list[dict]]:
+    """Render about:trust with a Record Trust form."""
     identities = cp.registry.list_identities()  # type: ignore[attr-defined]
     city_ids = [i.city_id for i in identities]
 
     parts = ["# Trust Matrix", "", f"Cities: {len(city_ids)}", ""]
-    links: list[tuple[str, str]] = []
+    links: _Links = []
 
     if city_filter:
-        # Show trust for one specific city
         parts.append(f"## Trust for: {city_filter}")
         for target in city_ids:
             if target == city_filter:
@@ -139,7 +161,6 @@ def render_about_trust(cp: object, city_filter: str = "") -> tuple[str, str, lis
             level = cp.trust_engine.evaluate(source, city_filter)  # type: ignore[attr-defined]
             parts.append(f"  {source} →: {level.name if hasattr(level, 'name') else level}")
     else:
-        # Full matrix
         for source in city_ids:
             parts.append(f"## {source}")
             for target in city_ids:
@@ -152,15 +173,25 @@ def render_about_trust(cp: object, city_filter: str = "") -> tuple[str, str, lis
 
     links.append(("about:cities", "Cities"))
     links.append(("about:routes", "Routes"))
-    return "Trust — Agent Web Browser", "\n".join(parts), links
+
+    forms = [{
+        "action": "cp://trust/record", "method": "POST",
+        "form_id": "record_trust",
+        "fields": [
+            _F("issuer_city_id"), _F("subject_city_id"),
+            _F("level", value="verified"),
+            _F("reason", required=False),
+        ],
+    }]
+    return "Trust — Agent Web Browser", "\n".join(parts), links, forms
 
 
-def render_about_routes(cp: object) -> tuple[str, str, list[tuple[str, str]]]:
-    """Render about:routes — all Lotus routes."""
+def render_about_routes(cp: object) -> tuple[str, str, _Links, list[dict]]:
+    """Render about:routes with a Publish Route form."""
     routes = cp.registry.list_routes()  # type: ignore[attr-defined]
 
     parts = ["# Lotus Routes", "", f"Total: {len(routes)}", ""]
-    links: list[tuple[str, str]] = []
+    links: _Links = []
 
     for r in routes:
         parts.append(f"## {r.route_id}")
@@ -183,11 +214,21 @@ def render_about_routes(cp: object) -> tuple[str, str, list[tuple[str, str]]]:
     links.append(("about:cities", "Cities"))
     links.append(("about:trust", "Trust"))
     links.append(("about:spaces", "Spaces"))
-    return "Routes — Agent Web Browser", "\n".join(parts), links
+
+    forms = [{
+        "action": "cp://routes/publish", "method": "POST",
+        "form_id": "publish_route",
+        "fields": [
+            _F("owner_city_id"), _F("destination_prefix"),
+            _F("target_city_id"), _F("next_hop_city_id"),
+            _F("metric", value="100", required=False),
+        ],
+    }]
+    return "Routes — Agent Web Browser", "\n".join(parts), links, forms
 
 
-def render_about_spaces(cp: object) -> tuple[str, str, list[tuple[str, str]]]:
-    """Render about:spaces — spaces, slots, claims, leases."""
+def render_about_spaces(cp: object) -> tuple[str, str, _Links, list[dict]]:
+    """Render about:spaces with Claim Space and Request Slot Lease forms."""
     spaces = cp.registry.list_spaces()  # type: ignore[attr-defined]
     slots = cp.registry.list_slots()  # type: ignore[attr-defined]
     claims = cp.registry.list_space_claims()  # type: ignore[attr-defined]
@@ -196,7 +237,7 @@ def render_about_spaces(cp: object) -> tuple[str, str, list[tuple[str, str]]]:
     parts = ["# Spaces & Slots", "",
              f"Spaces: {len(spaces)}  Slots: {len(slots)}  "
              f"Claims: {len(claims)}  Leases: {len(leases)}", ""]
-    links: list[tuple[str, str]] = []
+    links: _Links = []
 
     for s in spaces:
         kind = s.kind.name if hasattr(s.kind, "name") else s.kind
@@ -208,14 +249,13 @@ def render_about_spaces(cp: object) -> tuple[str, str, list[tuple[str, str]]]:
         if s.city_id:
             parts.append(f"  City: {s.city_id}")
             links.append((f"cp://cities/{s.city_id}", s.city_id))
-
-        # Slots in this space
         space_slots = [sl for sl in slots if sl.space_id == s.space_id]
         if space_slots:
             parts.append(f"  Slots ({len(space_slots)}):")
             for sl in space_slots:
                 status = sl.status.name if hasattr(sl.status, "name") else sl.status
-                parts.append(f"    - {sl.slot_id}: {status} (holder: {sl.holder_subject_id or 'none'})")
+                parts.append(f"    - {sl.slot_id}: {status} "
+                             f"(holder: {sl.holder_subject_id or 'none'})")
         parts.append("")
 
     if not spaces:
@@ -230,22 +270,42 @@ def render_about_spaces(cp: object) -> tuple[str, str, list[tuple[str, str]]]:
         parts.extend(["", "## Active Leases"])
         for le in leases:
             status = le.status.name if hasattr(le.status, "name") else le.status
-            parts.append(f"  {le.lease_id}: {status} — {le.holder_subject_id} on {le.slot_id}")
+            parts.append(f"  {le.lease_id}: {status} — "
+                         f"{le.holder_subject_id} on {le.slot_id}")
 
     links.append(("about:cities", "Cities"))
     links.append(("about:routes", "Routes"))
     links.append(("about:intents", "Intents"))
-    return "Spaces — Agent Web Browser", "\n".join(parts), links
+
+    forms = [
+        {
+            "action": "cp://spaces/claim", "method": "POST",
+            "form_id": "claim_space",
+            "fields": [
+                _F("space_id"), _F("subject_id"),
+                _F("intent_id", required=False),
+            ],
+        },
+        {
+            "action": "cp://spaces/lease", "method": "POST",
+            "form_id": "request_slot_lease",
+            "fields": [
+                _F("slot_id"), _F("space_id"), _F("holder_subject_id"),
+                _F("intent_id", required=False),
+            ],
+        },
+    ]
+    return "Spaces — Agent Web Browser", "\n".join(parts), links, forms
 
 
-def render_about_intents(cp: object) -> tuple[str, str, list[tuple[str, str]]]:
-    """Render about:intents — intent queue and operation receipts."""
+def render_about_intents(cp: object) -> tuple[str, str, _Links, list[dict]]:
+    """Render about:intents with a Submit Intent form."""
     intents = cp.registry.list_intents() if hasattr(cp.registry, "list_intents") else []  # type: ignore[attr-defined]
     receipts = cp.registry.list_operation_receipts()  # type: ignore[attr-defined]
 
     parts = ["# Intents & Operations", "",
              f"Intents: {len(intents)}  Operation Receipts: {len(receipts)}", ""]
-    links: list[tuple[str, str]] = []
+    links: _Links = []
 
     if intents:
         parts.append("## Intents")
@@ -272,7 +332,170 @@ def render_about_intents(cp: object) -> tuple[str, str, list[tuple[str, str]]]:
     links.append(("about:cities", "Cities"))
     links.append(("about:spaces", "Spaces"))
     links.append(("about:routes", "Routes"))
-    return "Intents — Agent Web Browser", "\n".join(parts), links
+
+    forms = [{
+        "action": "cp://intents/submit", "method": "POST",
+        "form_id": "submit_intent",
+        "fields": [
+            _F("intent_type", value="request_space_claim"),
+            _F("title"), _F("requested_by_subject_id"),
+            _F("city_id", required=False), _F("space_id", required=False),
+        ],
+    }]
+    return "Intents — Agent Web Browser", "\n".join(parts), links, forms
+
+
+# ---------------------------------------------------------------------------
+# Form submission handler — routes POSTs to control plane writes
+# ---------------------------------------------------------------------------
+
+def _missing_fields(data: dict[str, str], required: list[str]) -> list[str]:
+    """Return list of required fields that are empty or missing."""
+    return [f for f in required if not data.get(f, "").strip()]
+
+
+def handle_cp_submit(cp: object, url: str, data: dict[str, str]) -> tuple[str, str]:
+    """Handle a POST to a cp:// action URL.
+
+    Returns (redirect_url, error_message).  If error_message is non-empty the
+    write was rejected; otherwise redirect_url points to the updated view.
+    """
+    from .models import (
+        CityEndpoint,
+        CityIdentity,
+        ClaimStatus,
+        IntentRecord,
+        IntentStatus,
+        IntentType,
+        SlotLeaseRecord,
+        SpaceClaimRecord,
+        TrustLevel,
+        TrustRecord,
+    )
+
+    path = url.removeprefix("cp://").strip("/")
+
+    # -- Register City --
+    if path == "cities/register":
+        missing = _missing_fields(data, ["city_id", "location"])
+        if missing:
+            return "", f"Missing required fields: {', '.join(missing)}"
+        city_id = data["city_id"].strip()
+        cp.register_city(  # type: ignore[attr-defined]
+            CityIdentity(
+                city_id=city_id,
+                slug=data.get("slug", "").strip() or city_id,
+                repo=data.get("repo", "").strip(),
+            ),
+            CityEndpoint(
+                city_id=city_id,
+                transport=data.get("transport", "https").strip(),
+                location=data["location"].strip(),
+            ),
+        )
+        return f"about:cities?city={city_id}", ""
+
+    # -- Record Trust --
+    if path == "trust/record":
+        missing = _missing_fields(data, ["issuer_city_id", "subject_city_id", "level"])
+        if missing:
+            return "", f"Missing required fields: {', '.join(missing)}"
+        level_str = data["level"].strip().upper()
+        try:
+            level = TrustLevel(level_str.lower())
+        except ValueError:
+            return "", f"Invalid trust level: {level_str}. Use: unknown, observed, verified, trusted"
+        cp.record_trust(TrustRecord(  # type: ignore[attr-defined]
+            issuer_city_id=data["issuer_city_id"].strip(),
+            subject_city_id=data["subject_city_id"].strip(),
+            level=level,
+            reason=data.get("reason", "").strip(),
+        ))
+        return f"about:trust?city={data['issuer_city_id'].strip()}", ""
+
+    # -- Publish Route --
+    if path == "routes/publish":
+        missing = _missing_fields(data, ["owner_city_id", "destination_prefix",
+                                         "target_city_id", "next_hop_city_id"])
+        if missing:
+            return "", f"Missing required fields: {', '.join(missing)}"
+        metric = 100
+        if data.get("metric", "").strip():
+            try:
+                metric = int(data["metric"])
+            except ValueError:
+                return "", f"Invalid metric: {data['metric']}. Must be integer."
+        cp.publish_route(  # type: ignore[attr-defined]
+            owner_city_id=data["owner_city_id"].strip(),
+            destination_prefix=data["destination_prefix"].strip(),
+            target_city_id=data["target_city_id"].strip(),
+            next_hop_city_id=data["next_hop_city_id"].strip(),
+            metric=metric,
+        )
+        return "about:routes", ""
+
+    # -- Claim Space --
+    if path == "spaces/claim":
+        missing = _missing_fields(data, ["space_id", "subject_id"])
+        if missing:
+            return "", f"Missing required fields: {', '.join(missing)}"
+        claim_id = f"claim-{token_hex(4)}"
+        intent_id = data.get("intent_id", "").strip() or f"auto-{claim_id}"
+        claim = SpaceClaimRecord(
+            claim_id=claim_id,
+            source_intent_id=intent_id,
+            subject_id=data["subject_id"].strip(),
+            space_id=data["space_id"].strip(),
+            status=ClaimStatus.PENDING,
+            requested_at=time.time(),
+        )
+        cp.upsert_space_claim(claim)  # type: ignore[attr-defined]
+        cp.grant_space_claim(claim)  # type: ignore[attr-defined]
+        return "about:spaces", ""
+
+    # -- Request Slot Lease --
+    if path == "spaces/lease":
+        missing = _missing_fields(data, ["slot_id", "space_id", "holder_subject_id"])
+        if missing:
+            return "", f"Missing required fields: {', '.join(missing)}"
+        lease_id = f"lease-{token_hex(4)}"
+        intent_id = data.get("intent_id", "").strip() or f"auto-{lease_id}"
+        lease = SlotLeaseRecord(
+            lease_id=lease_id,
+            source_intent_id=intent_id,
+            holder_subject_id=data["holder_subject_id"].strip(),
+            space_id=data["space_id"].strip(),
+            slot_id=data["slot_id"].strip(),
+            granted_at=time.time(),
+        )
+        cp.upsert_slot_lease(lease)  # type: ignore[attr-defined]
+        return "about:spaces", ""
+
+    # -- Submit Intent --
+    if path == "intents/submit":
+        missing = _missing_fields(data, ["intent_type", "title",
+                                         "requested_by_subject_id"])
+        if missing:
+            return "", f"Missing required fields: {', '.join(missing)}"
+        itype_str = data["intent_type"].strip().lower()
+        try:
+            itype = IntentType(itype_str)
+        except ValueError:
+            valid = ", ".join(t.value for t in IntentType)
+            return "", f"Invalid intent_type: {itype_str}. Use: {valid}"
+        intent_id = f"intent-{token_hex(4)}"
+        cp.upsert_intent(IntentRecord(  # type: ignore[attr-defined]
+            intent_id=intent_id,
+            intent_type=itype,
+            status=IntentStatus.PENDING,
+            title=data["title"].strip(),
+            requested_by_subject_id=data["requested_by_subject_id"].strip(),
+            city_id=data.get("city_id", "").strip(),
+            space_id=data.get("space_id", "").strip(),
+        ))
+        return "about:intents", ""
+
+    return "", f"Unknown submit action: {path}"
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +506,7 @@ def render_about_intents(cp: object) -> tuple[str, str, list[tuple[str, str]]]:
 class ControlPlaneSource:
     """PageSource that intercepts ``cp://`` URLs and renders control plane data.
 
-    URL scheme::
+    Read URLs::
 
         cp://cities              → list all cities
         cp://cities/{city_id}    → city detail
@@ -292,6 +515,15 @@ class ControlPlaneSource:
         cp://routes              → route table
         cp://spaces              → spaces + slots
         cp://intents             → intent queue
+
+    Write URLs (POST via form submission)::
+
+        cp://cities/register     → register_city()
+        cp://trust/record        → record_trust()
+        cp://routes/publish      → publish_route()
+        cp://spaces/claim        → grant_space_claim()
+        cp://spaces/lease        → upsert_slot_lease()
+        cp://intents/submit      → upsert_intent()
     """
 
     _control_plane: object = field(repr=False)
@@ -300,47 +532,80 @@ class ControlPlaneSource:
         return url.startswith("cp://")
 
     def fetch(self, url: str, *, config: object = None) -> object:
-        """Route cp:// URLs to control plane renderers."""
-        from .agent_web_browser import BrowserPage, PageLink, PageMeta
-
+        """Route cp:// read URLs to control plane renderers."""
         path = url.removeprefix("cp://").strip("/")
 
-        # Route
-        if path.startswith("cities/"):
+        if path.startswith("cities/") and path != "cities/register":
             city_id = path.removeprefix("cities/").strip("/")
-            title, text, raw_links = render_about_city_detail(self._control_plane, city_id)
+            title, text, raw_links, raw_forms = render_about_city_detail(
+                self._control_plane, city_id)
         elif path == "cities" or path == "":
-            title, text, raw_links = render_about_cities(self._control_plane)
+            title, text, raw_links, raw_forms = render_about_cities(
+                self._control_plane)
         elif path.startswith("trust"):
             city_filter = ""
             if "?" in path:
                 for param in path.split("?", 1)[1].split("&"):
                     if param.startswith("city="):
                         city_filter = param.removeprefix("city=").strip()
-            title, text, raw_links = render_about_trust(self._control_plane, city_filter)
+            title, text, raw_links, raw_forms = render_about_trust(
+                self._control_plane, city_filter)
         elif path == "routes":
-            title, text, raw_links = render_about_routes(self._control_plane)
+            title, text, raw_links, raw_forms = render_about_routes(
+                self._control_plane)
         elif path == "spaces":
-            title, text, raw_links = render_about_spaces(self._control_plane)
+            title, text, raw_links, raw_forms = render_about_spaces(
+                self._control_plane)
         elif path == "intents":
-            title, text, raw_links = render_about_intents(self._control_plane)
+            title, text, raw_links, raw_forms = render_about_intents(
+                self._control_plane)
         else:
-            return BrowserPage(
-                url=url, status_code=404, title="Not Found",
-                content_text=f"Unknown control plane path: {path}",
-                links=(), forms=(), meta=PageMeta(), headers={},
-                fetched_at=0.0, content_type="text/plain", encoding="utf-8",
-                raw_html="", error=f"unknown_cp_path:{path}",
-            )
+            return _build_page(url, status=404,
+                               error=f"unknown_cp_path:{path}")
 
-        links = tuple(
-            PageLink(href=href, text=label, index=i)
-            for i, (href, label) in enumerate(raw_links)
+        return _build_page(url, title=title, text=text,
+                           raw_links=raw_links, raw_forms=raw_forms)
+
+    def submit(self, url: str, data: dict[str, str]) -> tuple[str, str]:
+        """Handle a POST to a cp:// write URL.
+
+        Returns ``(redirect_url, error)``.  The browser is responsible for
+        navigating to the redirect URL on success or rendering the error.
+        """
+        return handle_cp_submit(self._control_plane, url, data)
+
+
+# ---------------------------------------------------------------------------
+# Page builder helper
+# ---------------------------------------------------------------------------
+
+def _build_page(
+    url: str, *, title: str = "", text: str = "", status: int = 200,
+    error: str = "", raw_links: _Links | None = None,
+    raw_forms: list[dict] | None = None,
+) -> object:
+    """Build a BrowserPage from render output."""
+    from .agent_web_browser import BrowserPage, FormField, PageForm, PageLink, PageMeta
+
+    links = tuple(
+        PageLink(href=href, text=label, index=i)
+        for i, (href, label) in enumerate(raw_links or [])
+    )
+    forms = tuple(
+        PageForm(
+            action=f["action"], method=f.get("method", "POST"),
+            form_id=f.get("form_id", ""), index=i,
+            fields=tuple(
+                FormField(name=fd["name"], field_type=fd.get("field_type", "text"),
+                          value=fd.get("value", ""), required=fd.get("required", True))
+                for fd in f.get("fields", [])
+            ),
         )
-        import time
-        return BrowserPage(
-            url=url, status_code=200, title=title,
-            content_text=text, links=links, forms=(), meta=PageMeta(),
-            headers={}, fetched_at=time.time(), content_type="text/plain",
-            encoding="utf-8", raw_html=text, error="",
-        )
+        for i, f in enumerate(raw_forms or [])
+    )
+    return BrowserPage(
+        url=url, status_code=status, title=title,
+        content_text=text, links=links, forms=forms, meta=PageMeta(),
+        headers={}, fetched_at=time.time(), content_type="text/plain",
+        encoding="utf-8", raw_html=text, error=error,
+    )

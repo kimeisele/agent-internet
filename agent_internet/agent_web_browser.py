@@ -464,6 +464,10 @@ class AgentWebBrowser:
             url = f"{form.action}{sep}{urlencode(data)}"
             return self.open(url)
 
+        # Delegate cp:// POST to ControlPlaneSource
+        if form.action.startswith("cp://"):
+            return self._submit_to_control_plane(form.action, data)
+
         body = urlencode(data).encode("utf-8")
         page = fetch_url(
             form.action, config=self.config, method="POST", body=body,
@@ -1119,8 +1123,29 @@ class AgentWebBrowser:
         return _make_page(url, title=f"Search: \"{query}\" — Agent Web Browser",
                           content="\n".join(parts), links=tuple(links))
 
+    def _submit_to_control_plane(self, action: str, data: dict[str, str]) -> BrowserPage:
+        """Delegate a form POST to the ControlPlaneSource."""
+        from .agent_web_browser_control_plane import ControlPlaneSource
+
+        for source in self._sources:
+            if isinstance(source, ControlPlaneSource):
+                redirect_url, error = source.submit(action, data)
+                if error:
+                    page = _make_page(action, status=422,
+                                      content=f"# Submission Error\n\n{error}",
+                                      error=error)
+                    tab = self.active_tab
+                    tab.push_url(action)
+                    tab.current_page = page
+                    return page
+                # Navigate to the updated view
+                return self.open(redirect_url, use_cache=False)
+        return _make_page(action, status=503,
+                          error="no_control_plane_source_registered")
+
     def _handle_about_control_plane(self, url: str, page_name: str) -> BrowserPage:
         """Route about:cities/trust/routes/spaces/intents to control plane."""
+        from .agent_web_browser_control_plane import _build_page as _cp_page
         from .agent_web_browser_control_plane import (
             render_about_cities,
             render_about_city_detail,
@@ -1134,37 +1159,33 @@ class AgentWebBrowser:
         base = page_name.split("?")[0]
 
         if base == "cities":
-            # about:cities?city=X → detail
             city_id = ""
             if "?" in page_name:
                 for p in page_name.split("?", 1)[1].split("&"):
                     if p.startswith("city="):
                         city_id = p.removeprefix("city=").strip()
             if city_id:
-                title, text, raw_links = render_about_city_detail(cp, city_id)
+                title, text, raw_links, raw_forms = render_about_city_detail(cp, city_id)
             else:
-                title, text, raw_links = render_about_cities(cp)
+                title, text, raw_links, raw_forms = render_about_cities(cp)
         elif base == "trust":
             city_filter = ""
             if "?" in page_name:
                 for p in page_name.split("?", 1)[1].split("&"):
                     if p.startswith("city="):
                         city_filter = p.removeprefix("city=").strip()
-            title, text, raw_links = render_about_trust(cp, city_filter)
+            title, text, raw_links, raw_forms = render_about_trust(cp, city_filter)
         elif base == "routes":
-            title, text, raw_links = render_about_routes(cp)
+            title, text, raw_links, raw_forms = render_about_routes(cp)
         elif base == "spaces":
-            title, text, raw_links = render_about_spaces(cp)
+            title, text, raw_links, raw_forms = render_about_spaces(cp)
         elif base == "intents":
-            title, text, raw_links = render_about_intents(cp)
+            title, text, raw_links, raw_forms = render_about_intents(cp)
         else:
             return _make_page(url, status=404, error=f"unknown_cp_page:{base}")
 
-        links = tuple(
-            PageLink(href=href, text=label, index=i)
-            for i, (href, label) in enumerate(raw_links)
-        )
-        return _make_page(url, title=title, content=text, links=links)
+        return _cp_page(url, title=title, text=text,
+                        raw_links=raw_links, raw_forms=raw_forms)
 
     def _cache_page(self, url: str, page: BrowserPage) -> None:
         """Add a page to the LRU cache."""
