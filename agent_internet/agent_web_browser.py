@@ -293,6 +293,7 @@ class AgentWebBrowser:
     _history: list[HistoryEntry] = field(default_factory=list)
     _llms_txt_cache: dict[str, dict | None] = field(default_factory=dict)
     _agents_json_cache: dict[str, dict | None] = field(default_factory=dict)
+    _browsed_index: object | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if not self._tabs:
@@ -376,6 +377,11 @@ class AgentWebBrowser:
         tab.push_url(url)
         tab.current_page = page
         self._record_history(page)
+
+        # Auto-ingest into semantic index (skip about: pages)
+        if page.ok and not url.startswith("about:"):
+            self._auto_ingest(page)
+
         logger.info("open %s → %d %s", url, page.status_code, page.title[:60])
         return page
 
@@ -751,7 +757,9 @@ class AgentWebBrowser:
             return _make_page(
                 url, title="Environment — Agent Web Browser", content=text,
                 links=(PageLink(href="about:capabilities", text="Capabilities", index=0),
-                       PageLink(href="about:federation", text="Federation", index=1)),
+                       PageLink(href="about:federation", text="Federation", index=1),
+                       PageLink(href="about:graph", text="Knowledge Graph", index=2),
+                       PageLink(href="about:search", text="Search", index=3)),
             )
 
         if page_name == "capabilities":
@@ -797,6 +805,12 @@ class AgentWebBrowser:
             links.append(PageLink(href="about:capabilities", text="Capabilities", index=len(links)))
             return _make_page(url, title="Federation — Agent Web Browser",
                               content="\n".join(parts), links=tuple(links))
+
+        if page_name.startswith("graph"):
+            return self._handle_about_graph(url, page_name)
+
+        if page_name.startswith("search"):
+            return self._handle_about_search(url, page_name)
 
         if page_name == "bookmarks":
             parts = ["# Bookmarks", ""]
@@ -844,12 +858,259 @@ class AgentWebBrowser:
 
         return _make_page(url, status=404, error=f"unknown_about_page:{page_name}")
 
+    def _handle_about_graph(self, url: str, page_name: str) -> BrowserPage:
+        """Render about:graph — semantic knowledge graph browser.
+
+        about:graph          → all nodes in the graph
+        about:graph?query=X  → filter nodes by term
+        about:graph?node=ID  → show a specific node and its neighbors
+        """
+        query = ""
+        node_id = ""
+        if "?" in page_name:
+            for param in page_name.split("?", 1)[1].split("&"):
+                if param.startswith("query="):
+                    query = param.removeprefix("query=").replace("+", " ").strip()
+                elif param.startswith("node="):
+                    node_id = param.removeprefix("node=").replace("+", " ").strip()
+
+        idx = self.browsed_index
+        graph = idx.build_semantic_graph()
+        neighbors_map: dict[str, list[dict]] = graph.get("neighbors_by_record_id", {})
+        stats = graph.get("stats", {})
+
+        links: list[PageLink] = []
+
+        # Node detail view
+        if node_id:
+            record = None
+            for r in idx.records:
+                if r.get("record_id") == node_id:
+                    record = r
+                    break
+            if not record:
+                return _make_page(url, status=404, error=f"node_not_found:{node_id}")
+
+            parts = [
+                f"# Graph Node: {record.get('title', node_id)}",
+                f"ID: {node_id}",
+                f"Kind: {record.get('kind', '?')}",
+                f"Source: {record.get('source_city_id', '?')}",
+            ]
+            summary = record.get("summary", "")
+            if summary:
+                parts.append(f"Summary: {summary}")
+
+            href = record.get("href", "")
+            if href:
+                links.append(PageLink(href=href, text="Open page", index=len(links)))
+
+            neighbors = neighbors_map.get(node_id, [])
+            if neighbors:
+                parts.extend(["", f"--- Neighbors ({len(neighbors)}) ---", ""])
+                for nb in sorted(neighbors, key=lambda n: n.get("score", 0), reverse=True):
+                    nb_title = nb.get("title", nb.get("record_id", "?"))
+                    score = nb.get("score", 0)
+                    reasons = ", ".join(nb.get("reason_kinds", []))
+                    parts.append(f"  [{score:.3f}] {nb_title}")
+                    if reasons:
+                        parts.append(f"          via: {reasons}")
+                    nb_href = nb.get("href", "")
+                    if nb_href:
+                        links.append(PageLink(href=nb_href, text=nb_title, index=len(links)))
+                    nb_rid = nb.get("record_id", "")
+                    if nb_rid:
+                        links.append(PageLink(
+                            href=f"about:graph?node={nb_rid}",
+                            text=f"Node: {nb_title}", index=len(links),
+                        ))
+
+            links.append(PageLink(href="about:graph", text="All Nodes", index=len(links)))
+            links.append(PageLink(href="about:search", text="Search", index=len(links)))
+            return _make_page(url, title=f"Graph: {record.get('title', node_id)}",
+                              content="\n".join(parts), links=tuple(links))
+
+        # List / filter view
+        parts = [
+            "# Semantic Knowledge Graph", "",
+            f"Nodes: {stats.get('node_count', len(idx.records))}  "
+            f"Edges: {stats.get('edge_count', 0)}  "
+            f"Connected: {stats.get('connected_record_count', 0)}",
+        ]
+
+        records = idx.records
+        if query:
+            parts.append(f"Filter: \"{query}\"")
+            q_lower = query.lower()
+            records = [
+                r for r in records
+                if q_lower in r.get("title", "").lower()
+                or q_lower in r.get("summary", "").lower()
+                or any(q_lower in t for t in r.get("tags", []))
+            ]
+            parts.append(f"Matching: {len(records)} nodes")
+
+        parts.append("")
+        for record in records[:50]:
+            rid = record.get("record_id", "")
+            title = record.get("title", rid)
+            kind = record.get("kind", "?")
+            nb_count = len(neighbors_map.get(rid, []))
+            parts.append(f"  [{kind}] {title} ({nb_count} neighbors)")
+
+            href = record.get("href", "")
+            if href:
+                links.append(PageLink(href=href, text=title, index=len(links)))
+            links.append(PageLink(
+                href=f"about:graph?node={rid}",
+                text=f"Node: {title}", index=len(links),
+            ))
+
+        if len(records) > 50:
+            parts.append(f"  ... and {len(records) - 50} more (use ?query= to filter)")
+
+        if not records:
+            parts.append("(no nodes — browse some pages first to populate the graph)")
+
+        parts.extend(["", "--- Navigation ---"])
+        links.append(PageLink(href="about:search", text="Search Index", index=len(links)))
+        links.append(PageLink(href="about:environment", text="Environment", index=len(links)))
+        links.append(PageLink(href="about:federation", text="Federation", index=len(links)))
+
+        title = "Knowledge Graph — Agent Web Browser"
+        if query:
+            title = f"Graph: \"{query}\" — Agent Web Browser"
+        return _make_page(url, title=title, content="\n".join(parts), links=tuple(links))
+
+    def _handle_about_search(self, url: str, page_name: str) -> BrowserPage:
+        """Render about:search — federated search over all indexed content.
+
+        about:search       → search prompt / stats
+        about:search?q=X   → execute search
+        """
+        query = ""
+        if "?" in page_name:
+            for param in page_name.split("?", 1)[1].split("&"):
+                if param.startswith("q="):
+                    query = param.removeprefix("q=").replace("+", " ").strip()
+
+        idx = self.browsed_index
+        links: list[PageLink] = []
+
+        if not query:
+            # Landing page — show index stats
+            parts = [
+                "# Federated Search — Agent Web Browser", "",
+                f"Indexed pages: {len(idx.records)}",
+                "",
+                "Usage: open about:search?q=YOUR+QUERY to search.", "",
+                "--- Navigation ---",
+            ]
+            links.append(PageLink(href="about:graph", text="Knowledge Graph", index=len(links)))
+            links.append(PageLink(href="about:environment", text="Environment", index=len(links)))
+            links.append(PageLink(href="about:federation", text="Federation", index=len(links)))
+            return _make_page(url, title="Search — Agent Web Browser",
+                              content="\n".join(parts), links=tuple(links))
+
+        # Try federated index first, fall back to browsed page index
+        results = None
+        search_source = "browsed_pages"
+        try:
+            from .agent_web_federated_index import (
+                load_agent_web_federated_index,
+                search_agent_web_federated_index,
+            )
+            fed_index = load_agent_web_federated_index()
+            if fed_index.get("records"):
+                results = search_agent_web_federated_index(
+                    fed_index, query=query, limit=20,
+                )
+                search_source = "federated_index"
+        except Exception:
+            logger.debug("federated index search unavailable", exc_info=True)
+
+        if results is None:
+            results = idx.search(query, limit=20)
+            search_source = "browsed_pages"
+
+        result_list = results.get("results", [])
+        qi = results.get("query_interpretation", {})
+        input_terms = qi.get("input_terms", [])
+        expanded_terms = qi.get("expanded_terms", [])
+        bridges = qi.get("semantic_bridges_applied", [])
+
+        parts = [
+            f"# Search: \"{query}\"", "",
+            f"Source: {search_source}",
+            f"Results: {len(result_list)}",
+        ]
+
+        if expanded_terms:
+            parts.append(f"Terms: {', '.join(input_terms)} → expanded: {', '.join(expanded_terms)}")
+        if bridges:
+            parts.append(f"Bridges: {', '.join(str(b) for b in bridges)}")
+
+        parts.append("")
+        for i, result in enumerate(result_list):
+            title = result.get("title", "?")
+            href = result.get("href", "")
+            score = result.get("score", 0)
+            kind = result.get("kind", "?")
+            summary = result.get("summary", "")[:100]
+            matched = result.get("matched_terms", [])
+
+            parts.append(f"  {i+1}. [{score:.3f}] {title}")
+            parts.append(f"     Kind: {kind}")
+            if summary:
+                parts.append(f"     {summary}")
+            if matched:
+                parts.append(f"     Matched: {', '.join(matched[:8])}")
+            parts.append("")
+
+            if href:
+                links.append(PageLink(href=href, text=title, index=len(links)))
+
+        if not result_list:
+            parts.append("(no results — try a different query or browse more pages)")
+
+        stats = results.get("stats", {})
+        indexed_count = stats.get("indexed_record_count", len(idx.records))
+        parts.extend([
+            "--- Index Stats ---",
+            f"Indexed records: {indexed_count}",
+            "",
+        ])
+
+        links.append(PageLink(href="about:graph", text="Knowledge Graph", index=len(links)))
+        links.append(PageLink(href="about:search", text="New Search", index=len(links)))
+        links.append(PageLink(href="about:environment", text="Environment", index=len(links)))
+
+        return _make_page(url, title=f"Search: \"{query}\" — Agent Web Browser",
+                          content="\n".join(parts), links=tuple(links))
+
     def _cache_page(self, url: str, page: BrowserPage) -> None:
         """Add a page to the LRU cache."""
         if len(self._page_cache) >= self.config.max_page_cache:
             oldest_key = next(iter(self._page_cache))
             del self._page_cache[oldest_key]
         self._page_cache[url] = page
+
+    # -- Semantic index (auto-ingest) --
+
+    @property
+    def browsed_index(self) -> "BrowsedPageIndex":
+        """Lazy-loaded semantic index over browsed pages."""
+        if self._browsed_index is None:
+            from .agent_web_browser_semantic import BrowsedPageIndex
+            self._browsed_index = BrowsedPageIndex()
+        return self._browsed_index  # type: ignore[return-value]
+
+    def _auto_ingest(self, page: BrowserPage) -> None:
+        """Ingest a page into the browsed page index.  Silent on error."""
+        try:
+            self.browsed_index.ingest(page)
+        except Exception:
+            logger.debug("auto-ingest failed for %s", page.url, exc_info=True)
 
     # -- Environment awareness --
 
