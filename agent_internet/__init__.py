@@ -145,19 +145,17 @@ from .agent_web_browser import (
     BrowserConfig,
     BrowserPage,
     BrowserTab,
-    EnvironmentProbe,
     FormField,
     HistoryEntry,
     PageForm,
     PageLink,
     PageMeta,
     PageSource,
-    build_browser_capability_manifest,
-    compress_page,
-    fetch_url,
-    parse_html,
-    probe_environment,
 )
+from .agent_web_browser_compress import compress_page
+from .agent_web_browser_env import EnvironmentProbe, build_browser_capability_manifest, probe_environment
+from .agent_web_browser_http import fetch_url
+from .agent_web_browser_parser import parse_html
 from .agent_web_browser_github import GitHubBrowserSource, create_github_browser
 from .agent_web_browser_semantic import (
     BrowsedPageIndex,
