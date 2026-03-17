@@ -294,6 +294,7 @@ class AgentWebBrowser:
     _llms_txt_cache: dict[str, dict | None] = field(default_factory=dict)
     _agents_json_cache: dict[str, dict | None] = field(default_factory=dict)
     _browsed_index: object | None = field(default=None, repr=False)
+    _control_plane: object | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if not self._tabs:
@@ -306,6 +307,15 @@ class AgentWebBrowser:
     def register_source(self, source: PageSource) -> None:
         """Register a pluggable page source (e.g. GitHubBrowserSource)."""
         self._sources.append(source)
+
+    def attach_control_plane(self, control_plane: object) -> None:
+        """Attach a control plane for about:cities/trust/routes/spaces/intents.
+
+        Also registers a ``ControlPlaneSource`` for ``cp://`` URLs.
+        """
+        self._control_plane = control_plane
+        from .agent_web_browser_control_plane import ControlPlaneSource
+        self.register_source(ControlPlaneSource(_control_plane=control_plane))
 
     # -- Tab management --
 
@@ -754,12 +764,25 @@ class AgentWebBrowser:
                 f"  Platform: {rt.get('platform', '?')}",
                 f"  CWD: {rt.get('cwd', '?')}",
             ])
+            env_links = [
+                PageLink(href="about:capabilities", text="Capabilities", index=0),
+                PageLink(href="about:federation", text="Federation", index=1),
+                PageLink(href="about:graph", text="Knowledge Graph", index=2),
+                PageLink(href="about:search", text="Search", index=3),
+            ]
+            if self._control_plane is not None:
+                text += "\n\n## Control Plane\n  Attached: yes"
+                n = len(env_links)
+                env_links.extend([
+                    PageLink(href="about:cities", text="Cities", index=n),
+                    PageLink(href="about:trust", text="Trust", index=n + 1),
+                    PageLink(href="about:routes", text="Routes", index=n + 2),
+                    PageLink(href="about:spaces", text="Spaces", index=n + 3),
+                    PageLink(href="about:intents", text="Intents", index=n + 4),
+                ])
             return _make_page(
                 url, title="Environment — Agent Web Browser", content=text,
-                links=(PageLink(href="about:capabilities", text="Capabilities", index=0),
-                       PageLink(href="about:federation", text="Federation", index=1),
-                       PageLink(href="about:graph", text="Knowledge Graph", index=2),
-                       PageLink(href="about:search", text="Search", index=3)),
+                links=tuple(env_links),
             )
 
         if page_name == "capabilities":
@@ -855,6 +878,14 @@ class AgentWebBrowser:
                 parts.extend(["", f"Total: {len(self._history)} entries"])
             return _make_page(url, title="History — Agent Web Browser",
                               content="\n".join(parts), links=tuple(links))
+
+        # -- Control plane pages (require attached control plane) --
+        _CP_PAGES = {"cities", "trust", "routes", "spaces", "intents"}
+        if page_name.split("?")[0] in _CP_PAGES:
+            if self._control_plane is None:
+                return _make_page(url, status=503,
+                                  error="no_control_plane_attached")
+            return self._handle_about_control_plane(url, page_name)
 
         return _make_page(url, status=404, error=f"unknown_about_page:{page_name}")
 
@@ -1087,6 +1118,53 @@ class AgentWebBrowser:
 
         return _make_page(url, title=f"Search: \"{query}\" — Agent Web Browser",
                           content="\n".join(parts), links=tuple(links))
+
+    def _handle_about_control_plane(self, url: str, page_name: str) -> BrowserPage:
+        """Route about:cities/trust/routes/spaces/intents to control plane."""
+        from .agent_web_browser_control_plane import (
+            render_about_cities,
+            render_about_city_detail,
+            render_about_intents,
+            render_about_routes,
+            render_about_spaces,
+            render_about_trust,
+        )
+
+        cp = self._control_plane
+        base = page_name.split("?")[0]
+
+        if base == "cities":
+            # about:cities?city=X → detail
+            city_id = ""
+            if "?" in page_name:
+                for p in page_name.split("?", 1)[1].split("&"):
+                    if p.startswith("city="):
+                        city_id = p.removeprefix("city=").strip()
+            if city_id:
+                title, text, raw_links = render_about_city_detail(cp, city_id)
+            else:
+                title, text, raw_links = render_about_cities(cp)
+        elif base == "trust":
+            city_filter = ""
+            if "?" in page_name:
+                for p in page_name.split("?", 1)[1].split("&"):
+                    if p.startswith("city="):
+                        city_filter = p.removeprefix("city=").strip()
+            title, text, raw_links = render_about_trust(cp, city_filter)
+        elif base == "routes":
+            title, text, raw_links = render_about_routes(cp)
+        elif base == "spaces":
+            title, text, raw_links = render_about_spaces(cp)
+        elif base == "intents":
+            title, text, raw_links = render_about_intents(cp)
+        else:
+            return _make_page(url, status=404, error=f"unknown_cp_page:{base}")
+
+        links = tuple(
+            PageLink(href=href, text=label, index=i)
+            for i, (href, label) in enumerate(raw_links)
+        )
+        return _make_page(url, title=title, content=text, links=links)
 
     def _cache_page(self, url: str, page: BrowserPage) -> None:
         """Add a page to the LRU cache."""
