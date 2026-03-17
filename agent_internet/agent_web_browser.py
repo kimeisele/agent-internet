@@ -23,18 +23,14 @@ Usage::
 
 from __future__ import annotations
 
-import html
 import json
 import logging
-import re
 import time
 from dataclasses import dataclass, field
-import os
-import platform
-from html.parser import HTMLParser
+from pathlib import Path
 from secrets import token_hex
 from typing import Protocol
-from urllib.parse import urljoin, urlencode
+from urllib.parse import quote_plus, urlencode
 
 logger = logging.getLogger("AGENT_INTERNET.WEB_BROWSER")
 
@@ -132,15 +128,11 @@ class BrowserPage:
     def summary(self, max_text: int = 500) -> dict:
         """Return a compact summary suitable for agent context windows."""
         return {
-            "url": self.url,
-            "status": self.status_code,
-            "title": self.title,
+            "url": self.url, "status": self.status_code, "title": self.title,
             "text_preview": self.content_text[:max_text],
-            "link_count": self.link_count,
-            "form_count": self.form_count,
+            "link_count": self.link_count, "form_count": self.form_count,
             "meta_description": self.meta.description,
-            "ok": self.ok,
-            "error": self.error,
+            "ok": self.ok, "error": self.error,
         }
 
 
@@ -169,7 +161,6 @@ class BrowserTab:
         return ""
 
     def push_url(self, url: str) -> None:
-        # Trim forward history when navigating to a new page
         self.history = self.history[: self.cursor + 1]
         self.history.append(url)
         self.cursor = len(self.history) - 1
@@ -198,423 +189,7 @@ class HistoryEntry:
 
 
 # ---------------------------------------------------------------------------
-# HTML Parser
-# ---------------------------------------------------------------------------
-
-_BLOCK_TAGS = frozenset({
-    "p", "div", "section", "article", "header", "footer", "nav", "main",
-    "aside", "h1", "h2", "h3", "h4", "h5", "h6", "li", "dt", "dd",
-    "blockquote", "pre", "table", "tr", "br", "hr",
-})
-
-_SKIP_TAGS = frozenset({"script", "style", "noscript", "svg", "template"})
-
-
-class _PageParser(HTMLParser):
-    """Stateful HTML parser that extracts text, links, forms, and metadata."""
-
-    def __init__(self, base_url: str) -> None:
-        super().__init__()
-        self.base_url = base_url
-        self.title = ""
-        self.text_parts: list[str] = []
-        self.links: list[PageLink] = []
-        self.forms: list[PageForm] = []
-        self.meta = PageMeta()
-
-        # Internal parser state
-        self._in_title = False
-        self._title_parts: list[str] = []
-        self._skip_depth = 0
-        self._current_link_href = ""
-        self._current_link_rel = ""
-        self._link_text_parts: list[str] = []
-        self._in_link = False
-        self._current_form_action = ""
-        self._current_form_method = "GET"
-        self._current_form_id = ""
-        self._current_form_fields: list[FormField] = []
-        self._in_form = False
-        self._meta_extra: dict[str, str] = {}
-        self._meta_description = ""
-        self._meta_keywords: tuple[str, ...] = ()
-        self._meta_author = ""
-        self._meta_robots = ""
-        self._meta_og_title = ""
-        self._meta_og_description = ""
-        self._meta_og_image = ""
-        self._meta_og_url = ""
-        self._meta_canonical = ""
-        self._meta_charset = "utf-8"
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        attr_dict = {k: (v or "") for k, v in attrs}
-        tag_lower = tag.lower()
-
-        if tag_lower in _SKIP_TAGS:
-            self._skip_depth += 1
-            return
-
-        if self._skip_depth > 0:
-            return
-
-        if tag_lower in _BLOCK_TAGS:
-            self.text_parts.append("\n")
-
-        if tag_lower == "title":
-            self._in_title = True
-            self._title_parts = []
-
-        elif tag_lower == "a":
-            href = attr_dict.get("href", "")
-            if href:
-                self._in_link = True
-                self._current_link_href = urljoin(self.base_url, href)
-                self._current_link_rel = attr_dict.get("rel", "")
-                self._link_text_parts = []
-
-        elif tag_lower == "form":
-            self._in_form = True
-            action = attr_dict.get("action", "")
-            self._current_form_action = urljoin(self.base_url, action) if action else self.base_url
-            self._current_form_method = attr_dict.get("method", "GET").upper()
-            self._current_form_id = attr_dict.get("id", "")
-            self._current_form_fields = []
-
-        elif tag_lower == "input" and self._in_form:
-            self._current_form_fields.append(FormField(
-                name=attr_dict.get("name", ""),
-                field_type=attr_dict.get("type", "text"),
-                value=attr_dict.get("value", ""),
-                required="required" in attr_dict,
-            ))
-
-        elif tag_lower == "textarea" and self._in_form:
-            self._current_form_fields.append(FormField(
-                name=attr_dict.get("name", ""),
-                field_type="textarea",
-                required="required" in attr_dict,
-            ))
-
-        elif tag_lower == "select" and self._in_form:
-            self._current_form_fields.append(FormField(
-                name=attr_dict.get("name", ""),
-                field_type="select",
-            ))
-
-        elif tag_lower == "meta":
-            name = attr_dict.get("name", "").lower()
-            prop = attr_dict.get("property", "").lower()
-            content = attr_dict.get("content", "")
-            http_equiv = attr_dict.get("http-equiv", "").lower()
-            charset = attr_dict.get("charset", "")
-
-            if charset:
-                self._meta_charset = charset
-            elif http_equiv == "content-type" and "charset=" in content.lower():
-                parts = content.lower().split("charset=")
-                if len(parts) > 1:
-                    self._meta_charset = parts[1].strip().rstrip(";")
-
-            if name == "description":
-                self._meta_description = content
-            elif name == "keywords":
-                self._meta_keywords = tuple(k.strip() for k in content.split(",") if k.strip())
-            elif name == "author":
-                self._meta_author = content
-            elif name == "robots":
-                self._meta_robots = content
-            elif prop == "og:title":
-                self._meta_og_title = content
-            elif prop == "og:description":
-                self._meta_og_description = content
-            elif prop == "og:image":
-                self._meta_og_image = content
-            elif prop == "og:url":
-                self._meta_og_url = content
-            elif name or prop:
-                key = name or prop
-                self._meta_extra[key] = content
-
-        elif tag_lower == "link":
-            rel = attr_dict.get("rel", "").lower()
-            href = attr_dict.get("href", "")
-            if rel == "canonical" and href:
-                self._meta_canonical = urljoin(self.base_url, href)
-
-        elif tag_lower == "img":
-            alt = attr_dict.get("alt", "")
-            if alt:
-                self.text_parts.append(f"[image: {alt}]")
-
-    def handle_endtag(self, tag: str) -> None:
-        tag_lower = tag.lower()
-
-        if tag_lower in _SKIP_TAGS and self._skip_depth > 0:
-            self._skip_depth -= 1
-            return
-
-        if self._skip_depth > 0:
-            return
-
-        if tag_lower == "title":
-            self._in_title = False
-            self.title = " ".join(self._title_parts).strip()
-
-        elif tag_lower == "a" and self._in_link:
-            self._in_link = False
-            link_text = " ".join(self._link_text_parts).strip()
-            if self._current_link_href:
-                self.links.append(PageLink(
-                    href=self._current_link_href,
-                    text=link_text,
-                    rel=self._current_link_rel,
-                    index=len(self.links),
-                ))
-
-        elif tag_lower == "form" and self._in_form:
-            self._in_form = False
-            self.forms.append(PageForm(
-                action=self._current_form_action,
-                method=self._current_form_method,
-                fields=tuple(self._current_form_fields),
-                form_id=self._current_form_id,
-                index=len(self.forms),
-            ))
-
-        if tag_lower in _BLOCK_TAGS:
-            self.text_parts.append("\n")
-
-    def handle_data(self, data: str) -> None:
-        if self._skip_depth > 0:
-            return
-        if self._in_title:
-            self._title_parts.append(data)
-        if self._in_link:
-            self._link_text_parts.append(data)
-        self.text_parts.append(data)
-
-    def handle_entityref(self, name: str) -> None:
-        char = html.unescape(f"&{name};")
-        self.handle_data(char)
-
-    def handle_charref(self, name: str) -> None:
-        char = html.unescape(f"&#{name};")
-        self.handle_data(char)
-
-    def build_meta(self) -> PageMeta:
-        return PageMeta(
-            charset=self._meta_charset,
-            description=self._meta_description,
-            keywords=self._meta_keywords,
-            author=self._meta_author,
-            robots=self._meta_robots,
-            og_title=self._meta_og_title,
-            og_description=self._meta_og_description,
-            og_image=self._meta_og_image,
-            og_url=self._meta_og_url,
-            canonical_url=self._meta_canonical,
-            extra=dict(self._meta_extra),
-        )
-
-
-def _clean_text(raw: str) -> str:
-    """Collapse whitespace, preserve paragraph breaks."""
-    # Normalize line endings
-    text = raw.replace("\r\n", "\n").replace("\r", "\n")
-    # Collapse runs of whitespace within lines
-    lines = text.split("\n")
-    cleaned = []
-    for line in lines:
-        stripped = " ".join(line.split())
-        cleaned.append(stripped)
-    # Collapse multiple blank lines into at most two newlines
-    result = "\n".join(cleaned)
-    result = re.sub(r"\n{3,}", "\n\n", result)
-    return result.strip()
-
-
-# ---------------------------------------------------------------------------
-# Content compression — CBR-inspired token budget for agent browsing
-# ---------------------------------------------------------------------------
-
-# Nav-chrome patterns: menus, headers, footers, cookie banners, etc.
-_NAV_PATTERNS = re.compile(
-    r"(?i)^("
-    r"skip to (?:main )?content|toggle (?:navigation|menu)|"
-    r"navigation menu|search\.\.\.|sign (?:in|up|out)|"
-    r"log (?:in|out)|register|cookie|accept all|"
-    r"privacy policy|terms of (?:service|use)|"
-    r"follow us|subscribe|newsletter|"
-    r"all rights reserved|copyright ©|"
-    r"\[image:.*?\]|switch to mobile.*|"
-    r"search pypi|search$|menu$|help$|docs$|sponsors?$|"
-    r"copy pip instructions|latest version|navigation|"
-    r"verified details|unverified details|"
-    r"report project as malware|"
-    r"these details have (?:not )?been verified"
-    r")$"
-)
-
-# Short repeated noise lines (single words that are navigation items)
-_SHORT_NAV_LEN = 4
-
-
-def _estimate_tokens(text: str) -> int:
-    """Rough token estimate: ~4 chars per token (GPT/Claude average)."""
-    return max(1, len(text) // 4)
-
-
-def compress_page(
-    page: "BrowserPage",
-    *,
-    token_budget: int = 1024,
-    link_budget: int = 20,
-    keep_meta: bool = True,
-) -> "BrowserPage":
-    """Compress a BrowserPage to fit within a token budget.
-
-    Inspired by steward's CBR (Constant Bitrate) signal chain:
-    - Strip nav chrome (menus, footers, cookie banners)
-    - Deduplicate repeated lines
-    - Collapse whitespace aggressively
-    - Truncate to token budget with sentence-boundary awareness
-    - Trim links to the most relevant subset
-
-    Returns a new BrowserPage with compressed content.
-    """
-    if not page.ok or not page.content_text:
-        return page
-
-    # Stage 1: Strip nav chrome
-    lines = page.content_text.split("\n")
-    filtered: list[str] = []
-    seen: set[str] = set()
-
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            if filtered and filtered[-1] != "":
-                filtered.append("")
-            continue
-        # Skip nav patterns
-        if _NAV_PATTERNS.match(stripped):
-            continue
-        # Skip very short repeated items (nav menu items like "Help", "Docs")
-        if len(stripped) <= _SHORT_NAV_LEN and stripped.lower() in seen:
-            continue
-        # Deduplicate
-        norm = stripped.lower()
-        if norm in seen and len(stripped) < 80:
-            continue
-        seen.add(norm)
-        filtered.append(stripped)
-
-    # Stage 2: Collapse to text
-    text = "\n".join(filtered).strip()
-    text = re.sub(r"\n{3,}", "\n\n", text)
-
-    # Stage 3: Token-budget truncation
-    current_tokens = _estimate_tokens(text)
-    if current_tokens > token_budget:
-        # Target chars ≈ token_budget × 4
-        target_chars = token_budget * 4
-        if len(text) > target_chars:
-            # Try to cut at paragraph boundary
-            cut = text[:target_chars]
-            last_para = cut.rfind("\n\n")
-            if last_para > target_chars // 2:
-                text = cut[:last_para]
-            else:
-                # Cut at sentence boundary
-                last_dot = cut.rfind(". ")
-                if last_dot > target_chars // 2:
-                    text = cut[: last_dot + 1]
-                else:
-                    text = cut + "…"
-
-    # Stage 4: Compress links — keep most relevant
-    links = page.links
-    if link_budget > 0 and len(links) > link_budget:
-        # Prioritize: content links over nav/sponsor. Score by informativeness.
-        scored: list[tuple[float, PageLink]] = []
-        seen_hrefs: set[str] = set()
-        page_domain = page.url.split("/")[2] if "/" in page.url else ""
-        for link in links:
-            if link.href in seen_hrefs or not link.text.strip():
-                continue
-            seen_hrefs.add(link.href)
-            text_clean = " ".join(link.text.split()).strip()
-            score = len(text_clean)
-            # Bonus: same-domain links (actual content, not external sponsors)
-            link_domain = link.href.split("/")[2] if link.href.startswith("http") and "/" in link.href else ""
-            if link_domain == page_domain:
-                score += 15
-            # Bonus: informative keywords
-            tl = text_clean.lower()
-            if any(kw in tl for kw in ("article", "doc", "guide", "section", "chapter", "readme", "overview")):
-                score += 20
-            # Penalty: sponsor/ad links
-            if any(kw in tl for kw in ("sponsor", "advertis", "cookie", "privacy", "terms")):
-                score -= 50
-            if any(ad in link.href for ad in ("careers.", "ads.", "sponsor", "utm_")):
-                score -= 30
-            scored.append((score, link))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        kept = [lnk for _, lnk in scored[:link_budget]]
-        # Re-index
-        links = tuple(
-            PageLink(href=lnk.href, text=lnk.text, rel=lnk.rel, index=i)
-            for i, lnk in enumerate(kept)
-        )
-
-    # Build header with meta if requested
-    header_parts: list[str] = []
-    if keep_meta and page.title:
-        header_parts.append(f"# {page.title}")
-    if keep_meta and page.meta.description:
-        header_parts.append(f"> {page.meta.description}")
-    if header_parts:
-        text = "\n".join(header_parts) + "\n\n" + text
-
-    return BrowserPage(
-        url=page.url,
-        status_code=page.status_code,
-        title=page.title,
-        content_text=text,
-        links=links,
-        forms=page.forms,
-        meta=page.meta,
-        headers=page.headers,
-        fetched_at=page.fetched_at,
-        content_type=page.content_type,
-        encoding=page.encoding,
-        raw_html=page.raw_html,
-    )
-
-
-def parse_html(raw_html: str, base_url: str) -> tuple[str, str, tuple[PageLink, ...], tuple[PageForm, ...], PageMeta]:
-    """Parse raw HTML into structured components.
-
-    Returns (title, content_text, links, forms, meta).
-    """
-    parser = _PageParser(base_url)
-    try:
-        parser.feed(raw_html)
-    except Exception as exc:
-        logger.debug("HTML parse warning for %s: %s", base_url, exc)
-    content_text = _clean_text("".join(parser.text_parts))
-    return (
-        parser.title,
-        content_text,
-        tuple(parser.links),
-        tuple(parser.forms),
-        parser.build_meta(),
-    )
-
-
-# ---------------------------------------------------------------------------
-# HTTP Fetcher (stdlib only)
+# Config
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True, slots=True)
@@ -630,262 +205,59 @@ class BrowserConfig:
     accept: str = "text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.8"
     accept_language: str = "en-US,en;q=0.9"
     default_encoding: str = "utf-8"
-    respect_proxy: bool = True  # Honor HTTP_PROXY / HTTPS_PROXY env vars
+    respect_proxy: bool = True
     # CBR-inspired content compression
-    token_budget: int = 0  # 0 = no compression (raw). >0 = target token count
+    token_budget: int = 0  # 0 = no compression. >0 = target token count
     compress_links: int = 0  # 0 = keep all. >0 = max links to keep
-    # Agent-native discovery: check llms.txt and agents.json before scraping HTML
-    llms_txt_discovery: bool = True  # Check /llms.txt first (curated agent content)
-    agents_json_discovery: bool = True  # Check /.well-known/agents.json
+    # Agent-native discovery
+    llms_txt_discovery: bool = True
+    agents_json_discovery: bool = True
+    llms_txt_timeout: float = 3.0
+    agents_json_timeout: float = 3.0
+    probe_timeout: float = 5.0
+    max_history: int = 500
 
 
-def _detect_encoding(headers: dict[str, str], body: bytes) -> str:
-    """Best-effort encoding detection from Content-Type header or BOM."""
-    ct = headers.get("content-type", "")
-    if "charset=" in ct.lower():
-        for part in ct.split(";"):
-            if "charset=" in part.lower():
-                return part.split("=", 1)[1].strip().strip('"')
-    # UTF-8 BOM
-    if body[:3] == b"\xef\xbb\xbf":
-        return "utf-8"
-    return "utf-8"
-
-
-def fetch_url(
-    url: str,
-    *,
-    config: BrowserConfig | None = None,
-    method: str = "GET",
-    body: bytes | None = None,
-    extra_headers: dict[str, str] | None = None,
-) -> BrowserPage:
-    """Fetch a URL and return a parsed BrowserPage.
-
-    Uses ``urllib.request`` which natively respects ``HTTP_PROXY`` /
-    ``HTTPS_PROXY`` environment variables — critical for containerized and
-    sandboxed agent environments.  Returns an error page (with ``error``
-    set) on network failures rather than raising.
-    """
-    import urllib.error
-    import urllib.request
-
-    cfg = config or BrowserConfig()
-
-    # Validate URL before attempting network I/O
-    if not url or not url.strip():
-        return _error_page(url, 0, "empty_url")
-    if not url.startswith(("http://", "https://")):
-        return _error_page(url, 0, f"unsupported_scheme:{url.split(':')[0] if ':' in url else 'none'}")
-
-    request_headers = {
-        "User-Agent": cfg.user_agent,
-        "Accept": cfg.accept,
-        "Accept-Language": cfg.accept_language,
-    }
-    if extra_headers:
-        request_headers.update(extra_headers)
-
-    req = urllib.request.Request(url, data=body, headers=request_headers, method=method)
-
-    try:
-        with urllib.request.urlopen(req, timeout=cfg.connect_timeout_s) as resp:
-            raw_body = resp.read(cfg.max_response_bytes)
-            resp_headers = {k.lower(): v for k, v in resp.getheaders()}
-            status = resp.status
-            final_url = resp.url or url
-    except urllib.error.HTTPError as exc:
-        resp_headers = {k.lower(): v for k, v in exc.headers.items()} if exc.headers else {}
-        raw_body = exc.read(cfg.max_response_bytes) if exc.fp else b""
-        status = exc.code
-        final_url = url
-    except Exception as exc:
-        return _error_page(url, 0, f"{type(exc).__name__}: {exc}")
-
-    encoding = _detect_encoding(resp_headers, raw_body)
-    try:
-        decoded = raw_body.decode(encoding, errors="replace")
-    except (LookupError, UnicodeDecodeError):
-        decoded = raw_body.decode("utf-8", errors="replace")
-
-    content_type = resp_headers.get("content-type", "text/html")
-
-    # Handle JSON responses
-    if "application/json" in content_type:
-        return _json_page(final_url, status, decoded, resp_headers, content_type)
-
-    # Handle plain text
-    if "text/plain" in content_type:
-        return BrowserPage(
-            url=final_url,
-            status_code=status,
-            title=final_url.split("/")[-1] or final_url,
-            content_text=decoded.strip(),
-            links=(),
-            forms=(),
-            meta=PageMeta(),
-            headers=resp_headers,
-            fetched_at=time.time(),
-            content_type=content_type,
-            encoding=encoding,
-            raw_html=decoded,
-        )
-
-    # Parse HTML
-    title, content_text, links, forms, meta = parse_html(decoded, final_url)
-    return BrowserPage(
-        url=final_url,
-        status_code=status,
-        title=title,
-        content_text=content_text,
-        links=links,
-        forms=forms,
-        meta=meta,
-        headers=resp_headers,
-        fetched_at=time.time(),
-        content_type=content_type,
-        encoding=encoding,
-        raw_html=decoded,
-    )
-
-
-def _json_page(url: str, status: int, body: str, headers: dict[str, str], content_type: str) -> BrowserPage:
-    """Render a JSON response as a readable BrowserPage."""
-    try:
-        data = json.loads(body)
-        formatted = json.dumps(data, indent=2, ensure_ascii=False)
-    except (json.JSONDecodeError, ValueError):
-        formatted = body
-
-    # Extract links from JSON (common patterns)
-    links: list[PageLink] = []
-    _extract_json_links(data if isinstance(data, (dict, list)) else {}, links, base_url=url)
-
-    return BrowserPage(
-        url=url,
-        status_code=status,
-        title=f"JSON: {url.split('/')[-1] or url}",
-        content_text=formatted,
-        links=tuple(links),
-        forms=(),
-        meta=PageMeta(),
-        headers=headers,
-        fetched_at=time.time(),
-        content_type=content_type,
-        encoding="utf-8",
-        raw_html=body,
-    )
-
-
-def _extract_json_links(
-    data: dict | list,
-    links: list[PageLink],
-    *,
-    base_url: str,
-    depth: int = 0,
-    max_depth: int = 3,
-) -> None:
-    """Recursively extract URL-like values from JSON structures."""
-    if depth > max_depth:
-        return
-    if isinstance(data, dict):
-        for key, value in data.items():
-            if isinstance(value, str) and (value.startswith("http://") or value.startswith("https://")):
-                links.append(PageLink(
-                    href=value,
-                    text=str(key),
-                    index=len(links),
-                ))
-            elif isinstance(value, (dict, list)):
-                _extract_json_links(value, links, base_url=base_url, depth=depth + 1)
-    elif isinstance(data, list):
-        for item in data[:50]:  # Cap list traversal
-            if isinstance(item, (dict, list)):
-                _extract_json_links(item, links, base_url=base_url, depth=depth + 1)
-
+# ---------------------------------------------------------------------------
+# BrowserPage factory
+# ---------------------------------------------------------------------------
 
 def _error_page(url: str, status: int, error: str) -> BrowserPage:
     """Construct an error BrowserPage."""
+    return _make_page(url, status=status, error=error)
+
+
+def _make_page(
+    url: str,
+    *,
+    status: int = 200,
+    title: str = "",
+    content: str = "",
+    links: tuple[PageLink, ...] = (),
+    forms: tuple[PageForm, ...] = (),
+    meta: PageMeta | None = None,
+    headers: dict[str, str] | None = None,
+    content_type: str = "text/html",
+    encoding: str = "utf-8",
+    raw_html: str = "",
+    error: str = "",
+) -> BrowserPage:
+    """Single factory for all BrowserPage creation."""
     return BrowserPage(
         url=url,
         status_code=status,
-        title="Error",
-        content_text="",
-        links=(),
-        forms=(),
-        meta=PageMeta(),
+        title=title or ("Error" if error else ""),
+        content_text=content,
+        links=links,
+        forms=forms,
+        meta=meta or PageMeta(),
+        headers=headers or {},
         fetched_at=time.time(),
+        content_type=content_type,
+        encoding=encoding,
+        raw_html=raw_html,
         error=error,
     )
-
-
-# ---------------------------------------------------------------------------
-# llms.txt parser — agent-native content discovery
-# ---------------------------------------------------------------------------
-
-_LLMS_TXT_LINK_RE = re.compile(r"^\s*-\s*\[([^\]]+)\]\(([^)]+)\)\s*(?::\s*(.*))?$")
-
-
-def _parse_llms_txt(content: str, base_url: str) -> dict:
-    """Parse an llms.txt file per the spec at https://llmstxt.org/.
-
-    Structure:
-      - H1: project/site name (required)
-      - Blockquote: short summary
-      - Body paragraphs: description
-      - H2 sections: file lists (``- [name](url): notes``)
-      - H2 "Optional": lower-priority URLs
-    """
-    lines = content.strip().split("\n")
-    title = ""
-    summary = ""
-    description_parts: list[str] = []
-    sections: dict[str, list[dict]] = {}
-    current_section: str = ""
-    keywords: list[str] = []
-
-    for line in lines:
-        stripped = line.strip()
-
-        # H1 — title
-        if stripped.startswith("# ") and not stripped.startswith("## "):
-            title = stripped[2:].strip()
-            continue
-
-        # Blockquote — summary
-        if stripped.startswith("> ") and not summary:
-            summary = stripped[2:].strip()
-            continue
-
-        # H2 — section header
-        if stripped.startswith("## "):
-            current_section = stripped[3:].strip()
-            if current_section not in sections:
-                sections[current_section] = []
-            continue
-
-        # Link item in a section
-        if current_section:
-            match = _LLMS_TXT_LINK_RE.match(line)
-            if match:
-                name, url, notes = match.group(1), match.group(2), match.group(3) or ""
-                # Resolve relative URLs
-                if not url.startswith(("http://", "https://")):
-                    url = f"{base_url.rstrip('/')}/{url.lstrip('/')}"
-                sections[current_section].append({"name": name, "url": url, "notes": notes.strip()})
-                continue
-
-        # Body text before any H2
-        if not current_section and stripped and not stripped.startswith("#"):
-            description_parts.append(stripped)
-
-    return {
-        "title": title or "Unknown",
-        "summary": summary,
-        "description": "\n".join(description_parts),
-        "sections": sections,
-        "keywords": keywords,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -909,13 +281,6 @@ class AgentWebBrowser:
 
     Manages tabs, history, and a page cache.  Delegates fetching to pluggable
     ``PageSource`` implementations (default: stdlib HTTP).
-
-    Usage::
-
-        browser = AgentWebBrowser()
-        page = browser.open("https://example.com")
-        page2 = browser.follow_link(0)
-        browser.back()
     """
 
     config: BrowserConfig = field(default_factory=BrowserConfig)
@@ -926,7 +291,6 @@ class AgentWebBrowser:
     _request_count: int = 0
     _bookmarks: list[Bookmark] = field(default_factory=list)
     _history: list[HistoryEntry] = field(default_factory=list)
-    _max_history: int = 500
     _llms_txt_cache: dict[str, dict | None] = field(default_factory=dict)
     _agents_json_cache: dict[str, dict | None] = field(default_factory=dict)
 
@@ -981,9 +345,7 @@ class AgentWebBrowser:
         """Return a summary of all open tabs."""
         return [
             {
-                "tab_id": tab.tab_id,
-                "label": tab.label,
-                "url": tab.current_url,
+                "tab_id": tab.tab_id, "label": tab.label, "url": tab.current_url,
                 "title": tab.current_page.title if tab.current_page else "",
                 "active": tab.tab_id == self._active_tab_id,
                 "history_length": len(tab.history),
@@ -994,24 +356,19 @@ class AgentWebBrowser:
     # -- Navigation --
 
     def open(self, url: str, *, use_cache: bool = True, token_budget: int = 0) -> BrowserPage:
-        """Navigate the active tab to *url* and return the page.
+        """Navigate the active tab to *url* and return the page."""
+        from .agent_web_browser_compress import compress_page
 
-        If *token_budget* > 0 (or ``config.token_budget`` > 0), compress the
-        page content to fit within that token budget — stripping nav chrome,
-        deduplicating, and truncating with sentence-boundary awareness.
-        """
         if use_cache and url in self._page_cache:
             page = self._page_cache[url]
         else:
             page = self._fetch(url)
             self._cache_page(url, page)
 
-        # Apply CBR-inspired content compression
         budget = token_budget or self.config.token_budget
         if budget > 0 and page.ok:
             page = compress_page(
-                page,
-                token_budget=budget,
+                page, token_budget=budget,
                 link_budget=self.config.compress_links or 20,
             )
 
@@ -1045,15 +402,10 @@ class AgentWebBrowser:
         return page
 
     def follow_link(self, index_or_query: int | str) -> BrowserPage:
-        """Follow a link on the current page by index or text search.
-
-        - ``int``:  Follow the link at that index.
-        - ``str``:  Find the first link whose text or href contains the query.
-        """
+        """Follow a link on the current page by index or text search."""
         page = self.current_page
         if page is None:
             raise ValueError("no_current_page")
-
         if isinstance(index_or_query, int):
             if index_or_query < 0 or index_or_query >= len(page.links):
                 raise IndexError(f"link_index_out_of_range:{index_or_query}")
@@ -1063,23 +415,17 @@ class AgentWebBrowser:
             if not matches:
                 raise ValueError(f"no_link_matching:{index_or_query}")
             link = matches[0]
-
         return self.open(link.href)
 
     def submit_form(
-        self,
-        index_or_id: int | str,
-        *,
-        values: dict[str, str] | None = None,
+        self, index_or_id: int | str, *, values: dict[str, str] | None = None,
     ) -> BrowserPage:
-        """Submit a form on the current page.
+        """Submit a form on the current page."""
+        from .agent_web_browser_http import fetch_url
 
-        ``values`` maps field names to values, overriding defaults.
-        """
         page = self.current_page
         if page is None:
             raise ValueError("no_current_page")
-
         if isinstance(index_or_id, int):
             if index_or_id < 0 or index_or_id >= len(page.forms):
                 raise IndexError(f"form_index_out_of_range:{index_or_id}")
@@ -1090,7 +436,6 @@ class AgentWebBrowser:
                 raise ValueError(f"no_form_matching:{index_or_id}")
             form = matching[0]
 
-        # Build form data
         data: dict[str, str] = {}
         for fld in form.fields:
             if fld.name:
@@ -1102,21 +447,18 @@ class AgentWebBrowser:
             sep = "&" if "?" in form.action else "?"
             url = f"{form.action}{sep}{urlencode(data)}"
             return self.open(url)
-        else:
-            body = urlencode(data).encode("utf-8")
-            page = fetch_url(
-                form.action,
-                config=self.config,
-                method="POST",
-                body=body,
-                extra_headers={"Content-Type": "application/x-www-form-urlencoded"},
-            )
-            self._request_count += 1
-            tab = self.active_tab
-            tab.push_url(form.action)
-            tab.current_page = page
-            self._cache_page(form.action, page)
-            return page
+
+        body = urlencode(data).encode("utf-8")
+        page = fetch_url(
+            form.action, config=self.config, method="POST", body=body,
+            extra_headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        self._request_count += 1
+        tab = self.active_tab
+        tab.push_url(form.action)
+        tab.current_page = page
+        self._cache_page(form.action, page)
+        return page
 
     def refresh(self) -> BrowserPage | None:
         """Re-fetch the current page, bypassing cache."""
@@ -1135,29 +477,20 @@ class AgentWebBrowser:
         if page is None:
             return ""
         text = page.content_text
-        if max_length > 0:
-            text = text[:max_length]
-        return text
+        return text[:max_length] if max_length > 0 else text
 
     def get_links(self, *, query: str = "") -> tuple[PageLink, ...]:
         """Return links from the current page, optionally filtered."""
         page = self.current_page
         if page is None:
             return ()
-        if query:
-            return page.find_links(query)
-        return page.links
+        return page.find_links(query) if query else page.links
 
     # -- Bookmarks --
 
     def bookmark(
-        self,
-        url: str = "",
-        *,
-        title: str = "",
-        folder: str = "",
-        tags: tuple[str, ...] | list[str] = (),
-        notes: str = "",
+        self, url: str = "", *, title: str = "", folder: str = "",
+        tags: tuple[str, ...] | list[str] = (), notes: str = "",
     ) -> Bookmark:
         """Add a bookmark.  Defaults to current page if no URL given."""
         if not url:
@@ -1166,17 +499,9 @@ class AgentWebBrowser:
                 raise ValueError("no_current_page")
             url = page.url
             title = title or page.title
-
-        # Deduplicate by URL
         self._bookmarks = [bm for bm in self._bookmarks if bm.url != url]
-        bm = Bookmark(
-            url=url,
-            title=title or url,
-            folder=folder,
-            tags=tuple(tags),
-            added_at=time.time(),
-            notes=notes,
-        )
+        bm = Bookmark(url=url, title=title or url, folder=folder,
+                       tags=tuple(tags), added_at=time.time(), notes=notes)
         self._bookmarks.append(bm)
         return bm
 
@@ -1214,15 +539,12 @@ class AgentWebBrowser:
     def _record_history(self, page: BrowserPage) -> None:
         """Record a page visit in history."""
         entry = HistoryEntry(
-            url=page.url,
-            title=page.title,
-            visited_at=time.time(),
-            status_code=page.status_code,
+            url=page.url, title=page.title,
+            visited_at=time.time(), status_code=page.status_code,
         )
         self._history.append(entry)
-        # Trim to max
-        if len(self._history) > self._max_history:
-            self._history = self._history[-self._max_history:]
+        if len(self._history) > self.config.max_history:
+            self._history = self._history[-self.config.max_history:]
 
     def history(self, *, limit: int = 50, query: str = "") -> list[HistoryEntry]:
         """Return browsing history, most recent first."""
@@ -1245,11 +567,9 @@ class AgentWebBrowser:
     # -- Reader mode --
 
     def reader(self, *, token_budget: int = 1024) -> BrowserPage:
-        """Return current page in reader mode — stripped to pure content.
+        """Return current page in reader mode — stripped to pure content."""
+        from .agent_web_browser_compress import compress_page
 
-        Aggressive compression: removes all nav, sidebars, ads, footers.
-        Only keeps the main content + title + description.
-        """
         page = self.current_page
         if page is None:
             raise ValueError("no_current_page")
@@ -1258,63 +578,37 @@ class AgentWebBrowser:
     # -- Web search --
 
     def search(self, query: str, *, engine: str = "duckduckgo") -> BrowserPage:
-        """Search the web using a search engine.
-
-        Supported engines: ``duckduckgo`` (default), ``google``.
-        Returns the search results page.
-        """
-        from urllib.parse import quote_plus
+        """Search the web using a search engine."""
         if engine == "google":
             url = f"https://www.google.com/search?q={quote_plus(query)}"
         else:
-            # DuckDuckGo HTML-only (no JS required)
             url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
         return self.open(url)
 
     # -- Session save/restore --
 
     def save_session(self, path: str) -> dict:
-        """Save browser state (bookmarks, history, tabs) to a JSON file.
-
-        Does NOT save page cache or raw HTML — only navigational state.
-        """
-        from pathlib import Path
+        """Save browser state (bookmarks, history, tabs) to a JSON file."""
         session = {
-            "kind": "agent_web_browser_session",
-            "version": 1,
-            "saved_at": time.time(),
+            "kind": "agent_web_browser_session", "version": 1, "saved_at": time.time(),
             "config": {
                 "token_budget": self.config.token_budget,
                 "compress_links": self.config.compress_links,
                 "user_agent": self.config.user_agent,
             },
             "bookmarks": [
-                {
-                    "url": bm.url,
-                    "title": bm.title,
-                    "folder": bm.folder,
-                    "tags": list(bm.tags),
-                    "added_at": bm.added_at,
-                    "notes": bm.notes,
-                }
+                {"url": bm.url, "title": bm.title, "folder": bm.folder,
+                 "tags": list(bm.tags), "added_at": bm.added_at, "notes": bm.notes}
                 for bm in self._bookmarks
             ],
             "history": [
-                {
-                    "url": e.url,
-                    "title": e.title,
-                    "visited_at": e.visited_at,
-                    "status_code": e.status_code,
-                }
+                {"url": e.url, "title": e.title, "visited_at": e.visited_at,
+                 "status_code": e.status_code}
                 for e in self._history
             ],
             "tabs": [
-                {
-                    "tab_id": tab.tab_id,
-                    "label": tab.label,
-                    "history": tab.history,
-                    "cursor": tab.cursor,
-                }
+                {"tab_id": tab.tab_id, "label": tab.label,
+                 "history": tab.history, "cursor": tab.cursor}
                 for tab in self._tabs.values()
             ],
             "active_tab_id": self._active_tab_id,
@@ -1323,80 +617,56 @@ class AgentWebBrowser:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(session, indent=2, default=str), encoding="utf-8")
-        return {"saved": True, "path": str(p), "bookmarks": len(self._bookmarks), "history": len(self._history)}
+        return {"saved": True, "path": str(p),
+                "bookmarks": len(self._bookmarks), "history": len(self._history)}
 
     def restore_session(self, path: str) -> dict:
         """Restore browser state from a saved session file."""
-        from pathlib import Path
         p = Path(path)
         if not p.exists():
             return {"restored": False, "error": "file_not_found"}
-
         data = json.loads(p.read_text(encoding="utf-8"))
         if data.get("kind") != "agent_web_browser_session":
             return {"restored": False, "error": "invalid_session_file"}
 
-        # Restore bookmarks
         self._bookmarks = [
-            Bookmark(
-                url=bm["url"],
-                title=bm.get("title", ""),
-                folder=bm.get("folder", ""),
-                tags=tuple(bm.get("tags", ())),
-                added_at=bm.get("added_at", 0.0),
-                notes=bm.get("notes", ""),
-            )
+            Bookmark(url=bm["url"], title=bm.get("title", ""), folder=bm.get("folder", ""),
+                     tags=tuple(bm.get("tags", ())), added_at=bm.get("added_at", 0.0),
+                     notes=bm.get("notes", ""))
             for bm in data.get("bookmarks", [])
         ]
-
-        # Restore history
         self._history = [
-            HistoryEntry(
-                url=e["url"],
-                title=e.get("title", ""),
-                visited_at=e.get("visited_at", 0.0),
-                status_code=e.get("status_code", 200),
-            )
+            HistoryEntry(url=e["url"], title=e.get("title", ""),
+                         visited_at=e.get("visited_at", 0.0),
+                         status_code=e.get("status_code", 200))
             for e in data.get("history", [])
         ]
-
-        # Restore tabs
         self._tabs.clear()
         for tab_data in data.get("tabs", []):
             tab = BrowserTab(
-                tab_id=tab_data["tab_id"],
-                label=tab_data.get("label", ""),
-                history=tab_data.get("history", []),
-                cursor=tab_data.get("cursor", -1),
+                tab_id=tab_data["tab_id"], label=tab_data.get("label", ""),
+                history=tab_data.get("history", []), cursor=tab_data.get("cursor", -1),
             )
             self._tabs[tab.tab_id] = tab
 
         self._active_tab_id = data.get("active_tab_id", "")
         if self._active_tab_id not in self._tabs and self._tabs:
             self._active_tab_id = next(iter(self._tabs))
-
-        # Ensure at least one tab
         if not self._tabs:
             tab = BrowserTab(tab_id=f"tab_{token_hex(4)}", label="main")
             self._tabs[tab.tab_id] = tab
             self._active_tab_id = tab.tab_id
 
         self._request_count = data.get("request_count", 0)
+        return {"restored": True, "bookmarks": len(self._bookmarks),
+                "history": len(self._history), "tabs": len(self._tabs)}
 
-        return {
-            "restored": True,
-            "bookmarks": len(self._bookmarks),
-            "history": len(self._history),
-            "tabs": len(self._tabs),
-        }
-
-    # -- Snapshot / serialization --
+    # -- Snapshot --
 
     def snapshot(self) -> dict:
         """Export browser state as a JSON-serializable dict."""
         return {
-            "kind": "agent_web_browser_snapshot",
-            "version": 1,
+            "kind": "agent_web_browser_snapshot", "version": 1,
             "active_tab_id": self._active_tab_id,
             "request_count": self._request_count,
             "cache_size": len(self._page_cache),
@@ -1405,372 +675,178 @@ class AgentWebBrowser:
             "history_count": len(self._history),
         }
 
-    # -- Internal --
+    # -- Internal: fetch pipeline --
 
     def _fetch(self, url: str) -> BrowserPage:
         """Fetch a URL with agent-native discovery.
 
         Resolution order:
-        1. ``about:`` pages (built-in self-knowledge)
+        1. about: pages (built-in self-knowledge)
         2. Registered sources (GitHub API, etc.)
-        3. ``/llms.txt`` discovery (if enabled — curated agent content)
-        4. ``/.well-known/agents.json`` discovery (site capabilities)
-        5. Plain HTML fetch + CBR compression (fallback)
+        3. /llms.txt discovery (curated agent content)
+        4. Plain HTML fetch + agents.json enrichment (fallback)
         """
+        from .agent_web_browser_http import (
+            enrich_with_agents_json,
+            fetch_url,
+            try_llms_txt,
+        )
+
         self._request_count += 1
 
-        # Handle about: protocol — built-in browser pages
         if url.startswith("about:"):
             return self._handle_about(url)
 
-        # Registered sources (GitHub API, etc.)
         for source in self._sources:
             if source.can_handle(url):
                 return source.fetch(url, config=self.config)
 
-        # Agent-native discovery: try llms.txt before scraping HTML
         if self.config.llms_txt_discovery and url.startswith("https://"):
-            llms_page = self._try_llms_txt(url)
+            llms_page = try_llms_txt(
+                url, config=self.config, cache=self._llms_txt_cache,
+            )
             if llms_page is not None:
                 return llms_page
 
-        # Fallback: plain HTTP fetch
         page = fetch_url(url, config=self.config)
 
-        # Enrich with agents.json if available
         if self.config.agents_json_discovery and page.ok and url.startswith("https://"):
-            page = self._enrich_with_agents_json(url, page)
+            page = enrich_with_agents_json(
+                url, page, config=self.config, cache=self._agents_json_cache,
+            )
 
         return page
-
-    def _try_llms_txt(self, url: str) -> BrowserPage | None:
-        """Check if the domain serves /llms.txt — curated content for agents.
-
-        Per the llms.txt spec (https://llmstxt.org/): sites can provide a
-        Markdown file at /llms.txt with structured, agent-optimized content.
-        If found, we use it instead of scraping HTML. This is the strangler
-        fig: clean for new sites, transparent fallback for old ones.
-
-        Only checked for root or path-level URLs (not deep subpages).
-        """
-        from urllib.parse import urlparse
-
-        parsed = urlparse(url)
-        domain_root = f"{parsed.scheme}://{parsed.netloc}"
-        llms_url = f"{domain_root}/llms.txt"
-
-        # Check cache first
-        if llms_url in self._llms_txt_cache:
-            cached = self._llms_txt_cache[llms_url]
-            if cached is None:
-                return None  # Known to not exist
-            return self._render_llms_txt(url, cached)
-
-        # Fetch llms.txt with short timeout
-        try:
-            import urllib.request
-            import urllib.error
-            req = urllib.request.Request(
-                llms_url,
-                headers={"User-Agent": self.config.user_agent, "Accept": "text/plain,text/markdown"},
-            )
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                if resp.status == 200:
-                    body = resp.read(self.config.max_response_bytes).decode("utf-8", errors="replace")
-                    if body.strip() and body.strip().startswith("#"):
-                        # Looks like valid llms.txt (starts with Markdown heading)
-                        parsed_data = _parse_llms_txt(body, domain_root)
-                        self._llms_txt_cache[llms_url] = parsed_data
-                        logger.info("llms.txt found for %s", parsed.netloc)
-                        return self._render_llms_txt(url, parsed_data)
-        except Exception:
-            pass
-
-        # Cache the miss
-        self._llms_txt_cache[llms_url] = None
-        return None
-
-    def _render_llms_txt(self, original_url: str, data: dict) -> BrowserPage:
-        """Render parsed llms.txt data as a BrowserPage."""
-        text_parts = [f"# {data['title']}"]
-        if data.get("summary"):
-            text_parts.append(f"> {data['summary']}")
-        text_parts.append("")
-        if data.get("description"):
-            text_parts.append(data["description"])
-            text_parts.append("")
-
-        links: list[PageLink] = []
-        for section_name, items in data.get("sections", {}).items():
-            text_parts.append(f"## {section_name}")
-            for item in items:
-                text_parts.append(f"  [{item['name']}]({item['url']})")
-                if item.get("notes"):
-                    text_parts.append(f"    {item['notes']}")
-                links.append(PageLink(href=item["url"], text=item["name"], index=len(links)))
-            text_parts.append("")
-
-        text_parts.append("")
-        text_parts.append("[source: llms.txt — agent-optimized content]")
-
-        return BrowserPage(
-            url=original_url,
-            status_code=200,
-            title=data["title"],
-            content_text="\n".join(text_parts),
-            links=tuple(links),
-            forms=(),
-            meta=PageMeta(
-                description=data.get("summary", ""),
-                keywords=tuple(data.get("keywords", ())),
-            ),
-            headers={"x-content-source": "llms.txt"},
-            fetched_at=time.time(),
-            content_type="text/markdown",
-        )
-
-    def _enrich_with_agents_json(self, url: str, page: BrowserPage) -> BrowserPage:
-        """Check /.well-known/agents.json and enrich page metadata if found."""
-        from urllib.parse import urlparse
-
-        parsed = urlparse(url)
-        domain_root = f"{parsed.scheme}://{parsed.netloc}"
-        agents_url = f"{domain_root}/.well-known/agents.json"
-
-        # Check cache
-        if agents_url in self._agents_json_cache:
-            cached = self._agents_json_cache[agents_url]
-            if cached is None:
-                return page
-            return self._apply_agents_json(page, cached)
-
-        try:
-            import urllib.request
-            req = urllib.request.Request(
-                agents_url,
-                headers={"User-Agent": self.config.user_agent, "Accept": "application/json"},
-            )
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                if resp.status == 200:
-                    body = resp.read(self.config.max_response_bytes).decode("utf-8", errors="replace")
-                    data = json.loads(body)
-                    if isinstance(data, dict):
-                        self._agents_json_cache[agents_url] = data
-                        logger.info("agents.json found for %s", parsed.netloc)
-                        return self._apply_agents_json(page, data)
-        except Exception:
-            pass
-
-        self._agents_json_cache[agents_url] = None
-        return page
-
-    def _apply_agents_json(self, page: BrowserPage, agents_data: dict) -> BrowserPage:
-        """Enrich a page's metadata with agents.json capabilities info."""
-        extra = dict(page.meta.extra)
-        extra["agents_json"] = json.dumps(agents_data, default=str)[:2000]
-
-        # Extract agent-relevant info
-        caps = agents_data.get("capabilities", [])
-        if isinstance(caps, list):
-            extra["agent_capabilities"] = ", ".join(str(c) for c in caps[:10])
-
-        new_meta = PageMeta(
-            charset=page.meta.charset,
-            description=page.meta.description,
-            keywords=page.meta.keywords,
-            author=page.meta.author,
-            robots=page.meta.robots,
-            og_title=page.meta.og_title,
-            og_description=page.meta.og_description,
-            og_image=page.meta.og_image,
-            og_url=page.meta.og_url,
-            canonical_url=page.meta.canonical_url,
-            extra=extra,
-        )
-        return BrowserPage(
-            url=page.url,
-            status_code=page.status_code,
-            title=page.title,
-            content_text=page.content_text,
-            links=page.links,
-            forms=page.forms,
-            meta=new_meta,
-            headers=page.headers,
-            fetched_at=page.fetched_at,
-            content_type=page.content_type,
-            encoding=page.encoding,
-            raw_html=page.raw_html,
-        )
 
     def _handle_about(self, url: str) -> BrowserPage:
         """Render built-in about: pages for agent self-knowledge."""
+        from .agent_web_browser_env import (
+            build_browser_capability_manifest,
+            discover_federation_descriptors,
+            probe_environment,
+        )
+
         page_name = url.removeprefix("about:").strip().lower()
 
         if page_name in ("", "blank"):
-            return BrowserPage(
-                url=url, status_code=200, title="about:blank",
-                content_text="", links=(), forms=(), meta=PageMeta(),
-                fetched_at=time.time(),
-            )
+            return _make_page(url, title="about:blank")
 
         if page_name == "environment":
-            env = self.environment()
-            conn = env.get("connectivity", {})
-            gh = env.get("github", {})
-            rt = env.get("runtime", {})
+            env = probe_environment(config=self.config, sources=self._sources)
+            conn, gh, rt = env["connectivity"], env["github"], env["runtime"]
             text = "\n".join([
-                "# Agent Web Browser — Environment",
-                "",
+                "# Agent Web Browser — Environment", "",
                 "## Connectivity",
                 f"  Internet: {'yes' if conn.get('has_internet') else 'NO'}",
-                f"  Proxy: {conn.get('proxy_endpoint') or 'none'}",
-                "",
+                f"  Proxy: {conn.get('proxy_endpoint') or 'none'}", "",
                 "## GitHub",
                 f"  Authenticated: {'yes' if gh.get('authenticated') else 'no'}",
                 f"  User: {gh.get('user') or 'anonymous'}",
-                f"  API: {'reachable' if gh.get('api_reachable') else 'unreachable'}",
-                "",
-                "## Sources",
-                *[f"  - {s}" for s in env.get("sources", [])],
-                "",
+                f"  API: {'reachable' if gh.get('api_reachable') else 'unreachable'}", "",
+                "## Sources", *[f"  - {s}" for s in env.get("sources", [])], "",
                 "## Runtime",
                 f"  Python: {rt.get('python', '?')}",
                 f"  Platform: {rt.get('platform', '?')}",
                 f"  CWD: {rt.get('cwd', '?')}",
             ])
-            links = (
-                PageLink(href="about:capabilities", text="Capabilities", index=0),
-                PageLink(href="about:federation", text="Federation", index=1),
-            )
-            return BrowserPage(
-                url=url, status_code=200, title="Environment — Agent Web Browser",
-                content_text=text, links=links, forms=(), meta=PageMeta(),
-                fetched_at=time.time(),
+            return _make_page(
+                url, title="Environment — Agent Web Browser", content=text,
+                links=(PageLink(href="about:capabilities", text="Capabilities", index=0),
+                       PageLink(href="about:federation", text="Federation", index=1)),
             )
 
         if page_name == "capabilities":
-            manifest = self.capability_manifest()
-            text_parts = [
+            manifest = build_browser_capability_manifest(sources=self._sources)
+            parts = [
                 "# Agent Web Browser — Capabilities",
                 f"Standard: {manifest['standard_profile']['profile_id']}",
-                f"GAD: {manifest['standard_profile']['gad_conformance']}",
-                "",
+                f"GAD: {manifest['standard_profile']['gad_conformance']}", "",
             ]
             for cap in manifest.get("capabilities", []):
-                text_parts.append(f"## {cap['capability_id']}")
-                text_parts.append(f"  {cap['summary']}")
-                text_parts.append(f"  Mode: {cap['mode']}  Contract: v{cap['contract_version']}")
-                text_parts.append("")
-            return BrowserPage(
-                url=url, status_code=200, title="Capabilities — Agent Web Browser",
-                content_text="\n".join(text_parts), links=(
-                    PageLink(href="about:environment", text="Environment", index=0),
-                    PageLink(href="about:federation", text="Federation", index=1),
-                ), forms=(), meta=PageMeta(), fetched_at=time.time(),
+                parts.append(f"## {cap['capability_id']}")
+                parts.append(f"  {cap['summary']}")
+                parts.append(f"  Mode: {cap['mode']}  Contract: v{cap['contract_version']}")
+                parts.append("")
+            return _make_page(
+                url, title="Capabilities — Agent Web Browser",
+                content="\n".join(parts),
+                links=(PageLink(href="about:environment", text="Environment", index=0),
+                       PageLink(href="about:federation", text="Federation", index=1)),
             )
 
         if page_name == "federation":
-            text_parts = [
-                "# Agent Web Browser — Federation Discovery",
-                "",
-                "Scanning known federation peers...",
-                "",
-            ]
+            parts = ["# Agent Web Browser — Federation Discovery", "",
+                      "Scanning known federation peers...", ""]
             links: list[PageLink] = []
-            descriptors = _discover_federation_descriptors(config=self.config)
-            for desc in descriptors:
-                text_parts.append(f"## {desc.get('display_name', desc.get('repo_id', '?'))}")
-                text_parts.append(f"  Repo: {desc.get('repo_id', '?')}")
-                text_parts.append(f"  Layer: {desc.get('layer', '?')}")
-                text_parts.append(f"  Status: {desc.get('status', '?')}")
+            for desc in discover_federation_descriptors(config=self.config):
+                name = desc.get("display_name", desc.get("repo_id", "?"))
+                parts.append(f"## {name}")
+                parts.append(f"  Repo: {desc.get('repo_id', '?')}")
+                parts.append(f"  Layer: {desc.get('layer', '?')}")
+                parts.append(f"  Status: {desc.get('status', '?')}")
                 caps = desc.get("capabilities", [])
                 if caps:
-                    text_parts.append(f"  Capabilities: {', '.join(caps)}")
-                text_parts.append("")
+                    parts.append(f"  Capabilities: {', '.join(caps)}")
+                parts.append("")
                 repo_id = desc.get("repo_id", "")
                 if repo_id:
-                    links.append(PageLink(
-                        href=f"https://github.com/{repo_id}",
-                        text=desc.get("display_name", repo_id),
-                        index=len(links),
-                    ))
-
-            if not descriptors:
-                text_parts.append("(no federation peers discovered)")
-
+                    links.append(PageLink(href=f"https://github.com/{repo_id}",
+                                          text=name, index=len(links)))
+            if not links:
+                parts.append("(no federation peers discovered)")
             links.append(PageLink(href="about:environment", text="Environment", index=len(links)))
             links.append(PageLink(href="about:capabilities", text="Capabilities", index=len(links)))
-
-            return BrowserPage(
-                url=url, status_code=200, title="Federation — Agent Web Browser",
-                content_text="\n".join(text_parts), links=tuple(links),
-                forms=(), meta=PageMeta(), fetched_at=time.time(),
-            )
+            return _make_page(url, title="Federation — Agent Web Browser",
+                              content="\n".join(parts), links=tuple(links))
 
         if page_name == "bookmarks":
-            text_parts = ["# Bookmarks", ""]
+            parts = ["# Bookmarks", ""]
             links: list[PageLink] = []
             if not self._bookmarks:
-                text_parts.append("(no bookmarks saved)")
+                parts.append("(no bookmarks saved)")
             else:
-                folders = self.bookmark_folders()
-                if folders:
-                    for folder in folders:
-                        text_parts.append(f"## {folder}")
-                        for bm in self._bookmarks:
-                            if bm.folder == folder:
-                                text_parts.append(f"  [{bm.title}]({bm.url})")
-                                if bm.tags:
-                                    text_parts.append(f"    tags: {', '.join(bm.tags)}")
-                                links.append(PageLink(href=bm.url, text=bm.title, index=len(links)))
-                        text_parts.append("")
-                # Unfiled bookmarks
+                for folder in self.bookmark_folders():
+                    parts.append(f"## {folder}")
+                    for bm in self._bookmarks:
+                        if bm.folder == folder:
+                            parts.append(f"  [{bm.title}]({bm.url})")
+                            if bm.tags:
+                                parts.append(f"    tags: {', '.join(bm.tags)}")
+                            links.append(PageLink(href=bm.url, text=bm.title, index=len(links)))
+                    parts.append("")
                 unfiled = [bm for bm in self._bookmarks if not bm.folder]
                 if unfiled:
-                    if folders:
-                        text_parts.append("## Unfiled")
+                    if self.bookmark_folders():
+                        parts.append("## Unfiled")
                     for bm in unfiled:
-                        text_parts.append(f"  [{bm.title}]({bm.url})")
+                        parts.append(f"  [{bm.title}]({bm.url})")
                         if bm.tags:
-                            text_parts.append(f"    tags: {', '.join(bm.tags)}")
+                            parts.append(f"    tags: {', '.join(bm.tags)}")
                         links.append(PageLink(href=bm.url, text=bm.title, index=len(links)))
-
-                text_parts.append("")
-                text_parts.append(f"Total: {len(self._bookmarks)} bookmarks")
-
-            return BrowserPage(
-                url=url, status_code=200, title="Bookmarks — Agent Web Browser",
-                content_text="\n".join(text_parts), links=tuple(links),
-                forms=(), meta=PageMeta(), fetched_at=time.time(),
-            )
+                parts.extend(["", f"Total: {len(self._bookmarks)} bookmarks"])
+            return _make_page(url, title="Bookmarks — Agent Web Browser",
+                              content="\n".join(parts), links=tuple(links))
 
         if page_name == "history":
-            text_parts = ["# Browsing History", ""]
+            parts = ["# Browsing History", ""]
             links: list[PageLink] = []
             entries = self.history(limit=100)
             if not entries:
-                text_parts.append("(no history)")
+                parts.append("(no history)")
             else:
                 for entry in entries:
                     ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(entry.visited_at))
-                    text_parts.append(f"  {ts}  [{entry.status_code}] {entry.title[:60]}")
-                    text_parts.append(f"         {entry.url}")
+                    parts.append(f"  {ts}  [{entry.status_code}] {entry.title[:60]}")
+                    parts.append(f"         {entry.url}")
                     links.append(PageLink(href=entry.url, text=entry.title, index=len(links)))
-                text_parts.append("")
-                text_parts.append(f"Total: {len(self._history)} entries")
+                parts.extend(["", f"Total: {len(self._history)} entries"])
+            return _make_page(url, title="History — Agent Web Browser",
+                              content="\n".join(parts), links=tuple(links))
 
-            return BrowserPage(
-                url=url, status_code=200, title="History — Agent Web Browser",
-                content_text="\n".join(text_parts), links=tuple(links),
-                forms=(), meta=PageMeta(), fetched_at=time.time(),
-            )
-
-        return _error_page(url, 404, f"unknown_about_page:{page_name}")
+        return _make_page(url, status=404, error=f"unknown_about_page:{page_name}")
 
     def _cache_page(self, url: str, page: BrowserPage) -> None:
         """Add a page to the LRU cache."""
         if len(self._page_cache) >= self.config.max_page_cache:
-            # Evict oldest entry
             oldest_key = next(iter(self._page_cache))
             del self._page_cache[oldest_key]
         self._page_cache[url] = page
@@ -1778,380 +854,11 @@ class AgentWebBrowser:
     # -- Environment awareness --
 
     def environment(self) -> dict:
-        """Report the browser's runtime environment — what it can reach and how.
-
-        Agents should call this on startup to understand their connectivity,
-        available credentials, proxy configuration, and registered sources.
-        """
+        """Report the browser's runtime environment."""
+        from .agent_web_browser_env import probe_environment
         return probe_environment(config=self.config, sources=self._sources)
 
-    # -- GAD-000 capability manifest --
-
     def capability_manifest(self, *, base_url: str = "") -> dict:
-        """Return a GAD-000-conformant capability manifest for this browser.
-
-        Follows the same structure as ``agent_web_semantic_capabilities`` so
-        consumers can discover, introspect, and invoke browser capabilities
-        through a stable, versioned contract.
-        """
-        return build_browser_capability_manifest(
-            base_url=base_url, sources=self._sources,
-        )
-
-
-# ---------------------------------------------------------------------------
-# Environment probe — self-knowledge for agents
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True, slots=True)
-class EnvironmentProbe:
-    """Result of probing the runtime network environment."""
-
-    has_internet: bool
-    has_proxy: bool
-    proxy_url: str
-    has_github_token: bool
-    github_api_reachable: bool
-    github_user: str
-    registered_sources: tuple[str, ...]
-    python_version: str
-    platform: str
-    hostname: str
-    working_directory: str
-    probed_at: float
-
-
-def probe_environment(
-    *,
-    config: BrowserConfig | None = None,
-    sources: list[PageSource] | None = None,
-) -> dict:
-    """Probe and report the agent's runtime network environment.
-
-    Returns a structured dict agents can use to understand what they can
-    reach and with what credentials — so they never fly blind.
-    """
-    cfg = config or BrowserConfig()
-    proxy = os.environ.get("HTTPS_PROXY", os.environ.get("HTTP_PROXY", ""))
-    github_token = os.environ.get("GITHUB_TOKEN", "")
-
-    # Probe GitHub API reachability + identity
-    github_user = ""
-    github_reachable = False
-    if github_token:
-        try:
-            import urllib.request
-            req = urllib.request.Request(
-                "https://api.github.com/user",
-                headers={
-                    "Authorization": f"token {github_token}",
-                    "User-Agent": cfg.user_agent,
-                    "Accept": "application/vnd.github.v3+json",
-                },
-            )
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                data = json.loads(resp.read())
-                github_user = data.get("login", "")
-                github_reachable = True
-        except Exception:
-            # Token present but API unreachable or invalid
-            try:
-                import urllib.request
-                req = urllib.request.Request(
-                    "https://api.github.com",
-                    headers={"User-Agent": cfg.user_agent},
-                )
-                with urllib.request.urlopen(req, timeout=5):
-                    github_reachable = True
-            except Exception:
-                pass
-
-    # Probe general internet
-    has_internet = False
-    if github_reachable:
-        has_internet = True
-    else:
-        try:
-            import urllib.request
-            req = urllib.request.Request(
-                "https://example.com",
-                headers={"User-Agent": cfg.user_agent},
-                method="HEAD",
-            )
-            with urllib.request.urlopen(req, timeout=5):
-                has_internet = True
-        except Exception:
-            pass
-
-    source_names = tuple(type(s).__name__ for s in (sources or []))
-
-    probe = EnvironmentProbe(
-        has_internet=has_internet,
-        has_proxy=bool(proxy),
-        proxy_url=proxy.split("@")[-1] if "@" in proxy else proxy[:50] if proxy else "",
-        has_github_token=bool(github_token),
-        github_api_reachable=github_reachable,
-        github_user=github_user,
-        registered_sources=source_names,
-        python_version=platform.python_version(),
-        platform=f"{platform.system()} {platform.release()}",
-        hostname=platform.node(),
-        working_directory=os.getcwd(),
-        probed_at=time.time(),
-    )
-
-    return {
-        "kind": "agent_web_browser_environment",
-        "version": 1,
-        "connectivity": {
-            "has_internet": probe.has_internet,
-            "has_proxy": probe.has_proxy,
-            "proxy_endpoint": probe.proxy_url,
-        },
-        "github": {
-            "authenticated": probe.has_github_token,
-            "api_reachable": probe.github_api_reachable,
-            "user": probe.github_user,
-        },
-        "sources": list(probe.registered_sources),
-        "runtime": {
-            "python": probe.python_version,
-            "platform": probe.platform,
-            "hostname": probe.hostname,
-            "cwd": probe.working_directory,
-        },
-        "probed_at": probe.probed_at,
-    }
-
-
-# ---------------------------------------------------------------------------
-# GAD-000 capability manifest — browser as a discoverable agent surface
-# ---------------------------------------------------------------------------
-
-def build_browser_capability_manifest(
-    *,
-    base_url: str = "",
-    sources: list[PageSource] | None = None,
-) -> dict:
-    """Build a GAD-000-conformant capability manifest for the agent web browser.
-
-    Follows the ``agent_web_semantic_capability_manifest`` pattern: typed
-    capabilities, stable response subsets, versioned contracts, and
-    discovery metadata.
-    """
-    source_names = [type(s).__name__ for s in (sources or [])]
-
-    capabilities = [
-        {
-            "capability_id": "web_browse",
-            "summary": "Fetch a URL and return structured, agent-readable page content.",
-            "mode": "read_only",
-            "contract_version": 1,
-            "input_schema": {
-                "required": ["url"],
-                "properties": {
-                    "url": {"type": "string", "description": "URL to fetch"},
-                    "use_cache": {"type": "boolean", "default": True},
-                },
-            },
-            "stable_response_subset": {
-                "top_level_fields": [
-                    "url", "status_code", "title", "content_text",
-                    "links", "forms", "meta", "ok", "error",
-                ],
-                "link_fields": ["href", "text", "rel", "index"],
-                "form_fields": ["action", "method", "fields", "form_id", "index"],
-                "meta_fields": [
-                    "description", "keywords", "author", "canonical_url",
-                    "og_title", "og_description",
-                ],
-            },
-        },
-        {
-            "capability_id": "web_follow_link",
-            "summary": "Follow a link on the current page by index or text search.",
-            "mode": "read_only",
-            "contract_version": 1,
-            "input_schema": {
-                "required": ["index_or_query"],
-                "properties": {
-                    "index_or_query": {
-                        "type": ["integer", "string"],
-                        "description": "Link index (int) or text/href search query (str)",
-                    },
-                },
-            },
-            "stable_response_subset": {
-                "top_level_fields": [
-                    "url", "status_code", "title", "content_text",
-                    "links", "forms", "meta", "ok", "error",
-                ],
-            },
-        },
-        {
-            "capability_id": "web_navigate",
-            "summary": "Navigate back/forward in tab history.",
-            "mode": "read_only",
-            "contract_version": 1,
-            "input_schema": {
-                "required": ["direction"],
-                "properties": {
-                    "direction": {
-                        "type": "string",
-                        "enum": ["back", "forward", "refresh"],
-                    },
-                },
-            },
-        },
-        {
-            "capability_id": "web_search_links",
-            "summary": "Search links on the current page by keyword.",
-            "mode": "read_only",
-            "contract_version": 1,
-            "input_schema": {
-                "required": ["query"],
-                "properties": {
-                    "query": {"type": "string"},
-                },
-            },
-            "stable_response_subset": {
-                "result_fields": ["href", "text", "rel", "index"],
-            },
-        },
-        {
-            "capability_id": "web_submit_form",
-            "summary": "Submit a form on the current page with provided values.",
-            "mode": "write",
-            "contract_version": 1,
-            "input_schema": {
-                "required": ["index_or_id"],
-                "properties": {
-                    "index_or_id": {"type": ["integer", "string"]},
-                    "values": {"type": "object", "description": "Field name → value overrides"},
-                },
-            },
-        },
-        {
-            "capability_id": "web_environment",
-            "summary": "Probe the runtime environment: connectivity, proxy, credentials, sources.",
-            "mode": "read_only",
-            "contract_version": 1,
-            "input_schema": {"properties": {}},
-            "stable_response_subset": {
-                "top_level_fields": [
-                    "connectivity", "github", "sources", "runtime", "probed_at",
-                ],
-            },
-        },
-        {
-            "capability_id": "web_tab_management",
-            "summary": "Create, switch, close, and list browser tabs.",
-            "mode": "read_write",
-            "contract_version": 1,
-            "input_schema": {
-                "required": ["action"],
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["new", "switch", "close", "list"],
-                    },
-                    "tab_id": {"type": "string"},
-                    "label": {"type": "string"},
-                },
-            },
-        },
-    ]
-
-    return {
-        "kind": "agent_web_browser_capability_manifest",
-        "version": 1,
-        "standard_profile": {
-            "profile_id": "agent_web_browser_standard.v1",
-            "gad_conformance": "gad_000_plus",
-            "source_system": "agent_internet",
-            "provider_role": "public_web_transport_adapter",
-            "consumer_roles": ["autonomous_agent", "orchestrator", "proxy_wrapper"],
-        },
-        "surface_kind": "agent_web_browser_surface",
-        "consumer_model": "stateful_session",
-        "federation_surface": {
-            "surface_role": "public_web_transport_adapter",
-            "canonical_for_public_federation": False,
-            "transport_boundary": "Per ADR-0003: external protocols are transport, not substrate.",
-        },
-        "sources": {
-            "registered": source_names,
-            "available": ["GitHubBrowserSource", "custom PageSource implementations"],
-        },
-        "capabilities": capabilities,
-        "non_goals": [
-            "The browser does not execute JavaScript or render CSS.",
-            "External web identity is not imported into the federation identity model.",
-            "Page content is transport-level projection, not substrate truth.",
-        ],
-        "stats": {"capability_count": len(capabilities)},
-    }
-
-
-# ---------------------------------------------------------------------------
-# Federation discovery — scan known peers for agent-federation.json
-# ---------------------------------------------------------------------------
-
-_FEDERATION_DESCRIPTOR_SEEDS = (
-    "kimeisele/agent-internet",
-    "kimeisele/steward-protocol",
-    "kimeisele/agent-city",
-    "kimeisele/agent-world",
-    "kimeisele/steward",
-)
-
-
-def _discover_federation_descriptors(*, config: BrowserConfig | None = None) -> list[dict]:
-    """Fetch .well-known/agent-federation.json from known federation peers.
-
-    Used by ``about:federation`` to give agents a live map of the ecosystem.
-    """
-    cfg = config or BrowserConfig()
-    descriptors: list[dict] = []
-
-    # Also try loading local seeds
-    try:
-        from pathlib import Path
-        seed_path = Path("data/federation/authority-descriptor-seeds.json")
-        if seed_path.exists():
-            seed_data = json.loads(seed_path.read_text())
-            if isinstance(seed_data, list):
-                for seed in seed_data:
-                    url = seed.get("descriptor_url", "") if isinstance(seed, dict) else ""
-                    if url and "/agent-federation.json" in url:
-                        # Extract repo_id from URL
-                        parts = url.split("githubusercontent.com/")
-                        if len(parts) > 1:
-                            repo_parts = parts[1].split("/")
-                            if len(repo_parts) >= 2:
-                                repo_id = f"{repo_parts[0]}/{repo_parts[1]}"
-                                if repo_id not in _FEDERATION_DESCRIPTOR_SEEDS:
-                                    _fetch_descriptor(url, repo_id, descriptors, cfg)
-    except Exception:
-        pass
-
-    for repo_id in _FEDERATION_DESCRIPTOR_SEEDS:
-        url = f"https://raw.githubusercontent.com/{repo_id}/main/.well-known/agent-federation.json"
-        _fetch_descriptor(url, repo_id, descriptors, cfg)
-
-    return descriptors
-
-
-def _fetch_descriptor(url: str, repo_id: str, descriptors: list[dict], cfg: BrowserConfig) -> None:
-    """Fetch a single federation descriptor and append to the list."""
-    import urllib.request
-
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": cfg.user_agent})
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            if isinstance(data, dict) and data.get("kind") == "agent_federation_descriptor":
-                data.setdefault("repo_id", repo_id)
-                descriptors.append(data)
-    except Exception:
-        pass
+        """Return a GAD-000-conformant capability manifest."""
+        from .agent_web_browser_env import build_browser_capability_manifest
+        return build_browser_capability_manifest(base_url=base_url, sources=self._sources)
