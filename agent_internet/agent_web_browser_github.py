@@ -50,6 +50,8 @@ _TREE_PAT = re.compile(r"^/([^/]+)/([^/]+)/tree/([^/]+)(?:/(.+))?$")
 _BLOB_PAT = re.compile(r"^/([^/]+)/([^/]+)/blob/([^/]+)/(.+)$")
 _RELEASES_PAT = re.compile(r"^/([^/]+)/([^/]+)/releases/?$")
 _ACTIONS_PAT = re.compile(r"^/([^/]+)/([^/]+)/actions/?$")
+_WIKI_PAT = re.compile(r"^/([^/]+)/([^/]+)/wiki/?$")
+_WIKI_PAGE_PAT = re.compile(r"^/([^/]+)/([^/]+)/wiki/(.+)$")
 _USER_PAT = re.compile(r"^/([^/]+)/?$")
 
 
@@ -109,6 +111,8 @@ class GitHubBrowserSource:
             (_TREE_PAT, self._fetch_tree),
             (_RELEASES_PAT, self._fetch_releases),
             (_ACTIONS_PAT, self._fetch_actions),
+            (_WIKI_PAGE_PAT, self._fetch_wiki_page),
+            (_WIKI_PAT, self._fetch_wiki),
             (_REPO_PAT, self._fetch_repo),
             (_USER_PAT, self._fetch_user),
         ]
@@ -205,16 +209,59 @@ class GitHubBrowserSource:
         if data.get("topics"):
             text_parts.append(f"Topics: {', '.join(data['topics'])}")
 
+        # Semantic Depth: fetch top-level tree to show repo structure
+        default_branch = data.get("default_branch", "main")
+        _, tree_data = self._api_get(
+            f"/repos/{owner}/{repo}/git/trees/{default_branch}", config=config,
+        )
+        if isinstance(tree_data, dict) and "tree" in tree_data:
+            text_parts.extend(["", "--- Structure ---"])
+            dirs = []
+            files = []
+            for item in tree_data["tree"]:
+                name = item.get("path", "")
+                if item.get("type") == "tree":
+                    dirs.append(name)
+                else:
+                    files.append(name)
+            dirs.sort()
+            files.sort()
+            # Show directories as modules, key files as entry points
+            for d in dirs[:20]:
+                text_parts.append(f"  📁 {d}/")
+            key_files = [f for f in files if f in (
+                "setup.py", "pyproject.toml", "Cargo.toml", "package.json",
+                "go.mod", "Makefile", "Dockerfile", "README.md", "AGENTS.md",
+                "LICENSE", ".github", "requirements.txt",
+            ) or f.endswith((".toml", ".cfg")) and not f.startswith(".")]
+            other_files = [f for f in files if f not in key_files]
+            for f in key_files:
+                text_parts.append(f"  📄 {f}")
+            if len(other_files) > 10:
+                for f in other_files[:10]:
+                    text_parts.append(f"  📄 {f}")
+                text_parts.append(f"  ... and {len(other_files) - 10} more files")
+            else:
+                for f in other_files:
+                    text_parts.append(f"  📄 {f}")
+
         if readme_text and not readme_text.startswith("{"):
             text_parts.extend(["", "--- README ---", "", readme_text[:4000]])
 
         links = [
             PageLink(href=f"https://github.com/{owner}/{repo}/issues", text="Issues", index=0),
             PageLink(href=f"https://github.com/{owner}/{repo}/pulls", text="Pull Requests", index=1),
-            PageLink(href=f"https://github.com/{owner}/{repo}/tree/{data.get('default_branch', 'main')}", text="Browse Code", index=2),
+            PageLink(href=f"https://github.com/{owner}/{repo}/tree/{default_branch}", text="Browse Code", index=2),
             PageLink(href=f"https://github.com/{owner}/{repo}/releases", text="Releases", index=3),
             PageLink(href=f"https://github.com/{owner}/{repo}/actions", text="Actions", index=4),
         ]
+
+        # Add wiki link if enabled
+        if data.get("has_wiki"):
+            links.append(PageLink(
+                href=f"https://github.com/{owner}/{repo}/wiki",
+                text="Wiki", index=len(links),
+            ))
 
         if data.get("homepage"):
             links.append(PageLink(href=data["homepage"], text="Homepage", index=len(links)))
@@ -583,11 +630,19 @@ class GitHubBrowserSource:
             config=config,
         )
 
+        # Content-Type Intelligence: parse file based on type
+        from .agent_web_browser_content import detect_content_type, render_content
+        ct = detect_content_type(filepath)
+        if raw_content and ct != "unknown":
+            rendered = render_content(raw_content[:8000], ct, url=filepath)
+        else:
+            rendered = raw_content[:8000] if raw_content else "(binary or empty file)"
+
         text_parts = [
             f"# {filepath}",
-            f"Size: {_human_size(size)}  Branch: {ref}",
+            f"Size: {_human_size(size)}  Branch: {ref}  Type: {ct}",
             "",
-            raw_content[:8000] if raw_content else "(binary or empty file)",
+            rendered,
         ]
 
         parent_dir = "/".join(filepath.split("/")[:-1])
@@ -709,6 +764,132 @@ class GitHubBrowserSource:
             meta=PageMeta(),
             fetched_at=time.time(),
             content_type="application/json",
+        )
+
+    # -- Wiki handlers --
+
+    def _fetch_wiki(self, url: str, match: re.Match, *, config: BrowserConfig) -> BrowserPage:
+        """Fetch wiki page listing for a repo."""
+        owner, repo = match.group(1), match.group(2)
+
+        # GitHub REST API doesn't have a dedicated wiki list endpoint.
+        # We fetch the wiki repo's git tree via the API.
+        status, data = self._api_get(
+            f"/repos/{owner}/{repo}", config=config,
+        )
+        if not isinstance(data, dict):
+            return _error_page(url, status, f"GitHub API error: {data}")
+        if not data.get("has_wiki"):
+            return _error_page(url, 404, f"Wiki not enabled for {owner}/{repo}")
+
+        # Fetch the wiki repo's tree (wiki pages are .md files in root)
+        tree_status, tree_data = self._api_get(
+            f"/repos/{owner}/{repo}.wiki/git/trees/master?recursive=1", config=config,
+        )
+
+        text_parts = [f"# Wiki — {owner}/{repo}", ""]
+        links: list[PageLink] = []
+
+        if isinstance(tree_data, dict) and "tree" in tree_data:
+            pages = [
+                item for item in tree_data["tree"]
+                if item.get("type") == "blob" and item.get("path", "").endswith(".md")
+            ]
+            text_parts.append(f"{len(pages)} wiki pages:\n")
+            for item in sorted(pages, key=lambda x: x.get("path", "")):
+                page_name = item["path"].removesuffix(".md")
+                display = page_name.replace("-", " ")
+                text_parts.append(f"  📄 {display}")
+                links.append(PageLink(
+                    href=f"https://github.com/{owner}/{repo}/wiki/{page_name}",
+                    text=display,
+                    index=len(links),
+                ))
+        else:
+            # Fallback: just link to Home page
+            text_parts.append("(could not list wiki pages — try individual pages)")
+            links.append(PageLink(
+                href=f"https://github.com/{owner}/{repo}/wiki/Home",
+                text="Home",
+                index=len(links),
+            ))
+
+        links.append(PageLink(
+            href=f"https://github.com/{owner}/{repo}",
+            text=f"Back to {owner}/{repo}",
+            index=len(links),
+        ))
+
+        return BrowserPage(
+            url=url,
+            status_code=200,
+            title=f"Wiki — {owner}/{repo}",
+            content_text="\n".join(text_parts),
+            links=tuple(links),
+            forms=(),
+            meta=PageMeta(description=f"Wiki pages for {owner}/{repo}"),
+            fetched_at=time.time(),
+            content_type="application/json",
+        )
+
+    def _fetch_wiki_page(self, url: str, match: re.Match, *, config: BrowserConfig) -> BrowserPage:
+        """Fetch a single wiki page by name."""
+        owner, repo, page_name = match.group(1), match.group(2), match.group(3)
+
+        # Wiki pages are accessible as raw content from the wiki repo
+        status, content = self._api_get_raw(
+            f"/repos/{owner}/{repo}.wiki/contents/{quote(page_name)}.md",
+            config=config,
+        )
+
+        if status >= 400:
+            # Try without .md extension (page_name might already have it)
+            if not page_name.endswith(".md"):
+                status, content = self._api_get_raw(
+                    f"/repos/{owner}/{repo}.wiki/contents/{quote(page_name)}",
+                    config=config,
+                )
+            if status >= 400:
+                return _error_page(url, status, f"Wiki page not found: {page_name}")
+
+        display_name = page_name.replace("-", " ").removesuffix(".md")
+
+        # Render markdown content for agent readability
+        from .agent_web_browser_content import render_markdown_for_agent
+        rendered = render_markdown_for_agent(content)
+
+        # Extract links from the markdown for navigation
+        import re as _re
+        link_re = _re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+        links: list[PageLink] = []
+        for m in link_re.finditer(content):
+            link_text, link_url = m.group(1), m.group(2)
+            # Resolve wiki-relative links
+            if not link_url.startswith(("http://", "https://", "/")):
+                link_url = f"https://github.com/{owner}/{repo}/wiki/{link_url}"
+            links.append(PageLink(href=link_url, text=link_text, index=len(links)))
+
+        links.append(PageLink(
+            href=f"https://github.com/{owner}/{repo}/wiki",
+            text="Wiki Home",
+            index=len(links),
+        ))
+        links.append(PageLink(
+            href=f"https://github.com/{owner}/{repo}",
+            text=f"Back to {owner}/{repo}",
+            index=len(links),
+        ))
+
+        return BrowserPage(
+            url=url,
+            status_code=200,
+            title=f"{display_name} — {owner}/{repo} Wiki",
+            content_text=rendered,
+            links=tuple(links),
+            forms=(),
+            meta=PageMeta(description=f"Wiki: {display_name}"),
+            fetched_at=time.time(),
+            content_type="text/markdown",
         )
 
     def _fetch_user(self, url: str, match: re.Match, *, config: BrowserConfig) -> BrowserPage:
