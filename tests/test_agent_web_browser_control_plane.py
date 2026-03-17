@@ -609,3 +609,320 @@ def test_submit_without_control_plane():
     })
     assert not result.ok
     assert result.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# Brief #5: Federation ↔ System Bridge
+# ---------------------------------------------------------------------------
+
+# -- about:federation sync status --
+
+def test_federation_shows_sync_status(monkeypatch):
+    """about:federation should show 'Registered' / 'Not registered' per peer."""
+    browser = _make_browser()
+
+    # Patch discover_federation_descriptors to return known peers
+    fake_descriptors = [
+        {"display_name": "Agent Internet", "repo_id": "agent-internet",
+         "layer": "core", "status": "active", "capabilities": ["nadi-relay"]},
+        {"display_name": "Unknown Repo", "repo_id": "kimeisele/unknown-repo",
+         "layer": "extension", "status": "active", "capabilities": []},
+    ]
+    import agent_internet.agent_web_browser_env as _env_mod
+    monkeypatch.setattr(_env_mod, "discover_federation_descriptors",
+                        lambda config=None: fake_descriptors)
+
+    page = browser.open("about:federation")
+    assert page.ok
+    # agent-internet is registered in _make_control_plane
+    assert "Registered" in page.content_text
+    # unknown-repo is NOT registered
+    assert "Not registered" in page.content_text
+
+
+def test_federation_shows_onboard_forms(monkeypatch):
+    """about:federation should show onboard forms for unregistered peers."""
+    browser = _make_browser()
+
+    fake_descriptors = [
+        {"display_name": "Agent Internet", "repo_id": "agent-internet",
+         "layer": "core", "status": "active", "capabilities": ["nadi-relay"]},
+        {"display_name": "New Peer", "repo_id": "kimeisele/new-peer",
+         "layer": "extension", "status": "active",
+         "capabilities": ["search", "relay"]},
+    ]
+    import agent_internet.agent_web_browser_env as _env_mod
+    monkeypatch.setattr(_env_mod, "discover_federation_descriptors",
+                        lambda config=None: fake_descriptors)
+
+    page = browser.open("about:federation")
+    assert page.ok
+    # No onboard form for already-registered agent-internet
+    assert not any(f.form_id == "onboard_agent-internet" for f in page.forms)
+    # Onboard form for new-peer
+    onboard_forms = [f for f in page.forms if "onboard" in f.form_id]
+    assert len(onboard_forms) == 1
+    form = onboard_forms[0]
+    assert form.action == "cp://federation/onboard"
+    # Pre-filled values
+    field_vals = {f.name: f.value for f in form.fields}
+    assert field_vals["city_id"] == "kimeisele/new-peer"
+    assert field_vals["repo"] == "kimeisele/new-peer"
+    assert "search" in field_vals["capabilities"]
+
+
+def test_federation_no_forms_without_control_plane(monkeypatch):
+    """Without control plane, federation should show no onboard forms."""
+    browser = AgentWebBrowser()  # no control plane
+
+    fake_descriptors = [
+        {"display_name": "Some Peer", "repo_id": "kimeisele/some-peer",
+         "layer": "core", "status": "active", "capabilities": []},
+    ]
+    import agent_internet.agent_web_browser_env as _env_mod
+    monkeypatch.setattr(_env_mod, "discover_federation_descriptors",
+                        lambda config=None: fake_descriptors)
+
+    page = browser.open("about:federation")
+    assert page.ok
+    assert len(page.forms) == 0
+
+
+# -- Onboard form submission --
+
+def test_submit_onboard_federation_peer(monkeypatch):
+    """Submitting onboard form registers the peer via register_federation_peer."""
+    browser = _make_browser()
+
+    fake_descriptors = [
+        {"display_name": "New Peer", "repo_id": "kimeisele/new-peer",
+         "layer": "extension", "status": "active",
+         "capabilities": ["relay", "search"]},
+    ]
+    import agent_internet.agent_web_browser_env as _env_mod
+    monkeypatch.setattr(_env_mod, "discover_federation_descriptors",
+                        lambda config=None: fake_descriptors)
+
+    page = browser.open("about:federation")
+    assert len(page.forms) == 1
+
+    result = browser.submit_form(page.forms[0].form_id, values={
+        "city_id": "kimeisele/new-peer",
+        "slug": "new-peer",
+        "repo": "kimeisele/new-peer",
+        "location": "https://github.com/kimeisele/new-peer",
+        "capabilities": "relay, search",
+    })
+    assert result.ok
+    # Should redirect to city detail
+    assert "kimeisele/new-peer" in result.content_text
+
+    # Verify it's now in the cities list
+    cities = browser.open("about:cities", use_cache=False)
+    assert "Total: 6" in cities.content_text
+    assert "kimeisele/new-peer" in cities.content_text
+
+
+def test_submit_onboard_missing_fields():
+    """Onboard submission missing required fields should return error."""
+    browser = _make_browser()
+    # Manually set up a page with the onboard form
+    from agent_internet.agent_web_browser import BrowserPage, FormField, PageForm, PageMeta
+    import time as _time
+    fake_page = BrowserPage(
+        url="about:federation", status_code=200, title="Test",
+        content_text="test", links=(), meta=PageMeta(), headers={},
+        fetched_at=_time.time(), content_type="text/html", encoding="utf-8",
+        raw_html="", error="",
+        forms=(PageForm(
+            action="cp://federation/onboard", method="POST",
+            form_id="onboard_test",
+            fields=(
+                FormField(name="city_id", value="x"),
+                FormField(name="repo"),
+                FormField(name="location"),
+            ),
+        ),),
+    )
+    tab = browser.active_tab
+    tab.current_page = fake_page
+    tab.push_url("about:federation")
+
+    result = browser.submit_form("onboard_test", values={
+        "city_id": "x",
+        # missing repo and location
+    })
+    assert not result.ok
+    assert "Missing required fields" in result.error
+
+
+# -- about:cities Browse Repo links --
+
+def test_cities_has_browse_repo_links():
+    """about:cities should include Browse Repo links for peers with repos."""
+    browser = _make_browser()
+    page = browser.open("about:cities")
+    browse_links = [l for l in page.links if l.href.startswith("https://github.com/")]
+    # All 5 peers have repos
+    assert len(browse_links) == 5
+    assert any("kimeisele/agent-internet" in l.href for l in browse_links)
+
+
+def test_city_detail_has_browse_repo_link():
+    """cp://cities/{id} detail should include a Browse Repo link."""
+    browser = _make_browser()
+    page = browser.open("cp://cities/agent-internet")
+    browse_links = [l for l in page.links if l.href.startswith("https://github.com/")]
+    assert len(browse_links) >= 1
+    assert any("kimeisele/agent-internet" in l.href for l in browse_links)
+
+
+# -- about:relay --
+
+def test_about_relay_renders():
+    """about:relay should render with relay form."""
+    browser = _make_browser()
+    page = browser.open("about:relay")
+    assert page.ok
+    assert "Relay" in page.title
+    assert "Registered cities: 5" in page.content_text
+    assert "Routes: 2" in page.content_text
+    assert len(page.forms) == 1
+    assert page.forms[0].form_id == "relay_message"
+    assert page.forms[0].action == "cp://relay/send"
+    field_names = [f.name for f in page.forms[0].fields]
+    assert "source_city_id" in field_names
+    assert "target_city_id" in field_names
+    assert "operation" in field_names
+    assert "payload" in field_names
+
+
+def test_about_relay_links():
+    """about:relay should link to cities and routes."""
+    browser = _make_browser()
+    page = browser.open("about:relay")
+    assert any(l.href == "about:cities" for l in page.links)
+    assert any(l.href == "about:routes" for l in page.links)
+
+
+def test_cp_relay():
+    """cp://relay should render the relay page."""
+    browser = _make_browser()
+    page = browser.open("cp://relay")
+    assert page.ok
+    assert "Federation Relay" in page.content_text
+
+
+# -- Relay message submission with LoopbackTransport --
+
+def test_submit_relay_message_with_loopback():
+    """Relay a message through LoopbackTransport and verify delivery."""
+    from agent_internet.transport import LoopbackTransport
+
+    browser = AgentWebBrowser()
+    cp = _make_control_plane()
+    # Register a loopback transport for the 'https' scheme
+    loopback = LoopbackTransport()
+    cp.transports.register("https", loopback)
+    browser.attach_control_plane(cp)
+
+    # Open relay page first (needed for form context)
+    browser.open("about:relay")
+
+    result = browser.submit_form("relay_message", values={
+        "source_city_id": "agent-internet",
+        "target_city_id": "steward-protocol",
+        "operation": "sync",
+        "payload": '{"action": "ping"}',
+    })
+    assert result.ok
+    # Should redirect back to relay page
+    assert "Relay" in result.title
+
+    # Verify the message was delivered via loopback
+    messages = loopback.receive("steward-protocol")
+    assert len(messages) == 1
+    assert messages[0].operation == "sync"
+    assert messages[0].payload == {"action": "ping"}
+
+
+def test_submit_relay_invalid_json():
+    """Relay with invalid JSON payload should return error."""
+    browser = _make_browser()
+    browser.open("about:relay")
+
+    result = browser.submit_form("relay_message", values={
+        "source_city_id": "agent-internet",
+        "target_city_id": "steward-protocol",
+        "operation": "sync",
+        "payload": "not valid json{",
+    })
+    assert not result.ok
+    assert "Invalid JSON" in result.error
+
+
+def test_submit_relay_missing_fields():
+    """Relay with missing required fields should return error."""
+    browser = _make_browser()
+    browser.open("about:relay")
+
+    result = browser.submit_form("relay_message", values={
+        "source_city_id": "agent-internet",
+        # missing target_city_id and operation
+    })
+    assert not result.ok
+    assert "Missing required fields" in result.error
+
+
+# -- Cross-navigation: Web ↔ System bridge --
+
+def test_navigate_federation_onboard_to_cities(monkeypatch):
+    """Full loop: federation → onboard → cities detail → browse repo."""
+    browser = _make_browser()
+
+    fake_descriptors = [
+        {"display_name": "New Peer", "repo_id": "kimeisele/new-peer",
+         "layer": "extension", "status": "active", "capabilities": ["search"]},
+    ]
+    import agent_internet.agent_web_browser_env as _env_mod
+    monkeypatch.setattr(_env_mod, "discover_federation_descriptors",
+                        lambda config=None: fake_descriptors)
+
+    # 1. Start at federation
+    fed_page = browser.open("about:federation")
+    assert "Not registered" in fed_page.content_text
+
+    # 2. Submit onboard form
+    result = browser.submit_form(fed_page.forms[0].form_id, values={
+        "city_id": "kimeisele/new-peer",
+        "slug": "new-peer",
+        "repo": "kimeisele/new-peer",
+        "location": "https://github.com/kimeisele/new-peer",
+        "capabilities": "search",
+    })
+    assert result.ok
+    # Should be on city detail page
+    assert "kimeisele/new-peer" in result.content_text
+
+    # 3. Navigate to all cities
+    cities_link = next((l for l in result.links if l.href == "about:cities"), None)
+    assert cities_link is not None
+    cities_page = browser.open(cities_link.href, use_cache=False)
+    assert "Total: 6" in cities_page.content_text
+
+    # 4. Find Browse Repo link for new peer
+    browse_links = [l for l in cities_page.links
+                    if "kimeisele/new-peer" in l.href
+                    and l.href.startswith("https://")]
+    assert len(browse_links) >= 1
+
+
+def test_navigate_cities_to_relay():
+    """about:cities should link to relay, and relay should be navigable."""
+    browser = _make_browser()
+    cities = browser.open("about:cities")
+    relay_link = next((l for l in cities.links if l.href == "about:relay"), None)
+    assert relay_link is not None
+    relay_page = browser.open(relay_link.href)
+    assert relay_page.ok
+    assert "Federation Relay" in relay_page.content_text
