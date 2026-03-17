@@ -138,6 +138,22 @@ from .agent_web_repo_graph_contracts import (
     render_agent_web_repo_graph_contract_page,
 )
 
+# --- Agent Web Browser (internet explorer for agents) ---
+from .agent_web_browser import (
+    AgentWebBrowser,
+    BrowserConfig,
+    BrowserPage,
+    BrowserTab,
+    FormField,
+    PageForm,
+    PageLink,
+    PageMeta,
+    PageSource,
+    fetch_url,
+    parse_html,
+)
+from .agent_web_browser_github import GitHubBrowserSource, create_github_browser
+
 __all__ = [
     "AgentCityDirectiveFactory",
     "AgentCityDirectiveExecutionAdapter",
@@ -271,4 +287,18 @@ __all__ = [
     "build_agent_web_repo_graph_contract_manifest",
     "read_agent_web_repo_graph_contract_descriptor",
     "render_agent_web_repo_graph_contract_page",
+    # --- Agent Web Browser (internet explorer for agents) ---
+    "AgentWebBrowser",
+    "BrowserConfig",
+    "BrowserPage",
+    "BrowserTab",
+    "FormField",
+    "GitHubBrowserSource",
+    "PageForm",
+    "PageLink",
+    "PageMeta",
+    "PageSource",
+    "create_github_browser",
+    "fetch_url",
+    "parse_html",
 ]
