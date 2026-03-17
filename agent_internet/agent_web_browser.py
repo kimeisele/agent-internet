@@ -29,11 +29,12 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+import os
+import platform
 from html.parser import HTMLParser
-from http.client import HTTPConnection, HTTPSConnection
 from secrets import token_hex
 from typing import Protocol
-from urllib.parse import urljoin, urlparse, urlencode
+from urllib.parse import urljoin, urlencode
 
 logger = logging.getLogger("AGENT_INTERNET.WEB_BROWSER")
 
@@ -448,6 +449,7 @@ class BrowserConfig:
     accept: str = "text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.8"
     accept_language: str = "en-US,en;q=0.9"
     default_encoding: str = "utf-8"
+    respect_proxy: bool = True  # Honor HTTP_PROXY / HTTPS_PROXY env vars
 
 
 def _detect_encoding(headers: dict[str, str], body: bytes) -> str:
@@ -473,100 +475,62 @@ def fetch_url(
 ) -> BrowserPage:
     """Fetch a URL and return a parsed BrowserPage.
 
-    Follows redirects (up to ``config.max_redirects``).  Returns an error
-    page (with ``error`` set) on network failures rather than raising.
+    Uses ``urllib.request`` which natively respects ``HTTP_PROXY`` /
+    ``HTTPS_PROXY`` environment variables — critical for containerized and
+    sandboxed agent environments.  Returns an error page (with ``error``
+    set) on network failures rather than raising.
     """
+    import urllib.error
+    import urllib.request
+
     cfg = config or BrowserConfig()
-    current_url = url
-    visited: set[str] = set()
 
-    for _redirect in range(cfg.max_redirects + 1):
-        if current_url in visited:
-            return _error_page(current_url, 0, "Redirect loop detected")
-        visited.add(current_url)
+    request_headers = {
+        "User-Agent": cfg.user_agent,
+        "Accept": cfg.accept,
+        "Accept-Language": cfg.accept_language,
+    }
+    if extra_headers:
+        request_headers.update(extra_headers)
 
-        parsed = urlparse(current_url)
-        is_https = parsed.scheme == "https"
-        host = parsed.hostname or "localhost"
-        port = parsed.port or (443 if is_https else 80)
-        path = parsed.path or "/"
-        if parsed.query:
-            path = f"{path}?{parsed.query}"
+    req = urllib.request.Request(url, data=body, headers=request_headers, method=method)
 
-        request_headers = {
-            "Host": host,
-            "User-Agent": cfg.user_agent,
-            "Accept": cfg.accept,
-            "Accept-Language": cfg.accept_language,
-            "Connection": "close",
-        }
-        if extra_headers:
-            request_headers.update(extra_headers)
+    try:
+        with urllib.request.urlopen(req, timeout=cfg.connect_timeout_s) as resp:
+            raw_body = resp.read(cfg.max_response_bytes)
+            resp_headers = {k.lower(): v for k, v in resp.getheaders()}
+            status = resp.status
+            final_url = resp.url or url
+    except urllib.error.HTTPError as exc:
+        resp_headers = {k.lower(): v for k, v in exc.headers.items()} if exc.headers else {}
+        raw_body = exc.read(cfg.max_response_bytes) if exc.fp else b""
+        status = exc.code
+        final_url = url
+    except Exception as exc:
+        return _error_page(url, 0, f"{type(exc).__name__}: {exc}")
 
-        try:
-            conn_cls = HTTPSConnection if is_https else HTTPConnection
-            conn = conn_cls(host, port, timeout=cfg.connect_timeout_s)
-            try:
-                conn.request(method, path, body=body, headers=request_headers)
-                resp = conn.getresponse()
-                resp_headers = {k.lower(): v for k, v in resp.getheaders()}
-                status = resp.status
+    encoding = _detect_encoding(resp_headers, raw_body)
+    try:
+        decoded = raw_body.decode(encoding, errors="replace")
+    except (LookupError, UnicodeDecodeError):
+        decoded = raw_body.decode("utf-8", errors="replace")
 
-                # Follow redirects
-                if status in (301, 302, 303, 307, 308) and "location" in resp_headers:
-                    current_url = urljoin(current_url, resp_headers["location"])
-                    if status == 303:
-                        method = "GET"
-                        body = None
-                    resp.read()  # drain
-                    continue
+    content_type = resp_headers.get("content-type", "text/html")
 
-                raw_body = resp.read(cfg.max_response_bytes)
-            finally:
-                conn.close()
+    # Handle JSON responses
+    if "application/json" in content_type:
+        return _json_page(final_url, status, decoded, resp_headers, content_type)
 
-        except Exception as exc:
-            return _error_page(current_url, 0, f"{type(exc).__name__}: {exc}")
-
-        encoding = _detect_encoding(resp_headers, raw_body)
-        try:
-            decoded = raw_body.decode(encoding, errors="replace")
-        except (LookupError, UnicodeDecodeError):
-            decoded = raw_body.decode("utf-8", errors="replace")
-
-        content_type = resp_headers.get("content-type", "text/html")
-
-        # Handle JSON responses
-        if "application/json" in content_type:
-            return _json_page(current_url, status, decoded, resp_headers, content_type)
-
-        # Handle plain text
-        if "text/plain" in content_type:
-            return BrowserPage(
-                url=current_url,
-                status_code=status,
-                title=current_url.split("/")[-1] or current_url,
-                content_text=decoded.strip(),
-                links=(),
-                forms=(),
-                meta=PageMeta(),
-                headers=resp_headers,
-                fetched_at=time.time(),
-                content_type=content_type,
-                encoding=encoding,
-                raw_html=decoded,
-            )
-
-        # Parse HTML
-        title, content_text, links, forms, meta = parse_html(decoded, current_url)
+    # Handle plain text
+    if "text/plain" in content_type:
         return BrowserPage(
-            url=current_url,
+            url=final_url,
             status_code=status,
-            title=title,
-            content_text=content_text,
-            links=links,
-            forms=forms,
-            meta=meta,
+            title=final_url.split("/")[-1] or final_url,
+            content_text=decoded.strip(),
+            links=(),
+            forms=(),
+            meta=PageMeta(),
             headers=resp_headers,
             fetched_at=time.time(),
             content_type=content_type,
@@ -574,7 +538,22 @@ def fetch_url(
             raw_html=decoded,
         )
 
-    return _error_page(url, 0, f"Too many redirects (>{cfg.max_redirects})")
+    # Parse HTML
+    title, content_text, links, forms, meta = parse_html(decoded, final_url)
+    return BrowserPage(
+        url=final_url,
+        status_code=status,
+        title=title,
+        content_text=content_text,
+        links=links,
+        forms=forms,
+        meta=meta,
+        headers=resp_headers,
+        fetched_at=time.time(),
+        content_type=content_type,
+        encoding=encoding,
+        raw_html=decoded,
+    )
 
 
 def _json_page(url: str, status: int, body: str, headers: dict[str, str], content_type: str) -> BrowserPage:
@@ -917,3 +896,320 @@ class AgentWebBrowser:
             oldest_key = next(iter(self._page_cache))
             del self._page_cache[oldest_key]
         self._page_cache[url] = page
+
+    # -- Environment awareness --
+
+    def environment(self) -> dict:
+        """Report the browser's runtime environment — what it can reach and how.
+
+        Agents should call this on startup to understand their connectivity,
+        available credentials, proxy configuration, and registered sources.
+        """
+        return probe_environment(config=self.config, sources=self._sources)
+
+    # -- GAD-000 capability manifest --
+
+    def capability_manifest(self, *, base_url: str = "") -> dict:
+        """Return a GAD-000-conformant capability manifest for this browser.
+
+        Follows the same structure as ``agent_web_semantic_capabilities`` so
+        consumers can discover, introspect, and invoke browser capabilities
+        through a stable, versioned contract.
+        """
+        return build_browser_capability_manifest(
+            base_url=base_url, sources=self._sources,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Environment probe — self-knowledge for agents
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True, slots=True)
+class EnvironmentProbe:
+    """Result of probing the runtime network environment."""
+
+    has_internet: bool
+    has_proxy: bool
+    proxy_url: str
+    has_github_token: bool
+    github_api_reachable: bool
+    github_user: str
+    registered_sources: tuple[str, ...]
+    python_version: str
+    platform: str
+    hostname: str
+    working_directory: str
+    probed_at: float
+
+
+def probe_environment(
+    *,
+    config: BrowserConfig | None = None,
+    sources: list[PageSource] | None = None,
+) -> dict:
+    """Probe and report the agent's runtime network environment.
+
+    Returns a structured dict agents can use to understand what they can
+    reach and with what credentials — so they never fly blind.
+    """
+    cfg = config or BrowserConfig()
+    proxy = os.environ.get("HTTPS_PROXY", os.environ.get("HTTP_PROXY", ""))
+    github_token = os.environ.get("GITHUB_TOKEN", "")
+
+    # Probe GitHub API reachability + identity
+    github_user = ""
+    github_reachable = False
+    if github_token:
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                "https://api.github.com/user",
+                headers={
+                    "Authorization": f"token {github_token}",
+                    "User-Agent": cfg.user_agent,
+                    "Accept": "application/vnd.github.v3+json",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read())
+                github_user = data.get("login", "")
+                github_reachable = True
+        except Exception:
+            # Token present but API unreachable or invalid
+            try:
+                import urllib.request
+                req = urllib.request.Request(
+                    "https://api.github.com",
+                    headers={"User-Agent": cfg.user_agent},
+                )
+                with urllib.request.urlopen(req, timeout=5):
+                    github_reachable = True
+            except Exception:
+                pass
+
+    # Probe general internet
+    has_internet = False
+    if github_reachable:
+        has_internet = True
+    else:
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                "https://example.com",
+                headers={"User-Agent": cfg.user_agent},
+                method="HEAD",
+            )
+            with urllib.request.urlopen(req, timeout=5):
+                has_internet = True
+        except Exception:
+            pass
+
+    source_names = tuple(type(s).__name__ for s in (sources or []))
+
+    probe = EnvironmentProbe(
+        has_internet=has_internet,
+        has_proxy=bool(proxy),
+        proxy_url=proxy.split("@")[-1] if "@" in proxy else proxy[:50] if proxy else "",
+        has_github_token=bool(github_token),
+        github_api_reachable=github_reachable,
+        github_user=github_user,
+        registered_sources=source_names,
+        python_version=platform.python_version(),
+        platform=f"{platform.system()} {platform.release()}",
+        hostname=platform.node(),
+        working_directory=os.getcwd(),
+        probed_at=time.time(),
+    )
+
+    return {
+        "kind": "agent_web_browser_environment",
+        "version": 1,
+        "connectivity": {
+            "has_internet": probe.has_internet,
+            "has_proxy": probe.has_proxy,
+            "proxy_endpoint": probe.proxy_url,
+        },
+        "github": {
+            "authenticated": probe.has_github_token,
+            "api_reachable": probe.github_api_reachable,
+            "user": probe.github_user,
+        },
+        "sources": list(probe.registered_sources),
+        "runtime": {
+            "python": probe.python_version,
+            "platform": probe.platform,
+            "hostname": probe.hostname,
+            "cwd": probe.working_directory,
+        },
+        "probed_at": probe.probed_at,
+    }
+
+
+# ---------------------------------------------------------------------------
+# GAD-000 capability manifest — browser as a discoverable agent surface
+# ---------------------------------------------------------------------------
+
+def build_browser_capability_manifest(
+    *,
+    base_url: str = "",
+    sources: list[PageSource] | None = None,
+) -> dict:
+    """Build a GAD-000-conformant capability manifest for the agent web browser.
+
+    Follows the ``agent_web_semantic_capability_manifest`` pattern: typed
+    capabilities, stable response subsets, versioned contracts, and
+    discovery metadata.
+    """
+    source_names = [type(s).__name__ for s in (sources or [])]
+
+    capabilities = [
+        {
+            "capability_id": "web_browse",
+            "summary": "Fetch a URL and return structured, agent-readable page content.",
+            "mode": "read_only",
+            "contract_version": 1,
+            "input_schema": {
+                "required": ["url"],
+                "properties": {
+                    "url": {"type": "string", "description": "URL to fetch"},
+                    "use_cache": {"type": "boolean", "default": True},
+                },
+            },
+            "stable_response_subset": {
+                "top_level_fields": [
+                    "url", "status_code", "title", "content_text",
+                    "links", "forms", "meta", "ok", "error",
+                ],
+                "link_fields": ["href", "text", "rel", "index"],
+                "form_fields": ["action", "method", "fields", "form_id", "index"],
+                "meta_fields": [
+                    "description", "keywords", "author", "canonical_url",
+                    "og_title", "og_description",
+                ],
+            },
+        },
+        {
+            "capability_id": "web_follow_link",
+            "summary": "Follow a link on the current page by index or text search.",
+            "mode": "read_only",
+            "contract_version": 1,
+            "input_schema": {
+                "required": ["index_or_query"],
+                "properties": {
+                    "index_or_query": {
+                        "type": ["integer", "string"],
+                        "description": "Link index (int) or text/href search query (str)",
+                    },
+                },
+            },
+            "stable_response_subset": {
+                "top_level_fields": [
+                    "url", "status_code", "title", "content_text",
+                    "links", "forms", "meta", "ok", "error",
+                ],
+            },
+        },
+        {
+            "capability_id": "web_navigate",
+            "summary": "Navigate back/forward in tab history.",
+            "mode": "read_only",
+            "contract_version": 1,
+            "input_schema": {
+                "required": ["direction"],
+                "properties": {
+                    "direction": {
+                        "type": "string",
+                        "enum": ["back", "forward", "refresh"],
+                    },
+                },
+            },
+        },
+        {
+            "capability_id": "web_search_links",
+            "summary": "Search links on the current page by keyword.",
+            "mode": "read_only",
+            "contract_version": 1,
+            "input_schema": {
+                "required": ["query"],
+                "properties": {
+                    "query": {"type": "string"},
+                },
+            },
+            "stable_response_subset": {
+                "result_fields": ["href", "text", "rel", "index"],
+            },
+        },
+        {
+            "capability_id": "web_submit_form",
+            "summary": "Submit a form on the current page with provided values.",
+            "mode": "write",
+            "contract_version": 1,
+            "input_schema": {
+                "required": ["index_or_id"],
+                "properties": {
+                    "index_or_id": {"type": ["integer", "string"]},
+                    "values": {"type": "object", "description": "Field name → value overrides"},
+                },
+            },
+        },
+        {
+            "capability_id": "web_environment",
+            "summary": "Probe the runtime environment: connectivity, proxy, credentials, sources.",
+            "mode": "read_only",
+            "contract_version": 1,
+            "input_schema": {"properties": {}},
+            "stable_response_subset": {
+                "top_level_fields": [
+                    "connectivity", "github", "sources", "runtime", "probed_at",
+                ],
+            },
+        },
+        {
+            "capability_id": "web_tab_management",
+            "summary": "Create, switch, close, and list browser tabs.",
+            "mode": "read_write",
+            "contract_version": 1,
+            "input_schema": {
+                "required": ["action"],
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["new", "switch", "close", "list"],
+                    },
+                    "tab_id": {"type": "string"},
+                    "label": {"type": "string"},
+                },
+            },
+        },
+    ]
+
+    return {
+        "kind": "agent_web_browser_capability_manifest",
+        "version": 1,
+        "standard_profile": {
+            "profile_id": "agent_web_browser_standard.v1",
+            "gad_conformance": "gad_000_plus",
+            "source_system": "agent_internet",
+            "provider_role": "public_web_transport_adapter",
+            "consumer_roles": ["autonomous_agent", "orchestrator", "proxy_wrapper"],
+        },
+        "surface_kind": "agent_web_browser_surface",
+        "consumer_model": "stateful_session",
+        "federation_surface": {
+            "surface_role": "public_web_transport_adapter",
+            "canonical_for_public_federation": False,
+            "transport_boundary": "Per ADR-0003: external protocols are transport, not substrate.",
+        },
+        "sources": {
+            "registered": source_names,
+            "available": ["GitHubBrowserSource", "custom PageSource implementations"],
+        },
+        "capabilities": capabilities,
+        "non_goals": [
+            "The browser does not execute JavaScript or render CSS.",
+            "External web identity is not imported into the federation identity model.",
+            "Page content is transport-level projection, not substrate truth.",
+        ],
+        "stats": {"capability_count": len(capabilities)},
+    }

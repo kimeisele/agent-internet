@@ -144,13 +144,16 @@ from .agent_web_browser import (
     BrowserConfig,
     BrowserPage,
     BrowserTab,
+    EnvironmentProbe,
     FormField,
     PageForm,
     PageLink,
     PageMeta,
     PageSource,
+    build_browser_capability_manifest,
     fetch_url,
     parse_html,
+    probe_environment,
 )
 from .agent_web_browser_github import GitHubBrowserSource, create_github_browser
 
@@ -292,13 +295,16 @@ __all__ = [
     "BrowserConfig",
     "BrowserPage",
     "BrowserTab",
+    "EnvironmentProbe",
     "FormField",
     "GitHubBrowserSource",
     "PageForm",
     "PageLink",
     "PageMeta",
     "PageSource",
+    "build_browser_capability_manifest",
     "create_github_browser",
     "fetch_url",
     "parse_html",
+    "probe_environment",
 ]
