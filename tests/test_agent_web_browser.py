@@ -16,20 +16,20 @@ from agent_internet.agent_web_browser import (
     BrowserConfig,
     BrowserPage,
     BrowserTab,
-    EnvironmentProbe,
     FormField,
     HistoryEntry,
     PageForm,
     PageLink,
     PageMeta,
-    _clean_text,
-    _estimate_tokens,
-    _parse_llms_txt,
+)
+from agent_internet.agent_web_browser_compress import _estimate_tokens, compress_page
+from agent_internet.agent_web_browser_env import (
+    EnvironmentProbe,
     build_browser_capability_manifest,
-    compress_page,
-    parse_html,
     probe_environment,
 )
+from agent_internet.agent_web_browser_http import _parse_llms_txt
+from agent_internet.agent_web_browser_parser import _clean_text, parse_html
 
 
 # ---------------------------------------------------------------------------
@@ -1031,8 +1031,7 @@ def test_clear_history():
 
 
 def test_history_trimmed_to_max():
-    browser = AgentWebBrowser()
-    browser._max_history = 5
+    browser = AgentWebBrowser(config=BrowserConfig(max_history=5))
     for i in range(10):
         url = f"https://example.com/{i}"
         page = BrowserPage(
