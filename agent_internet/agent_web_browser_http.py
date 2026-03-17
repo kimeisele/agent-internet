@@ -103,11 +103,14 @@ def fetch_url(
     if "application/json" in content_type:
         return _json_page(final_url, status, decoded, resp_headers, content_type)
 
-    if "text/plain" in content_type:
+    if "text/plain" in content_type or "text/markdown" in content_type:
+        from .agent_web_browser_content import detect_content_type, render_content
+        ct = detect_content_type(final_url, content_type)
+        rendered = render_content(decoded.strip(), ct, url=final_url) if ct != "unknown" else decoded.strip()
         return _make_page(
             final_url, status=status,
             title=final_url.split("/")[-1] or final_url,
-            content=decoded.strip(),
+            content=rendered,
             headers=resp_headers, content_type=content_type,
             encoding=encoding, raw_html=decoded,
         )
