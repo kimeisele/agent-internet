@@ -412,6 +412,165 @@ def _clean_text(raw: str) -> str:
     return result.strip()
 
 
+# ---------------------------------------------------------------------------
+# Content compression — CBR-inspired token budget for agent browsing
+# ---------------------------------------------------------------------------
+
+# Nav-chrome patterns: menus, headers, footers, cookie banners, etc.
+_NAV_PATTERNS = re.compile(
+    r"(?i)^("
+    r"skip to (?:main )?content|toggle (?:navigation|menu)|"
+    r"navigation menu|search\.\.\.|sign (?:in|up|out)|"
+    r"log (?:in|out)|register|cookie|accept all|"
+    r"privacy policy|terms of (?:service|use)|"
+    r"follow us|subscribe|newsletter|"
+    r"all rights reserved|copyright ©|"
+    r"\[image:.*?\]|switch to mobile.*|"
+    r"search pypi|search$|menu$|help$|docs$|sponsors?$|"
+    r"copy pip instructions|latest version|navigation|"
+    r"verified details|unverified details|"
+    r"report project as malware|"
+    r"these details have (?:not )?been verified"
+    r")$"
+)
+
+# Short repeated noise lines (single words that are navigation items)
+_SHORT_NAV_LEN = 4
+
+
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimate: ~4 chars per token (GPT/Claude average)."""
+    return max(1, len(text) // 4)
+
+
+def compress_page(
+    page: "BrowserPage",
+    *,
+    token_budget: int = 1024,
+    link_budget: int = 20,
+    keep_meta: bool = True,
+) -> "BrowserPage":
+    """Compress a BrowserPage to fit within a token budget.
+
+    Inspired by steward's CBR (Constant Bitrate) signal chain:
+    - Strip nav chrome (menus, footers, cookie banners)
+    - Deduplicate repeated lines
+    - Collapse whitespace aggressively
+    - Truncate to token budget with sentence-boundary awareness
+    - Trim links to the most relevant subset
+
+    Returns a new BrowserPage with compressed content.
+    """
+    if not page.ok or not page.content_text:
+        return page
+
+    # Stage 1: Strip nav chrome
+    lines = page.content_text.split("\n")
+    filtered: list[str] = []
+    seen: set[str] = set()
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if filtered and filtered[-1] != "":
+                filtered.append("")
+            continue
+        # Skip nav patterns
+        if _NAV_PATTERNS.match(stripped):
+            continue
+        # Skip very short repeated items (nav menu items like "Help", "Docs")
+        if len(stripped) <= _SHORT_NAV_LEN and stripped.lower() in seen:
+            continue
+        # Deduplicate
+        norm = stripped.lower()
+        if norm in seen and len(stripped) < 80:
+            continue
+        seen.add(norm)
+        filtered.append(stripped)
+
+    # Stage 2: Collapse to text
+    text = "\n".join(filtered).strip()
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    # Stage 3: Token-budget truncation
+    current_tokens = _estimate_tokens(text)
+    if current_tokens > token_budget:
+        # Target chars ≈ token_budget × 4
+        target_chars = token_budget * 4
+        if len(text) > target_chars:
+            # Try to cut at paragraph boundary
+            cut = text[:target_chars]
+            last_para = cut.rfind("\n\n")
+            if last_para > target_chars // 2:
+                text = cut[:last_para]
+            else:
+                # Cut at sentence boundary
+                last_dot = cut.rfind(". ")
+                if last_dot > target_chars // 2:
+                    text = cut[: last_dot + 1]
+                else:
+                    text = cut + "…"
+
+    # Stage 4: Compress links — keep most relevant
+    links = page.links
+    if link_budget > 0 and len(links) > link_budget:
+        # Prioritize: content links over nav/sponsor. Score by informativeness.
+        scored: list[tuple[float, PageLink]] = []
+        seen_hrefs: set[str] = set()
+        page_domain = page.url.split("/")[2] if "/" in page.url else ""
+        for link in links:
+            if link.href in seen_hrefs or not link.text.strip():
+                continue
+            seen_hrefs.add(link.href)
+            text_clean = " ".join(link.text.split()).strip()
+            score = len(text_clean)
+            # Bonus: same-domain links (actual content, not external sponsors)
+            link_domain = link.href.split("/")[2] if link.href.startswith("http") and "/" in link.href else ""
+            if link_domain == page_domain:
+                score += 15
+            # Bonus: informative keywords
+            tl = text_clean.lower()
+            if any(kw in tl for kw in ("article", "doc", "guide", "section", "chapter", "readme", "overview")):
+                score += 20
+            # Penalty: sponsor/ad links
+            if any(kw in tl for kw in ("sponsor", "advertis", "cookie", "privacy", "terms")):
+                score -= 50
+            if any(ad in link.href for ad in ("careers.", "ads.", "sponsor", "utm_")):
+                score -= 30
+            scored.append((score, link))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        kept = [lnk for _, lnk in scored[:link_budget]]
+        # Re-index
+        links = tuple(
+            PageLink(href=lnk.href, text=lnk.text, rel=lnk.rel, index=i)
+            for i, lnk in enumerate(kept)
+        )
+
+    # Build header with meta if requested
+    header_parts: list[str] = []
+    if keep_meta and page.title:
+        header_parts.append(f"# {page.title}")
+    if keep_meta and page.meta.description:
+        header_parts.append(f"> {page.meta.description}")
+    if header_parts:
+        text = "\n".join(header_parts) + "\n\n" + text
+
+    return BrowserPage(
+        url=page.url,
+        status_code=page.status_code,
+        title=page.title,
+        content_text=text,
+        links=links,
+        forms=page.forms,
+        meta=page.meta,
+        headers=page.headers,
+        fetched_at=page.fetched_at,
+        content_type=page.content_type,
+        encoding=page.encoding,
+        raw_html=page.raw_html,
+    )
+
+
 def parse_html(raw_html: str, base_url: str) -> tuple[str, str, tuple[PageLink, ...], tuple[PageForm, ...], PageMeta]:
     """Parse raw HTML into structured components.
 
@@ -440,7 +599,7 @@ def parse_html(raw_html: str, base_url: str) -> tuple[str, str, tuple[PageLink, 
 class BrowserConfig:
     """Tuning knobs for the agent web browser."""
 
-    user_agent: str = "AgentWebBrowser/1.0 (agent-internet federation)"
+    user_agent: str = "Mozilla/5.0 (compatible; AgentWebBrowser/1.0; +https://github.com/kimeisele/agent-internet)"
     connect_timeout_s: float = 10.0
     read_timeout_s: float = 30.0
     max_redirects: int = 10
@@ -450,6 +609,9 @@ class BrowserConfig:
     accept_language: str = "en-US,en;q=0.9"
     default_encoding: str = "utf-8"
     respect_proxy: bool = True  # Honor HTTP_PROXY / HTTPS_PROXY env vars
+    # CBR-inspired content compression
+    token_budget: int = 0  # 0 = no compression (raw). >0 = target token count
+    compress_links: int = 0  # 0 = keep all. >0 = max links to keep
 
 
 def _detect_encoding(headers: dict[str, str], body: bytes) -> str:
@@ -732,13 +894,27 @@ class AgentWebBrowser:
 
     # -- Navigation --
 
-    def open(self, url: str, *, use_cache: bool = True) -> BrowserPage:
-        """Navigate the active tab to *url* and return the page."""
+    def open(self, url: str, *, use_cache: bool = True, token_budget: int = 0) -> BrowserPage:
+        """Navigate the active tab to *url* and return the page.
+
+        If *token_budget* > 0 (or ``config.token_budget`` > 0), compress the
+        page content to fit within that token budget — stripping nav chrome,
+        deduplicating, and truncating with sentence-boundary awareness.
+        """
         if use_cache and url in self._page_cache:
             page = self._page_cache[url]
         else:
             page = self._fetch(url)
             self._cache_page(url, page)
+
+        # Apply CBR-inspired content compression
+        budget = token_budget or self.config.token_budget
+        if budget > 0 and page.ok:
+            page = compress_page(
+                page,
+                token_budget=budget,
+                link_budget=self.config.compress_links or 20,
+            )
 
         tab = self.active_tab
         tab.push_url(url)

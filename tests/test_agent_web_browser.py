@@ -15,7 +15,9 @@ from agent_internet.agent_web_browser import (
     PageLink,
     PageMeta,
     _clean_text,
+    _estimate_tokens,
     build_browser_capability_manifest,
+    compress_page,
     parse_html,
     probe_environment,
 )
@@ -748,3 +750,118 @@ def test_about_federation():
     page = browser.open("about:federation")
     assert page.ok
     assert "Federation" in page.title
+
+
+# ---------------------------------------------------------------------------
+# Content compression (CBR-inspired)
+# ---------------------------------------------------------------------------
+
+def _make_big_page(n_lines: int = 200, n_links: int = 50) -> BrowserPage:
+    """Create a page with lots of content and nav chrome for compression tests."""
+    nav_lines = [
+        "Skip to main content", "Toggle navigation", "Sign in", "Log out",
+        "Menu", "Help", "Docs", "Search", "Cookie", "Privacy policy",
+    ]
+    content_lines = [f"This is paragraph {i} about Python programming and web development." for i in range(n_lines)]
+    all_lines = nav_lines + content_lines + ["All rights reserved", "Subscribe", "Newsletter"]
+    links = tuple(
+        PageLink(href=f"https://example.com/page{i}", text=f"Link {i} text here", index=i)
+        for i in range(n_links)
+    )
+    return BrowserPage(
+        url="https://example.com/big",
+        status_code=200,
+        title="Big Test Page",
+        content_text="\n".join(all_lines),
+        links=links,
+        forms=(),
+        meta=PageMeta(description="A big test page"),
+        fetched_at=1000.0,
+    )
+
+
+def test_compress_strips_nav_chrome():
+    page = _make_big_page(n_lines=10, n_links=5)
+    compressed = compress_page(page, token_budget=5000, link_budget=50)
+    text = compressed.content_text.lower()
+    assert "skip to main content" not in text
+    assert "toggle navigation" not in text
+    assert "all rights reserved" not in text
+    # Real content preserved
+    assert "paragraph" in text
+
+
+def test_compress_respects_token_budget():
+    page = _make_big_page(n_lines=500, n_links=100)
+    original_tokens = _estimate_tokens(page.content_text)
+    assert original_tokens > 2000  # big page
+
+    compressed = compress_page(page, token_budget=512, link_budget=10)
+    compressed_tokens = _estimate_tokens(compressed.content_text)
+    assert compressed_tokens <= 600  # some slack for header
+
+
+def test_compress_respects_link_budget():
+    page = _make_big_page(n_lines=10, n_links=100)
+    compressed = compress_page(page, token_budget=5000, link_budget=15)
+    assert len(compressed.links) <= 15
+
+
+def test_compress_preserves_meta_header():
+    page = _make_big_page(n_lines=10, n_links=5)
+    compressed = compress_page(page, token_budget=5000, keep_meta=True)
+    assert "# Big Test Page" in compressed.content_text
+    assert "A big test page" in compressed.content_text
+
+
+def test_compress_no_meta_header():
+    page = _make_big_page(n_lines=10, n_links=5)
+    compressed = compress_page(page, token_budget=5000, keep_meta=False)
+    assert "# Big Test Page" not in compressed.content_text
+
+
+def test_compress_deduplicates_lines():
+    page = BrowserPage(
+        url="https://example.com",
+        status_code=200,
+        title="Dedup Test",
+        content_text="Hello World\nHello World\nHello World\nUnique line here\nHello World",
+        links=(), forms=(), meta=PageMeta(), fetched_at=1000.0,
+    )
+    compressed = compress_page(page, token_budget=5000)
+    # "Hello World" should appear only once
+    assert compressed.content_text.count("Hello World") == 1
+    assert "Unique line here" in compressed.content_text
+
+
+def test_compress_skips_error_pages():
+    page = BrowserPage(
+        url="https://example.com",
+        status_code=404,
+        title="Not Found",
+        content_text="Page not found",
+        links=(), forms=(), meta=PageMeta(), fetched_at=1000.0,
+        error="not_found",
+    )
+    compressed = compress_page(page, token_budget=512)
+    assert compressed is page  # returned unchanged
+
+
+def test_estimate_tokens():
+    assert _estimate_tokens("hello world") > 0
+    # ~4 chars per token
+    assert _estimate_tokens("a" * 400) == 100
+
+
+def test_config_token_budget_auto_compresses():
+    """BrowserConfig.token_budget triggers auto-compression in open()."""
+    config = BrowserConfig(token_budget=256, compress_links=5)
+    browser = AgentWebBrowser(config=config)
+    # Simulate a cached page with lots of content
+    big_page = _make_big_page(n_lines=200, n_links=50)
+    browser._page_cache["https://example.com/big"] = big_page
+
+    page = browser.open("https://example.com/big")
+    # Should be compressed
+    assert _estimate_tokens(page.content_text) <= 350  # budget + header slack
+    assert len(page.links) <= 5
