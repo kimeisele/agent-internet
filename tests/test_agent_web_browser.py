@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import time
-
 import pytest
 
 from agent_internet.agent_web_browser import (
@@ -11,13 +9,15 @@ from agent_internet.agent_web_browser import (
     BrowserConfig,
     BrowserPage,
     BrowserTab,
+    EnvironmentProbe,
     FormField,
     PageForm,
     PageLink,
     PageMeta,
-    PageSource,
     _clean_text,
+    build_browser_capability_manifest,
     parse_html,
+    probe_environment,
 )
 
 
@@ -568,3 +568,107 @@ def test_browser_refresh():
 
     browser.refresh()
     assert "version 2" in browser.get_text()
+
+
+# ---------------------------------------------------------------------------
+# Environment probe
+# ---------------------------------------------------------------------------
+
+def test_probe_environment_returns_structured_dict():
+    env = probe_environment()
+    assert env["kind"] == "agent_web_browser_environment"
+    assert env["version"] == 1
+    assert "connectivity" in env
+    assert "github" in env
+    assert "sources" in env
+    assert "runtime" in env
+    assert "probed_at" in env
+    assert isinstance(env["connectivity"]["has_internet"], bool)
+    assert isinstance(env["runtime"]["python"], str)
+
+
+def test_browser_environment_includes_sources():
+    class _DummySource:
+        def can_handle(self, url: str) -> bool:
+            return False
+        def fetch(self, url: str, *, config: BrowserConfig) -> BrowserPage:
+            return _make_page(url=url)
+
+    browser = AgentWebBrowser()
+    browser.register_source(_DummySource())
+    env = browser.environment()
+    assert "_DummySource" in env["sources"]
+
+
+# ---------------------------------------------------------------------------
+# GAD-000 capability manifest
+# ---------------------------------------------------------------------------
+
+def test_capability_manifest_structure():
+    manifest = build_browser_capability_manifest()
+    assert manifest["kind"] == "agent_web_browser_capability_manifest"
+    assert manifest["version"] == 1
+    assert manifest["standard_profile"]["gad_conformance"] == "gad_000_plus"
+    assert manifest["standard_profile"]["profile_id"] == "agent_web_browser_standard.v1"
+    assert manifest["surface_kind"] == "agent_web_browser_surface"
+    assert isinstance(manifest["capabilities"], list)
+    assert manifest["stats"]["capability_count"] == len(manifest["capabilities"])
+
+
+def test_capability_manifest_has_required_capabilities():
+    manifest = build_browser_capability_manifest()
+    cap_ids = {cap["capability_id"] for cap in manifest["capabilities"]}
+    assert "web_browse" in cap_ids
+    assert "web_follow_link" in cap_ids
+    assert "web_navigate" in cap_ids
+    assert "web_search_links" in cap_ids
+    assert "web_submit_form" in cap_ids
+    assert "web_environment" in cap_ids
+    assert "web_tab_management" in cap_ids
+
+
+def test_capability_manifest_includes_sources():
+    class _TestSource:
+        def can_handle(self, url: str) -> bool:
+            return False
+        def fetch(self, url: str, *, config: BrowserConfig) -> BrowserPage:
+            return _make_page(url=url)
+
+    manifest = build_browser_capability_manifest(sources=[_TestSource()])
+    assert "_TestSource" in manifest["sources"]["registered"]
+
+
+def test_browser_capability_manifest_method():
+    browser = AgentWebBrowser()
+    manifest = browser.capability_manifest()
+    assert manifest["kind"] == "agent_web_browser_capability_manifest"
+
+
+def test_capability_manifest_follows_federation_boundary():
+    manifest = build_browser_capability_manifest()
+    assert manifest["federation_surface"]["canonical_for_public_federation"] is False
+    assert "ADR-0003" in manifest["federation_surface"]["transport_boundary"]
+
+
+# ---------------------------------------------------------------------------
+# EnvironmentProbe dataclass
+# ---------------------------------------------------------------------------
+
+def test_environment_probe_dataclass():
+    probe = EnvironmentProbe(
+        has_internet=True,
+        has_proxy=False,
+        proxy_url="",
+        has_github_token=True,
+        github_api_reachable=True,
+        github_user="testuser",
+        registered_sources=("GitHubBrowserSource",),
+        python_version="3.11.0",
+        platform="Linux 6.0",
+        hostname="testhost",
+        working_directory="/tmp",
+        probed_at=1000.0,
+    )
+    assert probe.has_internet is True
+    assert probe.github_user == "testuser"
+    assert probe.registered_sources == ("GitHubBrowserSource",)

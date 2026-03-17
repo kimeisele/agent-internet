@@ -7,8 +7,6 @@ canned responses.
 
 from __future__ import annotations
 
-import pytest
-
 from agent_internet.agent_web_browser import AgentWebBrowser, BrowserConfig
 from agent_internet.agent_web_browser_github import (
     GitHubBrowserSource,
@@ -280,7 +278,6 @@ def test_fetch_blob():
         }),
     })
     # Also mock raw content
-    original_api_get_raw = source._api_get_raw
     source._api_get_raw = lambda endpoint, *, config: (200, "# Hello World\nContent here.")
 
     page = source.fetch("https://github.com/octo/cat/blob/main/README.md", config=BrowserConfig())
