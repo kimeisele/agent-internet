@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import pytest
 
+import json
+import tempfile
+from pathlib import Path
+
 from agent_internet.agent_web_browser import (
     AgentWebBrowser,
+    Bookmark,
     BrowserConfig,
     BrowserPage,
     BrowserTab,
     EnvironmentProbe,
     FormField,
+    HistoryEntry,
     PageForm,
     PageLink,
     PageMeta,
@@ -865,3 +871,303 @@ def test_config_token_budget_auto_compresses():
     # Should be compressed
     assert _estimate_tokens(page.content_text) <= 350  # budget + header slack
     assert len(page.links) <= 5
+
+
+# ---------------------------------------------------------------------------
+# Bookmark model
+# ---------------------------------------------------------------------------
+
+def test_bookmark_dataclass():
+    bm = Bookmark(url="https://example.com", title="Example", folder="dev", tags=("test",))
+    assert bm.url == "https://example.com"
+    assert bm.folder == "dev"
+    assert bm.tags == ("test",)
+
+
+def test_history_entry_dataclass():
+    entry = HistoryEntry(url="https://example.com", title="Example", visited_at=1000.0)
+    assert entry.url == "https://example.com"
+    assert entry.visited_at == 1000.0
+
+
+# ---------------------------------------------------------------------------
+# Bookmarks — browser integration
+# ---------------------------------------------------------------------------
+
+def _browser_with_cached_pages() -> AgentWebBrowser:
+    """Create a browser with pre-cached pages for testing."""
+    browser = AgentWebBrowser()
+    for i in range(3):
+        url = f"https://example.com/page{i}"
+        page = BrowserPage(
+            url=url, status_code=200, title=f"Page {i}",
+            content_text=f"Content {i}", links=(), forms=(), meta=PageMeta(),
+            fetched_at=1000.0,
+        )
+        browser._page_cache[url] = page
+    return browser
+
+
+def test_bookmark_current_page():
+    browser = _browser_with_cached_pages()
+    browser.open("https://example.com/page0")
+    bm = browser.bookmark(folder="test", tags=("demo",))
+    assert bm.url == "https://example.com/page0"
+    assert bm.title == "Page 0"
+    assert bm.folder == "test"
+    assert browser.bookmark_count == 1
+
+
+def test_bookmark_explicit_url():
+    browser = AgentWebBrowser()
+    bm = browser.bookmark("https://example.com", title="Example", folder="web")
+    assert bm.url == "https://example.com"
+    assert bm.title == "Example"
+    assert browser.bookmark_count == 1
+
+
+def test_bookmark_deduplicates():
+    browser = AgentWebBrowser()
+    browser.bookmark("https://example.com", title="V1")
+    browser.bookmark("https://example.com", title="V2")
+    assert browser.bookmark_count == 1
+    assert browser.list_bookmarks()[0].title == "V2"
+
+
+def test_remove_bookmark():
+    browser = AgentWebBrowser()
+    browser.bookmark("https://example.com", title="Test")
+    assert browser.remove_bookmark("https://example.com") is True
+    assert browser.bookmark_count == 0
+    assert browser.remove_bookmark("https://nonexistent.com") is False
+
+
+def test_list_bookmarks_filter_folder():
+    browser = AgentWebBrowser()
+    browser.bookmark("https://a.com", title="A", folder="dev")
+    browser.bookmark("https://b.com", title="B", folder="tools")
+    browser.bookmark("https://c.com", title="C", folder="dev")
+
+    dev = browser.list_bookmarks(folder="dev")
+    assert len(dev) == 2
+    assert all(bm.folder == "dev" for bm in dev)
+
+
+def test_list_bookmarks_search():
+    browser = AgentWebBrowser()
+    browser.bookmark("https://python.org", title="Python", tags=("lang",))
+    browser.bookmark("https://rust-lang.org", title="Rust", tags=("lang",))
+
+    found = browser.list_bookmarks(query="python")
+    assert len(found) == 1
+    assert found[0].title == "Python"
+
+    # Search by tag
+    found = browser.list_bookmarks(query="lang")
+    assert len(found) == 2
+
+
+def test_bookmark_folders():
+    browser = AgentWebBrowser()
+    browser.bookmark("https://a.com", title="A", folder="z-folder")
+    browser.bookmark("https://b.com", title="B", folder="a-folder")
+    browser.bookmark("https://c.com", title="C")  # No folder
+
+    folders = browser.bookmark_folders()
+    assert folders == ["a-folder", "z-folder"]
+
+
+def test_bookmark_no_page_raises():
+    browser = AgentWebBrowser()
+    with pytest.raises(ValueError, match="no_current_page"):
+        browser.bookmark()
+
+
+# ---------------------------------------------------------------------------
+# History
+# ---------------------------------------------------------------------------
+
+def test_history_recorded_on_open():
+    browser = _browser_with_cached_pages()
+    browser.open("https://example.com/page0")
+    browser.open("https://example.com/page1")
+    assert browser.history_count == 2
+    entries = browser.history()
+    assert entries[0].url == "https://example.com/page1"  # most recent first
+    assert entries[1].url == "https://example.com/page0"
+
+
+def test_history_search():
+    browser = _browser_with_cached_pages()
+    browser.open("https://example.com/page0")
+    browser.open("https://example.com/page1")
+    browser.open("https://example.com/page2")
+
+    found = browser.history(query="Page 1")
+    assert len(found) == 1
+    assert found[0].title == "Page 1"
+
+
+def test_history_limit():
+    browser = _browser_with_cached_pages()
+    browser.open("https://example.com/page0")
+    browser.open("https://example.com/page1")
+    browser.open("https://example.com/page2")
+
+    entries = browser.history(limit=2)
+    assert len(entries) == 2
+
+
+def test_clear_history():
+    browser = _browser_with_cached_pages()
+    browser.open("https://example.com/page0")
+    browser.open("https://example.com/page1")
+    count = browser.clear_history()
+    assert count == 2
+    assert browser.history_count == 0
+
+
+def test_history_trimmed_to_max():
+    browser = AgentWebBrowser()
+    browser._max_history = 5
+    for i in range(10):
+        url = f"https://example.com/{i}"
+        page = BrowserPage(
+            url=url, status_code=200, title=f"P{i}",
+            content_text="", links=(), forms=(), meta=PageMeta(),
+        )
+        browser._page_cache[url] = page
+        browser.open(url)
+    assert browser.history_count == 5
+
+
+# ---------------------------------------------------------------------------
+# Reader mode
+# ---------------------------------------------------------------------------
+
+def test_reader_mode():
+    browser = _browser_with_cached_pages()
+    # Open a page with lots of content
+    big_page = _make_big_page(n_lines=200, n_links=50)
+    browser._page_cache["https://example.com/big"] = big_page
+    browser.open("https://example.com/big")
+
+    reader = browser.reader(token_budget=256)
+    assert _estimate_tokens(reader.content_text) <= 350
+    assert len(reader.links) <= 5
+
+
+def test_reader_no_page_raises():
+    browser = AgentWebBrowser()
+    with pytest.raises(ValueError, match="no_current_page"):
+        browser.reader()
+
+
+# ---------------------------------------------------------------------------
+# about:bookmarks and about:history
+# ---------------------------------------------------------------------------
+
+def test_about_bookmarks_empty():
+    browser = AgentWebBrowser()
+    page = browser.open("about:bookmarks")
+    assert page.ok
+    assert "Bookmarks" in page.title
+    assert "no bookmarks" in page.content_text
+
+
+def test_about_bookmarks_with_data():
+    browser = AgentWebBrowser()
+    browser.bookmark("https://example.com", title="Example", folder="dev", tags=("test",))
+    browser.bookmark("https://other.com", title="Other")
+    page = browser.open("about:bookmarks")
+    assert page.ok
+    assert "Example" in page.content_text
+    assert "dev" in page.content_text
+    assert "test" in page.content_text
+    assert "Other" in page.content_text
+    assert "Total: 2" in page.content_text
+    assert len(page.links) >= 2
+
+
+def test_about_history_empty():
+    browser = AgentWebBrowser()
+    page = browser.open("about:history")
+    assert page.ok
+    assert "History" in page.title
+
+
+def test_about_history_with_data():
+    browser = _browser_with_cached_pages()
+    browser.open("https://example.com/page0")
+    browser.open("https://example.com/page1")
+    page = browser.open("about:history")
+    assert page.ok
+    assert "Page 0" in page.content_text
+    assert "Page 1" in page.content_text
+    assert len(page.links) >= 2
+
+
+# ---------------------------------------------------------------------------
+# Session save/restore
+# ---------------------------------------------------------------------------
+
+def test_session_save_and_restore():
+    browser = _browser_with_cached_pages()
+    browser.open("https://example.com/page0")
+    browser.open("https://example.com/page1")
+    browser.bookmark("https://example.com", title="Example", folder="dev")
+    browser.bookmark("https://other.com", title="Other")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = str(Path(tmpdir) / "session.json")
+        result = browser.save_session(path)
+        assert result["saved"] is True
+        assert result["bookmarks"] == 2
+        assert result["history"] >= 2
+
+        # Verify JSON structure
+        data = json.loads(Path(path).read_text())
+        assert data["kind"] == "agent_web_browser_session"
+        assert len(data["bookmarks"]) == 2
+        assert len(data["tabs"]) >= 1
+
+        # Restore into new browser
+        browser2 = AgentWebBrowser()
+        result = browser2.restore_session(path)
+        assert result["restored"] is True
+        assert result["bookmarks"] == 2
+        assert result["tabs"] >= 1
+
+        # Bookmarks preserved
+        bms = browser2.list_bookmarks()
+        assert len(bms) == 2
+        assert any(bm.title == "Example" for bm in bms)
+
+        # History preserved
+        assert browser2.history_count >= 2
+
+
+def test_session_restore_nonexistent():
+    browser = AgentWebBrowser()
+    result = browser.restore_session("/nonexistent/path.json")
+    assert result["restored"] is False
+    assert "file_not_found" in result["error"]
+
+
+def test_session_restore_invalid():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = str(Path(tmpdir) / "bad.json")
+        Path(path).write_text('{"kind": "not_a_session"}')
+        browser = AgentWebBrowser()
+        result = browser.restore_session(path)
+        assert result["restored"] is False
+
+
+def test_snapshot_includes_counts():
+    browser = _browser_with_cached_pages()
+    browser.open("https://example.com/page0")
+    browser.bookmark("https://example.com", title="Test")
+    snap = browser.snapshot()
+    assert snap["bookmark_count"] == 1
+    assert snap["history_count"] >= 1
+    assert "request_count" in snap

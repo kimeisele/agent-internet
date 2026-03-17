@@ -141,11 +141,13 @@ from .agent_web_repo_graph_contracts import (
 # --- Agent Web Browser (internet explorer for agents) ---
 from .agent_web_browser import (
     AgentWebBrowser,
+    Bookmark,
     BrowserConfig,
     BrowserPage,
     BrowserTab,
     EnvironmentProbe,
     FormField,
+    HistoryEntry,
     PageForm,
     PageLink,
     PageMeta,
@@ -299,11 +301,13 @@ __all__ = [
     "render_agent_web_repo_graph_contract_page",
     # --- Agent Web Browser (internet explorer for agents) ---
     "AgentWebBrowser",
+    "Bookmark",
     "BrowserConfig",
     "BrowserPage",
     "BrowserTab",
     "EnvironmentProbe",
     "FormField",
+    "HistoryEntry",
     "GitHubBrowserSource",
     "PageForm",
     "PageLink",
