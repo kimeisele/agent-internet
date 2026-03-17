@@ -634,6 +634,9 @@ class BrowserConfig:
     # CBR-inspired content compression
     token_budget: int = 0  # 0 = no compression (raw). >0 = target token count
     compress_links: int = 0  # 0 = keep all. >0 = max links to keep
+    # Agent-native discovery: check llms.txt and agents.json before scraping HTML
+    llms_txt_discovery: bool = True  # Check /llms.txt first (curated agent content)
+    agents_json_discovery: bool = True  # Check /.well-known/agents.json
 
 
 def _detect_encoding(headers: dict[str, str], body: bytes) -> str:
@@ -817,6 +820,75 @@ def _error_page(url: str, status: int, error: str) -> BrowserPage:
 
 
 # ---------------------------------------------------------------------------
+# llms.txt parser — agent-native content discovery
+# ---------------------------------------------------------------------------
+
+_LLMS_TXT_LINK_RE = re.compile(r"^\s*-\s*\[([^\]]+)\]\(([^)]+)\)\s*(?::\s*(.*))?$")
+
+
+def _parse_llms_txt(content: str, base_url: str) -> dict:
+    """Parse an llms.txt file per the spec at https://llmstxt.org/.
+
+    Structure:
+      - H1: project/site name (required)
+      - Blockquote: short summary
+      - Body paragraphs: description
+      - H2 sections: file lists (``- [name](url): notes``)
+      - H2 "Optional": lower-priority URLs
+    """
+    lines = content.strip().split("\n")
+    title = ""
+    summary = ""
+    description_parts: list[str] = []
+    sections: dict[str, list[dict]] = {}
+    current_section: str = ""
+    keywords: list[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+
+        # H1 — title
+        if stripped.startswith("# ") and not stripped.startswith("## "):
+            title = stripped[2:].strip()
+            continue
+
+        # Blockquote — summary
+        if stripped.startswith("> ") and not summary:
+            summary = stripped[2:].strip()
+            continue
+
+        # H2 — section header
+        if stripped.startswith("## "):
+            current_section = stripped[3:].strip()
+            if current_section not in sections:
+                sections[current_section] = []
+            continue
+
+        # Link item in a section
+        if current_section:
+            match = _LLMS_TXT_LINK_RE.match(line)
+            if match:
+                name, url, notes = match.group(1), match.group(2), match.group(3) or ""
+                # Resolve relative URLs
+                if not url.startswith(("http://", "https://")):
+                    url = f"{base_url.rstrip('/')}/{url.lstrip('/')}"
+                sections[current_section].append({"name": name, "url": url, "notes": notes.strip()})
+                continue
+
+        # Body text before any H2
+        if not current_section and stripped and not stripped.startswith("#"):
+            description_parts.append(stripped)
+
+    return {
+        "title": title or "Unknown",
+        "summary": summary,
+        "description": "\n".join(description_parts),
+        "sections": sections,
+        "keywords": keywords,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Protocol — pluggable page sources
 # ---------------------------------------------------------------------------
 
@@ -855,6 +927,8 @@ class AgentWebBrowser:
     _bookmarks: list[Bookmark] = field(default_factory=list)
     _history: list[HistoryEntry] = field(default_factory=list)
     _max_history: int = 500
+    _llms_txt_cache: dict[str, dict | None] = field(default_factory=dict)
+    _agents_json_cache: dict[str, dict | None] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self._tabs:
@@ -1334,17 +1408,199 @@ class AgentWebBrowser:
     # -- Internal --
 
     def _fetch(self, url: str) -> BrowserPage:
-        """Fetch a URL, trying about: pages, registered sources, then HTTP."""
+        """Fetch a URL with agent-native discovery.
+
+        Resolution order:
+        1. ``about:`` pages (built-in self-knowledge)
+        2. Registered sources (GitHub API, etc.)
+        3. ``/llms.txt`` discovery (if enabled — curated agent content)
+        4. ``/.well-known/agents.json`` discovery (site capabilities)
+        5. Plain HTML fetch + CBR compression (fallback)
+        """
         self._request_count += 1
 
         # Handle about: protocol — built-in browser pages
         if url.startswith("about:"):
             return self._handle_about(url)
 
+        # Registered sources (GitHub API, etc.)
         for source in self._sources:
             if source.can_handle(url):
                 return source.fetch(url, config=self.config)
-        return fetch_url(url, config=self.config)
+
+        # Agent-native discovery: try llms.txt before scraping HTML
+        if self.config.llms_txt_discovery and url.startswith("https://"):
+            llms_page = self._try_llms_txt(url)
+            if llms_page is not None:
+                return llms_page
+
+        # Fallback: plain HTTP fetch
+        page = fetch_url(url, config=self.config)
+
+        # Enrich with agents.json if available
+        if self.config.agents_json_discovery and page.ok and url.startswith("https://"):
+            page = self._enrich_with_agents_json(url, page)
+
+        return page
+
+    def _try_llms_txt(self, url: str) -> BrowserPage | None:
+        """Check if the domain serves /llms.txt — curated content for agents.
+
+        Per the llms.txt spec (https://llmstxt.org/): sites can provide a
+        Markdown file at /llms.txt with structured, agent-optimized content.
+        If found, we use it instead of scraping HTML. This is the strangler
+        fig: clean for new sites, transparent fallback for old ones.
+
+        Only checked for root or path-level URLs (not deep subpages).
+        """
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        domain_root = f"{parsed.scheme}://{parsed.netloc}"
+        llms_url = f"{domain_root}/llms.txt"
+
+        # Check cache first
+        if llms_url in self._llms_txt_cache:
+            cached = self._llms_txt_cache[llms_url]
+            if cached is None:
+                return None  # Known to not exist
+            return self._render_llms_txt(url, cached)
+
+        # Fetch llms.txt with short timeout
+        try:
+            import urllib.request
+            import urllib.error
+            req = urllib.request.Request(
+                llms_url,
+                headers={"User-Agent": self.config.user_agent, "Accept": "text/plain,text/markdown"},
+            )
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                if resp.status == 200:
+                    body = resp.read(self.config.max_response_bytes).decode("utf-8", errors="replace")
+                    if body.strip() and body.strip().startswith("#"):
+                        # Looks like valid llms.txt (starts with Markdown heading)
+                        parsed_data = _parse_llms_txt(body, domain_root)
+                        self._llms_txt_cache[llms_url] = parsed_data
+                        logger.info("llms.txt found for %s", parsed.netloc)
+                        return self._render_llms_txt(url, parsed_data)
+        except Exception:
+            pass
+
+        # Cache the miss
+        self._llms_txt_cache[llms_url] = None
+        return None
+
+    def _render_llms_txt(self, original_url: str, data: dict) -> BrowserPage:
+        """Render parsed llms.txt data as a BrowserPage."""
+        text_parts = [f"# {data['title']}"]
+        if data.get("summary"):
+            text_parts.append(f"> {data['summary']}")
+        text_parts.append("")
+        if data.get("description"):
+            text_parts.append(data["description"])
+            text_parts.append("")
+
+        links: list[PageLink] = []
+        for section_name, items in data.get("sections", {}).items():
+            text_parts.append(f"## {section_name}")
+            for item in items:
+                text_parts.append(f"  [{item['name']}]({item['url']})")
+                if item.get("notes"):
+                    text_parts.append(f"    {item['notes']}")
+                links.append(PageLink(href=item["url"], text=item["name"], index=len(links)))
+            text_parts.append("")
+
+        text_parts.append("")
+        text_parts.append("[source: llms.txt — agent-optimized content]")
+
+        return BrowserPage(
+            url=original_url,
+            status_code=200,
+            title=data["title"],
+            content_text="\n".join(text_parts),
+            links=tuple(links),
+            forms=(),
+            meta=PageMeta(
+                description=data.get("summary", ""),
+                keywords=tuple(data.get("keywords", ())),
+            ),
+            headers={"x-content-source": "llms.txt"},
+            fetched_at=time.time(),
+            content_type="text/markdown",
+        )
+
+    def _enrich_with_agents_json(self, url: str, page: BrowserPage) -> BrowserPage:
+        """Check /.well-known/agents.json and enrich page metadata if found."""
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        domain_root = f"{parsed.scheme}://{parsed.netloc}"
+        agents_url = f"{domain_root}/.well-known/agents.json"
+
+        # Check cache
+        if agents_url in self._agents_json_cache:
+            cached = self._agents_json_cache[agents_url]
+            if cached is None:
+                return page
+            return self._apply_agents_json(page, cached)
+
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                agents_url,
+                headers={"User-Agent": self.config.user_agent, "Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                if resp.status == 200:
+                    body = resp.read(self.config.max_response_bytes).decode("utf-8", errors="replace")
+                    data = json.loads(body)
+                    if isinstance(data, dict):
+                        self._agents_json_cache[agents_url] = data
+                        logger.info("agents.json found for %s", parsed.netloc)
+                        return self._apply_agents_json(page, data)
+        except Exception:
+            pass
+
+        self._agents_json_cache[agents_url] = None
+        return page
+
+    def _apply_agents_json(self, page: BrowserPage, agents_data: dict) -> BrowserPage:
+        """Enrich a page's metadata with agents.json capabilities info."""
+        extra = dict(page.meta.extra)
+        extra["agents_json"] = json.dumps(agents_data, default=str)[:2000]
+
+        # Extract agent-relevant info
+        caps = agents_data.get("capabilities", [])
+        if isinstance(caps, list):
+            extra["agent_capabilities"] = ", ".join(str(c) for c in caps[:10])
+
+        new_meta = PageMeta(
+            charset=page.meta.charset,
+            description=page.meta.description,
+            keywords=page.meta.keywords,
+            author=page.meta.author,
+            robots=page.meta.robots,
+            og_title=page.meta.og_title,
+            og_description=page.meta.og_description,
+            og_image=page.meta.og_image,
+            og_url=page.meta.og_url,
+            canonical_url=page.meta.canonical_url,
+            extra=extra,
+        )
+        return BrowserPage(
+            url=page.url,
+            status_code=page.status_code,
+            title=page.title,
+            content_text=page.content_text,
+            links=page.links,
+            forms=page.forms,
+            meta=new_meta,
+            headers=page.headers,
+            fetched_at=page.fetched_at,
+            content_type=page.content_type,
+            encoding=page.encoding,
+            raw_html=page.raw_html,
+        )
 
     def _handle_about(self, url: str) -> BrowserPage:
         """Render built-in about: pages for agent self-knowledge."""

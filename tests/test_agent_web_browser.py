@@ -8,6 +8,8 @@ import json
 import tempfile
 from pathlib import Path
 
+from unittest.mock import patch, MagicMock
+
 from agent_internet.agent_web_browser import (
     AgentWebBrowser,
     Bookmark,
@@ -22,6 +24,7 @@ from agent_internet.agent_web_browser import (
     PageMeta,
     _clean_text,
     _estimate_tokens,
+    _parse_llms_txt,
     build_browser_capability_manifest,
     compress_page,
     parse_html,
@@ -1171,3 +1174,393 @@ def test_snapshot_includes_counts():
     assert snap["bookmark_count"] == 1
     assert snap["history_count"] >= 1
     assert "request_count" in snap
+
+
+# ---------------------------------------------------------------------------
+# llms.txt parser (unit tests — no network)
+# ---------------------------------------------------------------------------
+
+_SAMPLE_LLMS_TXT = """\
+# Stripe Documentation
+
+> Stripe developer documentation and API reference.
+
+Stripe is a suite of APIs powering online commerce.
+
+## API Reference
+- [Authentication](https://docs.stripe.com/api/authentication): API key auth
+- [Errors](https://docs.stripe.com/api/errors): Error codes
+- [Pagination](/api/pagination): Paginating list results
+
+## Optional
+- [Legacy API](https://docs.stripe.com/legacy): Deprecated endpoints
+"""
+
+
+def test_parse_llms_txt_title():
+    data = _parse_llms_txt(_SAMPLE_LLMS_TXT, "https://docs.stripe.com")
+    assert data["title"] == "Stripe Documentation"
+
+
+def test_parse_llms_txt_summary():
+    data = _parse_llms_txt(_SAMPLE_LLMS_TXT, "https://docs.stripe.com")
+    assert "API reference" in data["summary"]
+
+
+def test_parse_llms_txt_description():
+    data = _parse_llms_txt(_SAMPLE_LLMS_TXT, "https://docs.stripe.com")
+    assert "suite of APIs" in data["description"]
+
+
+def test_parse_llms_txt_sections():
+    data = _parse_llms_txt(_SAMPLE_LLMS_TXT, "https://docs.stripe.com")
+    assert "API Reference" in data["sections"]
+    assert "Optional" in data["sections"]
+    api_ref = data["sections"]["API Reference"]
+    assert len(api_ref) == 3
+    assert api_ref[0]["name"] == "Authentication"
+    assert api_ref[0]["url"] == "https://docs.stripe.com/api/authentication"
+    assert api_ref[0]["notes"] == "API key auth"
+
+
+def test_parse_llms_txt_relative_url():
+    data = _parse_llms_txt(_SAMPLE_LLMS_TXT, "https://docs.stripe.com")
+    pagination = data["sections"]["API Reference"][2]
+    assert pagination["url"] == "https://docs.stripe.com/api/pagination"
+
+
+def test_parse_llms_txt_empty():
+    data = _parse_llms_txt("", "https://example.com")
+    assert data["title"] == "Unknown"
+    assert data["sections"] == {}
+
+
+def test_parse_llms_txt_no_sections():
+    data = _parse_llms_txt("# My Site\n> A summary.\nSome description.", "https://example.com")
+    assert data["title"] == "My Site"
+    assert data["summary"] == "A summary."
+    assert "Some description" in data["description"]
+    assert data["sections"] == {}
+
+
+# ---------------------------------------------------------------------------
+# llms.txt discovery — mock-based browser tests
+# ---------------------------------------------------------------------------
+
+def _mock_llms_txt_response(body: str):
+    """Create a mock urllib response returning llms.txt content."""
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.read.return_value = body.encode("utf-8")
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    return mock_resp
+
+
+def _mock_urlopen_for_llms_txt(llms_body: str, html_body: str = "<html><head><title>Fallback</title></head><body>HTML</body></html>"):
+    """Return a side_effect callable that serves llms.txt or HTML depending on URL."""
+    def side_effect(req, **kwargs):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if url.endswith("/llms.txt"):
+            return _mock_llms_txt_response(llms_body)
+        # HTML fallback
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.url = url
+        mock_resp.headers = MagicMock()
+        mock_resp.headers.get_content_type.return_value = "text/html"
+        mock_resp.headers.get.side_effect = lambda k, d="": {"Content-Type": "text/html; charset=utf-8"}.get(k, d)
+        mock_resp.read.return_value = html_body.encode("utf-8")
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        return mock_resp
+    return side_effect
+
+
+def test_browser_uses_llms_txt_when_available():
+    """When /llms.txt exists, the browser should return curated content."""
+    llms_txt = "# Test Site\n> A test site for agents.\n\n## Docs\n- [Guide](https://test.com/guide): The guide\n"
+    browser = AgentWebBrowser(config=BrowserConfig(agents_json_discovery=False))
+
+    with patch("urllib.request.urlopen", side_effect=_mock_urlopen_for_llms_txt(llms_txt)):
+        page = browser.open("https://test.com/")
+
+    assert page.ok
+    assert page.headers.get("x-content-source") == "llms.txt"
+    assert page.title == "Test Site"
+    assert page.content_type == "text/markdown"
+    assert any(link.text == "Guide" for link in page.links)
+
+
+def test_browser_falls_back_to_html_when_no_llms_txt():
+    """When /llms.txt returns 404, browser should fall back to normal HTML scraping."""
+    def side_effect(req, **kwargs):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if url.endswith("/llms.txt"):
+            import urllib.error
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+        # Return normal HTML
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.url = url
+        mock_resp.headers = MagicMock()
+        mock_resp.headers.get_content_type.return_value = "text/html"
+        mock_resp.headers.get.side_effect = lambda k, d="": {"Content-Type": "text/html; charset=utf-8"}.get(k, d)
+        mock_resp.read.return_value = b"<html><head><title>Normal Page</title></head><body>Normal content</body></html>"
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        return mock_resp
+
+    browser = AgentWebBrowser(config=BrowserConfig(agents_json_discovery=False))
+    with patch("urllib.request.urlopen", side_effect=side_effect):
+        page = browser.open("https://nosite.com/")
+
+    assert page.ok
+    assert page.headers.get("x-content-source", "") != "llms.txt"
+    assert page.title == "Normal Page"
+
+
+def test_llms_txt_cache_hit():
+    """Second request to same domain should use cached llms.txt data."""
+    llms_txt = "# Cached Site\n> Summary.\n"
+    browser = AgentWebBrowser(config=BrowserConfig(agents_json_discovery=False))
+
+    call_count = 0
+    def side_effect(req, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if url.endswith("/llms.txt"):
+            return _mock_llms_txt_response(llms_txt)
+        raise Exception("should not reach HTML fetch")
+
+    with patch("urllib.request.urlopen", side_effect=side_effect):
+        page1 = browser.open("https://cached.com/")
+        page2 = browser.open("https://cached.com/other")
+
+    assert page1.headers.get("x-content-source") == "llms.txt"
+    assert page2.headers.get("x-content-source") == "llms.txt"
+    # Should only fetch llms.txt once
+    assert call_count == 1
+
+
+def test_llms_txt_cache_miss():
+    """When llms.txt doesn't exist, negative result is cached too."""
+    fetch_count = {"llms": 0}
+
+    def side_effect(req, **kwargs):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if url.endswith("/llms.txt"):
+            fetch_count["llms"] += 1
+            import urllib.error
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.url = url
+        mock_resp.headers = MagicMock()
+        mock_resp.headers.get_content_type.return_value = "text/html"
+        mock_resp.headers.get.side_effect = lambda k, d="": {"Content-Type": "text/html; charset=utf-8"}.get(k, d)
+        mock_resp.read.return_value = b"<html><head><title>Page</title></head><body>Hi</body></html>"
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        return mock_resp
+
+    browser = AgentWebBrowser(config=BrowserConfig(agents_json_discovery=False))
+    with patch("urllib.request.urlopen", side_effect=side_effect):
+        browser.open("https://nomatch.com/")
+        browser.open("https://nomatch.com/other")
+
+    # llms.txt should only be attempted once per domain
+    assert fetch_count["llms"] == 1
+
+
+def test_llms_txt_disabled():
+    """When llms_txt_discovery is False, skip llms.txt check entirely."""
+    def side_effect(req, **kwargs):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        assert not url.endswith("/llms.txt"), "Should not attempt llms.txt fetch"
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.url = url
+        mock_resp.headers = MagicMock()
+        mock_resp.headers.get_content_type.return_value = "text/html"
+        mock_resp.headers.get.side_effect = lambda k, d="": {"Content-Type": "text/html; charset=utf-8"}.get(k, d)
+        mock_resp.read.return_value = b"<html><head><title>Direct</title></head><body>Direct</body></html>"
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        return mock_resp
+
+    browser = AgentWebBrowser(config=BrowserConfig(llms_txt_discovery=False, agents_json_discovery=False))
+    with patch("urllib.request.urlopen", side_effect=side_effect):
+        page = browser.open("https://direct.com/")
+    assert page.title == "Direct"
+
+
+def test_llms_txt_invalid_content_ignored():
+    """Content that doesn't start with '#' should be ignored."""
+    def side_effect(req, **kwargs):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if url.endswith("/llms.txt"):
+            return _mock_llms_txt_response("This is not valid llms.txt content")
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.url = url
+        mock_resp.headers = MagicMock()
+        mock_resp.headers.get_content_type.return_value = "text/html"
+        mock_resp.headers.get.side_effect = lambda k, d="": {"Content-Type": "text/html; charset=utf-8"}.get(k, d)
+        mock_resp.read.return_value = b"<html><head><title>Fallback</title></head><body>FB</body></html>"
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        return mock_resp
+
+    browser = AgentWebBrowser(config=BrowserConfig(agents_json_discovery=False))
+    with patch("urllib.request.urlopen", side_effect=side_effect):
+        page = browser.open("https://invalid.com/")
+    assert page.title == "Fallback"
+    assert page.headers.get("x-content-source", "") != "llms.txt"
+
+
+# ---------------------------------------------------------------------------
+# agents.json discovery — mock-based browser tests
+# ---------------------------------------------------------------------------
+
+def _mock_urlopen_for_agents_json(agents_data: dict):
+    """Return a side_effect that serves HTML + agents.json."""
+    agents_json = json.dumps(agents_data)
+
+    def side_effect(req, **kwargs):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if "/.well-known/agents.json" in url:
+            mock_resp = MagicMock()
+            mock_resp.status = 200
+            mock_resp.read.return_value = agents_json.encode("utf-8")
+            mock_resp.__enter__ = lambda s: s
+            mock_resp.__exit__ = MagicMock(return_value=False)
+            return mock_resp
+        # Normal HTML
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.url = url
+        mock_resp.headers = MagicMock()
+        mock_resp.headers.get_content_type.return_value = "text/html"
+        mock_resp.headers.get.side_effect = lambda k, d="": {"Content-Type": "text/html; charset=utf-8"}.get(k, d)
+        mock_resp.read.return_value = b"<html><head><title>Site</title></head><body>Content</body></html>"
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        return mock_resp
+    return side_effect
+
+
+def test_agents_json_enriches_page():
+    """When agents.json exists, page meta should be enriched."""
+    agents_data = {"capabilities": ["api", "search", "chat"], "name": "TestAgent"}
+    browser = AgentWebBrowser(config=BrowserConfig(llms_txt_discovery=False))
+
+    with patch("urllib.request.urlopen", side_effect=_mock_urlopen_for_agents_json(agents_data)):
+        page = browser.open("https://agentsite.com/")
+
+    assert page.ok
+    assert "agents_json" in page.meta.extra
+    assert "api" in page.meta.extra.get("agent_capabilities", "")
+
+
+def test_agents_json_not_found():
+    """When agents.json returns 404, page should be unchanged."""
+    def side_effect(req, **kwargs):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if "/.well-known/agents.json" in url:
+            import urllib.error
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.url = url
+        mock_resp.headers = MagicMock()
+        mock_resp.headers.get_content_type.return_value = "text/html"
+        mock_resp.headers.get.side_effect = lambda k, d="": {"Content-Type": "text/html; charset=utf-8"}.get(k, d)
+        mock_resp.read.return_value = b"<html><head><title>Plain</title></head><body>No agents</body></html>"
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        return mock_resp
+
+    browser = AgentWebBrowser(config=BrowserConfig(llms_txt_discovery=False))
+    with patch("urllib.request.urlopen", side_effect=side_effect):
+        page = browser.open("https://plain.com/")
+
+    assert page.ok
+    assert "agents_json" not in page.meta.extra
+
+
+def test_agents_json_cached():
+    """Second request to same domain should use cached agents.json."""
+    agents_data = {"capabilities": ["read"]}
+    fetch_count = {"agents": 0}
+    original_side_effect = _mock_urlopen_for_agents_json(agents_data)
+
+    def counting_side_effect(req, **kwargs):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if "/.well-known/agents.json" in url:
+            fetch_count["agents"] += 1
+        return original_side_effect(req, **kwargs)
+
+    browser = AgentWebBrowser(config=BrowserConfig(llms_txt_discovery=False))
+    with patch("urllib.request.urlopen", side_effect=counting_side_effect):
+        browser.open("https://cached-agents.com/")
+        browser.open("https://cached-agents.com/other")
+
+    assert fetch_count["agents"] == 1
+
+
+def test_agents_json_disabled():
+    """When agents_json_discovery is False, skip agents.json check."""
+    def side_effect(req, **kwargs):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        assert "agents.json" not in url, "Should not attempt agents.json fetch"
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.url = url
+        mock_resp.headers = MagicMock()
+        mock_resp.headers.get_content_type.return_value = "text/html"
+        mock_resp.headers.get.side_effect = lambda k, d="": {"Content-Type": "text/html; charset=utf-8"}.get(k, d)
+        mock_resp.read.return_value = b"<html><head><title>No Agents</title></head><body>No</body></html>"
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        return mock_resp
+
+    browser = AgentWebBrowser(config=BrowserConfig(llms_txt_discovery=False, agents_json_discovery=False))
+    with patch("urllib.request.urlopen", side_effect=side_effect):
+        page = browser.open("https://no-agents.com/")
+    assert page.title == "No Agents"
+
+
+# ---------------------------------------------------------------------------
+# llms.txt + agents.json combined
+# ---------------------------------------------------------------------------
+
+def test_llms_txt_takes_priority_over_html_and_agents_json():
+    """When llms.txt is found, agents.json enrichment should not run (llms.txt is the source)."""
+    llms_txt = "# Priority Site\n> LLMs-first content.\n"
+
+    def side_effect(req, **kwargs):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if url.endswith("/llms.txt"):
+            return _mock_llms_txt_response(llms_txt)
+        assert "agents.json" not in url, "agents.json should not be fetched when llms.txt exists"
+        raise AssertionError(f"Unexpected fetch: {url}")
+
+    browser = AgentWebBrowser()
+    with patch("urllib.request.urlopen", side_effect=side_effect):
+        page = browser.open("https://priority.com/")
+
+    assert page.headers.get("x-content-source") == "llms.txt"
+    assert page.title == "Priority Site"
+
+
+def test_render_llms_txt_has_source_footer():
+    """Rendered llms.txt page should include source attribution."""
+    llms_txt = "# Footer Test\n> Summary.\n\n## Links\n- [Docs](https://test.com/docs): Documentation\n"
+    browser = AgentWebBrowser(config=BrowserConfig(agents_json_discovery=False))
+
+    with patch("urllib.request.urlopen", side_effect=_mock_urlopen_for_llms_txt(llms_txt)):
+        page = browser.open("https://test.com/")
+
+    assert "[source: llms.txt" in page.content_text
