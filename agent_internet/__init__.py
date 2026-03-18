@@ -157,12 +157,36 @@ from .agent_web_browser_env import EnvironmentProbe, build_browser_capability_ma
 from .agent_web_browser_http import fetch_url
 from .agent_web_browser_parser import parse_html
 from .agent_web_browser_github import GitHubBrowserSource, create_github_browser
+from .agent_web_browser_nadi import NadiSource
 from .agent_web_browser_semantic import (
     BrowsedPageIndex,
     build_browser_semantic_capability_manifest,
     page_to_semantic_record,
     pages_to_semantic_records,
 )
+
+
+def create_agent_browser(
+    control_plane: object,
+    *,
+    config: BrowserConfig | None = None,
+    github: bool = True,
+    nadi: bool = True,
+) -> AgentWebBrowser:
+    """Create a fully configured browser for an agent.
+
+    One import, one call::
+
+        from agent_internet import create_agent_browser
+        browser = create_agent_browser(control_plane=cp)
+
+    The returned browser has all sources registered: control plane,
+    GitHub, and Nadi messaging.  The agent can navigate, read, and act
+    using only ``browser.open(url)`` and ``browser.submit_form(form_id, values)``.
+    """
+    return AgentWebBrowser.from_control_plane(
+        control_plane, config=config, github=github, nadi=nadi,
+    )
 
 __all__ = [
     "AgentCityDirectiveFactory",
@@ -314,6 +338,8 @@ __all__ = [
     "build_browser_capability_manifest",
     "compress_page",
     "create_github_browser",
+    "create_agent_browser",
+    "NadiSource",
     "BrowsedPageIndex",
     "build_browser_semantic_capability_manifest",
     "page_to_semantic_record",
