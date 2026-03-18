@@ -317,6 +317,37 @@ class AgentWebBrowser:
         from .agent_web_browser_control_plane import ControlPlaneSource
         self.register_source(ControlPlaneSource(_control_plane=control_plane))
 
+    @classmethod
+    def from_control_plane(
+        cls,
+        control_plane: object,
+        *,
+        config: BrowserConfig | None = None,
+        github: bool = True,
+        nadi: bool = True,
+    ) -> "AgentWebBrowser":
+        """Create a fully configured browser with all sources registered.
+
+        This is the canonical way to give an agent a browser::
+
+            browser = AgentWebBrowser.from_control_plane(cp)
+
+        The returned browser has:
+        - Control plane attached (``about:`` pages + ``cp://`` URLs + forms)
+        - ``GitHubBrowserSource`` registered (if *github* is True)
+        - ``NadiSource`` registered (if *nadi* is True)
+        - All ``about:`` self-knowledge pages active
+        """
+        browser = cls(config=config or BrowserConfig())
+        browser.attach_control_plane(control_plane)
+        if github:
+            from .agent_web_browser_github import GitHubBrowserSource
+            browser.register_source(GitHubBrowserSource())
+        if nadi:
+            from .agent_web_browser_nadi import NadiSource
+            browser.register_source(NadiSource(_control_plane=control_plane))
+        return browser
+
     # -- Tab management --
 
     @property
@@ -467,6 +498,10 @@ class AgentWebBrowser:
         # Delegate cp:// POST to ControlPlaneSource
         if form.action.startswith("cp://"):
             return self._submit_to_control_plane(form.action, data)
+
+        # Delegate nadi:// POST to NadiSource
+        if form.action.startswith("nadi://"):
+            return self._submit_to_nadi_source(form.action, data)
 
         body = urlencode(data).encode("utf-8")
         page = fetch_url(
@@ -1182,6 +1217,25 @@ class AgentWebBrowser:
                 return self.open(redirect_url, use_cache=False)
         return _make_page(action, status=503,
                           error="no_control_plane_source_registered")
+
+    def _submit_to_nadi_source(self, action: str, data: dict[str, str]) -> BrowserPage:
+        """Delegate a form POST to the NadiSource."""
+        from .agent_web_browser_nadi import NadiSource
+
+        for source in self._sources:
+            if isinstance(source, NadiSource):
+                redirect_url, error = source.submit(action, data)
+                if error:
+                    page = _make_page(action, status=422,
+                                      content=f"# Submission Error\n\n{error}",
+                                      error=error)
+                    tab = self.active_tab
+                    tab.push_url(action)
+                    tab.current_page = page
+                    return page
+                return self.open(redirect_url, use_cache=False)
+        return _make_page(action, status=503,
+                          error="no_nadi_source_registered")
 
     def _handle_about_control_plane(self, url: str, page_name: str) -> BrowserPage:
         """Route about:cities/trust/routes/spaces/intents/relay to control plane."""
