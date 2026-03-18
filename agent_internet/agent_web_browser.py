@@ -809,29 +809,69 @@ class AgentWebBrowser:
             )
 
         if page_name == "federation":
+            # Check which peers are already registered in the control plane
+            registered: set[str] = set()
+            if self._control_plane is not None:
+                from .agent_web_browser_control_plane import get_registered_city_ids
+                registered = get_registered_city_ids(self._control_plane)
+
             parts = ["# Agent Web Browser — Federation Discovery", "",
                       "Scanning known federation peers...", ""]
             links: list[PageLink] = []
+            forms: list[PageForm] = []
+            form_idx = 0
             for desc in discover_federation_descriptors(config=self.config):
                 name = desc.get("display_name", desc.get("repo_id", "?"))
+                repo_id = desc.get("repo_id", "")
+                caps = desc.get("capabilities", [])
+
+                # Sync status
+                is_registered = repo_id in registered
+                status_mark = "Registered" if is_registered else "Not registered"
                 parts.append(f"## {name}")
-                parts.append(f"  Repo: {desc.get('repo_id', '?')}")
+                parts.append(f"  Repo: {repo_id or '?'}")
                 parts.append(f"  Layer: {desc.get('layer', '?')}")
                 parts.append(f"  Status: {desc.get('status', '?')}")
-                caps = desc.get("capabilities", [])
+                parts.append(f"  System: {status_mark}")
                 if caps:
                     parts.append(f"  Capabilities: {', '.join(caps)}")
                 parts.append("")
-                repo_id = desc.get("repo_id", "")
+
                 if repo_id:
                     links.append(PageLink(href=f"https://github.com/{repo_id}",
                                           text=name, index=len(links)))
+                    if is_registered:
+                        links.append(PageLink(href=f"cp://cities/{repo_id}",
+                                              text=f"View: {repo_id}",
+                                              index=len(links)))
+
+                # Onboard form (only if not already registered and CP attached)
+                if not is_registered and self._control_plane is not None and repo_id:
+                    slug = desc.get("slug", repo_id)
+                    gh_url = f"https://github.com/{repo_id}"
+                    forms.append(PageForm(
+                        action="cp://federation/onboard", method="POST",
+                        form_id=f"onboard_{repo_id.replace('/', '_')}",
+                        index=form_idx,
+                        fields=(
+                            FormField(name="city_id", value=repo_id, required=True),
+                            FormField(name="slug", value=slug),
+                            FormField(name="repo", value=repo_id, required=True),
+                            FormField(name="location", value=gh_url, required=True),
+                            FormField(name="capabilities", value=", ".join(caps)),
+                        ),
+                    ))
+                    form_idx += 1
+
             if not links:
                 parts.append("(no federation peers discovered)")
             links.append(PageLink(href="about:environment", text="Environment", index=len(links)))
             links.append(PageLink(href="about:capabilities", text="Capabilities", index=len(links)))
+            if self._control_plane is not None:
+                links.append(PageLink(href="about:cities", text="Cities", index=len(links)))
             return _make_page(url, title="Federation — Agent Web Browser",
-                              content="\n".join(parts), links=tuple(links))
+                              content="\n".join(parts), links=tuple(links),
+                              forms=tuple(forms))
 
         if page_name.startswith("graph"):
             return self._handle_about_graph(url, page_name)
@@ -884,7 +924,7 @@ class AgentWebBrowser:
                               content="\n".join(parts), links=tuple(links))
 
         # -- Control plane pages (require attached control plane) --
-        _CP_PAGES = {"cities", "trust", "routes", "spaces", "intents"}
+        _CP_PAGES = {"cities", "trust", "routes", "spaces", "intents", "relay"}
         if page_name.split("?")[0] in _CP_PAGES:
             if self._control_plane is None:
                 return _make_page(url, status=503,
@@ -1144,12 +1184,13 @@ class AgentWebBrowser:
                           error="no_control_plane_source_registered")
 
     def _handle_about_control_plane(self, url: str, page_name: str) -> BrowserPage:
-        """Route about:cities/trust/routes/spaces/intents to control plane."""
+        """Route about:cities/trust/routes/spaces/intents/relay to control plane."""
         from .agent_web_browser_control_plane import _build_page as _cp_page
         from .agent_web_browser_control_plane import (
             render_about_cities,
             render_about_city_detail,
             render_about_intents,
+            render_about_relay,
             render_about_routes,
             render_about_spaces,
             render_about_trust,
@@ -1181,6 +1222,8 @@ class AgentWebBrowser:
             title, text, raw_links, raw_forms = render_about_spaces(cp)
         elif base == "intents":
             title, text, raw_links, raw_forms = render_about_intents(cp)
+        elif base == "relay":
+            title, text, raw_links, raw_forms = render_about_relay(cp)
         else:
             return _make_page(url, status=404, error=f"unknown_cp_page:{base}")
 
