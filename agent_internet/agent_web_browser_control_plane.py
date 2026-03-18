@@ -36,7 +36,7 @@ def _F(name: str, *, required: bool = True, value: str = "",
 # ---------------------------------------------------------------------------
 
 def render_about_cities(cp: object) -> tuple[str, str, _Links, list[dict]]:
-    """Render about:cities with a Register City form."""
+    """Render about:cities with a Register City form and Browse Repo links."""
     identities = cp.registry.list_identities()  # type: ignore[attr-defined]
     endpoints = {e.city_id: e for e in cp.registry.list_endpoints()}  # type: ignore[attr-defined]
     presences = {p.city_id: p for p in cp.registry.list_cities()}  # type: ignore[attr-defined]
@@ -64,10 +64,15 @@ def render_about_cities(cp: object) -> tuple[str, str, _Links, list[dict]]:
         parts.append("")
         links.append((f"cp://cities/{cid}", cid))
         links.append((f"about:trust?city={cid}", f"Trust: {cid}"))
+        # Browse Repo link (System → Web bridge)
+        if ident.repo:
+            links.append((f"https://github.com/{ident.repo}",
+                          f"Browse: {ident.repo}"))
 
     links.append(("about:routes", "Routes"))
     links.append(("about:spaces", "Spaces"))
     links.append(("about:intents", "Intents"))
+    links.append(("about:relay", "Relay"))
     links.append(("about:environment", "Environment"))
 
     forms = [{
@@ -131,10 +136,11 @@ def render_about_city_detail(cp: object, city_id: str) -> tuple[str, str, _Links
     parts.append("")
     links: _Links = []
     if ident.repo:
-        links.append((f"https://github.com/{ident.repo}", f"GitHub: {ident.repo}"))
+        links.append((f"https://github.com/{ident.repo}", f"Browse Repo: {ident.repo}"))
     links.append(("about:cities", "All Cities"))
     links.append(("about:routes", "Routes"))
     links.append(("about:trust", "Trust"))
+    links.append(("about:relay", "Relay"))
     return f"City: {city_id}", "\n".join(parts), links, []
 
 
@@ -345,6 +351,44 @@ def render_about_intents(cp: object) -> tuple[str, str, _Links, list[dict]]:
     return "Intents — Agent Web Browser", "\n".join(parts), links, forms
 
 
+def render_about_relay(cp: object) -> tuple[str, str, _Links, list[dict]]:
+    """Render about:relay — send messages through the federation."""
+    identities = cp.registry.list_identities()  # type: ignore[attr-defined]
+    city_ids = [i.city_id for i in identities]
+    routes = cp.registry.list_routes()  # type: ignore[attr-defined]
+    schemes = cp.transports.schemes() if hasattr(cp, "transports") else ()  # type: ignore[attr-defined]
+
+    parts = ["# Federation Relay", "",
+             f"Registered cities: {len(city_ids)}",
+             f"Routes: {len(routes)}",
+             f"Transports: {', '.join(schemes) or 'none'}", ""]
+    links: _Links = []
+
+    if not schemes:
+        parts.append("(no transports registered — register a transport to relay messages)")
+    if not routes:
+        parts.append("(no routes configured — publish routes first)")
+
+    links.append(("about:cities", "Cities"))
+    links.append(("about:routes", "Routes"))
+
+    forms = [{
+        "action": "cp://relay/send", "method": "POST",
+        "form_id": "relay_message",
+        "fields": [
+            _F("source_city_id"), _F("target_city_id"),
+            _F("operation", value="sync"),
+            _F("payload", value="{}", required=False),
+        ],
+    }]
+    return "Relay — Agent Web Browser", "\n".join(parts), links, forms
+
+
+def get_registered_city_ids(cp: object) -> set[str]:
+    """Return set of city_ids currently registered in the control plane."""
+    return {i.city_id for i in cp.registry.list_identities()}  # type: ignore[attr-defined]
+
+
 # ---------------------------------------------------------------------------
 # Form submission handler — routes POSTs to control plane writes
 # ---------------------------------------------------------------------------
@@ -495,6 +539,51 @@ def handle_cp_submit(cp: object, url: str, data: dict[str, str]) -> tuple[str, s
         ))
         return "about:intents", ""
 
+    # -- Onboard Federation Peer --
+    if path == "federation/onboard":
+        missing = _missing_fields(data, ["city_id", "repo", "location"])
+        if missing:
+            return "", f"Missing required fields: {', '.join(missing)}"
+        city_id = data["city_id"].strip()
+        caps_str = data.get("capabilities", "").strip()
+        caps = tuple(c.strip() for c in caps_str.split(",") if c.strip()) if caps_str else ()
+        cp.register_federation_peer(  # type: ignore[attr-defined]
+            city_id=city_id,
+            slug=data.get("slug", "").strip() or city_id,
+            repo=data["repo"].strip(),
+            transport="https",
+            location=data["location"].strip(),
+            capabilities=caps,
+        )
+        return f"about:cities?city={city_id}", ""
+
+    # -- Relay Message --
+    if path == "relay/send":
+        from .transport import DeliveryEnvelope
+        import json as _json
+        missing = _missing_fields(data, ["source_city_id", "target_city_id", "operation"])
+        if missing:
+            return "", f"Missing required fields: {', '.join(missing)}"
+        payload_str = data.get("payload", "{}").strip() or "{}"
+        try:
+            payload = _json.loads(payload_str)
+        except _json.JSONDecodeError as exc:
+            return "", f"Invalid JSON payload: {exc}"
+        envelope = DeliveryEnvelope(
+            source_city_id=data["source_city_id"].strip(),
+            target_city_id=data["target_city_id"].strip(),
+            operation=data["operation"].strip(),
+            payload=payload if isinstance(payload, dict) else {"data": payload},
+        )
+        try:
+            receipt = cp.relay_envelope(envelope)  # type: ignore[attr-defined]
+        except Exception as exc:
+            return "", f"Relay failed: {exc}"
+        status = receipt.status.name if hasattr(receipt.status, "name") else receipt.status
+        if status in ("DELIVERED", "delivered"):
+            return "about:relay", ""
+        return "", f"Relay status: {status} — {receipt.detail}"
+
     return "", f"Unknown submit action: {path}"
 
 
@@ -558,6 +647,9 @@ class ControlPlaneSource:
                 self._control_plane)
         elif path == "intents":
             title, text, raw_links, raw_forms = render_about_intents(
+                self._control_plane)
+        elif path == "relay":
+            title, text, raw_links, raw_forms = render_about_relay(
                 self._control_plane)
         else:
             return _build_page(url, status=404,
