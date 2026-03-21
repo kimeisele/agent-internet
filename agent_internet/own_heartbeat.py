@@ -4,8 +4,10 @@ import logging
 import sys
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
 # nadi_kit is vendored at repo root
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(_REPO_ROOT))
 from nadi_kit import NadiNode
 
 log = logging.getLogger("agent_internet.own_heartbeat")
@@ -14,7 +16,7 @@ log = logging.getLogger("agent_internet.own_heartbeat")
 def create_internet_node(federation_dir: Path | None = None) -> NadiNode:
     """Create NadiNode for agent-internet's own identity."""
     if federation_dir is None:
-        federation_dir = Path("data/federation")
+        federation_dir = _REPO_ROOT / "data" / "federation"
     peer_json = federation_dir / "peer.json"
     return NadiNode.from_peer_json(peer_json)
 
