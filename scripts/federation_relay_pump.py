@@ -411,6 +411,14 @@ def main() -> int:
         if index_result and "error" not in index_result:
             print(f"  index: {index_result.get('stats', {}).get('record_count', 0)} records")
 
+    # Emit agent-internet's own heartbeat
+    try:
+        from agent_internet.own_heartbeat import emit_control_plane_heartbeat
+        hb_stats = emit_control_plane_heartbeat(health=1.0)
+        print(f"  control plane heartbeat: {hb_stats}")
+    except Exception as exc:
+        print(f"  control plane heartbeat failed (non-fatal): {exc}")
+
     return 0
 
 
