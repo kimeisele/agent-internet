@@ -411,13 +411,20 @@ def main() -> int:
         if index_result and "error" not in index_result:
             print(f"  index: {index_result.get('stats', {}).get('record_count', 0)} records")
 
-    # Emit agent-internet's own heartbeat
+    # Navigator: Head Agent cognitive cycle (replaces simple heartbeat)
     try:
-        from agent_internet.own_heartbeat import emit_control_plane_heartbeat
-        hb_stats = emit_control_plane_heartbeat(health=1.0)
-        print(f"  control plane heartbeat: {hb_stats}")
+        from agent_internet.navigator import run_navigator
+        nav_result = run_navigator()
+        print(f"  navigator: {nav_result}")
     except Exception as exc:
-        print(f"  control plane heartbeat failed (non-fatal): {exc}")
+        print(f"  navigator failed (non-fatal): {exc}")
+        # Fallback to simple heartbeat
+        try:
+            from agent_internet.own_heartbeat import emit_control_plane_heartbeat
+            hb_stats = emit_control_plane_heartbeat(health=1.0)
+            print(f"  control plane heartbeat (fallback): {hb_stats}")
+        except Exception as exc2:
+            print(f"  heartbeat also failed: {exc2}")
 
     return 0
 
