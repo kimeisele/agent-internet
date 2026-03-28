@@ -11,7 +11,9 @@ requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [{name = "agents"}]
 keywords = ["agents", "federation", "network", "mesh", "control-plane"]
-dependencies = []
+dependencies = [
+    "nadi-kit @ git+https://github.com/kimeisele/steward-federation.git#egg=nadi-kit",
+]
 
 [project.optional-dependencies]
 substrate = ["steward-protocol[web,crypto]"]
