@@ -130,7 +130,12 @@ jobs:
             echo "No agent-internet state changes."
           else
             git commit -m "relay: pump outboxes and refresh index"
-            git push
+            for attempt in 1 2 3; do
+              git push && break
+              echo "Push attempt $attempt failed, rebasing..."
+              git pull --rebase origin main || true
+              sleep $((RANDOM % 10 + 2))
+            done
           fi
 
       - name: Push federation state to peer repos
@@ -149,7 +154,12 @@ jobs:
               echo "[$repo] no federation state changes."
             else
               git commit -m "relay: federation sync from agent-internet pump"
-              git push && echo "[$repo] pushed." || echo "[$repo] push failed (non-fatal)."
+              for attempt in 1 2 3; do
+                git push && break
+                echo "[$repo] push attempt $attempt failed, rebasing..."
+                git pull --rebase origin main || true
+                sleep $((RANDOM % 10 + 2))
+              done && echo "[$repo] pushed." || echo "[$repo] push failed (non-fatal)."
             fi
             cd ..
           done
