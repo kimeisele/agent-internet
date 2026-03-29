@@ -163,3 +163,46 @@ jobs:
             fi
             cd ..
           done
+
+      - name: Write self heartbeat payload
+        run: |
+          mkdir -p data/federation
+          echo '[{"agent_id":"agent-internet","operation":"heartbeat","source":"agent-internet","status":"alive","role":"projection_layer"}]' > data/federation/nadi_outbox.json
+
+      - name: Relay self heartbeat to steward-federation hub
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p data/federation
+          OUTBOX="data/federation/nadi_outbox.json"
+
+          if [ ! -f "$OUTBOX" ]; then
+            echo "[]" > "$OUTBOX"
+          fi
+
+          if [ "$(cat "$OUTBOX" | tr -d '[:space:]')" = "[]" ]; then
+            echo "Self-heartbeat outbox empty, skipping relay"
+            exit 0
+          fi
+
+          git clone --depth=1 https://x-access-token:${GH_TOKEN}@github.com/kimeisele/steward-federation.git /tmp/hub-self
+
+          mkdir -p /tmp/hub-self/nadi
+
+          cp "$OUTBOX" /tmp/hub-self/nadi/agent-internet_to_steward.json
+
+          cd /tmp/hub-self
+          git config user.name "agent-internet-bot"
+          git config user.email "bot@agent-internet"
+          git add nadi/agent-internet_to_steward.json
+          git diff --cached --quiet || git commit -m "relay: agent-internet self-heartbeat → steward (relay #${{ github.run_number }})"
+          for attempt in 1 2 3; do
+            git push && break
+            echo "Push attempt $attempt failed, rebasing..."
+            git pull --rebase origin main || true
+            sleep $((RANDOM % 10 + 2))
+          done
+
+          echo "[]" > "$OUTBOX"
+          echo "Self-heartbeat relayed and cleared"
