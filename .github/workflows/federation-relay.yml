@@ -130,12 +130,19 @@ jobs:
             echo "No agent-internet state changes."
           else
             git commit -m "relay: pump outboxes and refresh index"
-            for attempt in 1 2 3; do
-              git push && break
-              echo "Push attempt $attempt failed, rebasing..."
-              git pull --rebase origin main || true
-              sleep $((RANDOM % 10 + 2))
-            done
+          max_retries=10
+          count=0
+          until git push origin main; do
+            count=$((count+1))
+            if [ $count -gt $max_retries ]; then
+              echo "Push failed after $max_retries attempts"
+              exit 1
+            fi
+            backoff=$(( (RANDOM % 15) + 2 ))
+            echo "Race condition. Backoff ${backoff}s then rebase..."
+            sleep $backoff
+            git pull --rebase origin main
+          done
           fi
 
       - name: Push federation state to peer repos
@@ -154,12 +161,19 @@ jobs:
               echo "[$repo] no federation state changes."
             else
               git commit -m "relay: federation sync from agent-internet pump"
-              for attempt in 1 2 3; do
-                git push && break
-                echo "[$repo] push attempt $attempt failed, rebasing..."
-                git pull --rebase origin main || true
-                sleep $((RANDOM % 10 + 2))
-              done && echo "[$repo] pushed." || echo "[$repo] push failed (non-fatal)."
+          max_retries=10
+          count=0
+          until git push origin main; do
+            count=$((count+1))
+            if [ $count -gt $max_retries ]; then
+              echo "Push failed after $max_retries attempts"
+              exit 1
+            fi
+            backoff=$(( (RANDOM % 15) + 2 ))
+            echo "Race condition. Backoff ${backoff}s then rebase..."
+            sleep $backoff
+            git pull --rebase origin main
+          done
             fi
             cd ..
           done
@@ -197,11 +211,18 @@ jobs:
           git config user.email "bot@agent-internet"
           git add nadi/agent-internet_to_steward.json
           git diff --cached --quiet || git commit -m "relay: agent-internet self-heartbeat → steward (relay #${{ github.run_number }})"
-          for attempt in 1 2 3; do
-            git push && break
-            echo "Push attempt $attempt failed, rebasing..."
-            git pull --rebase origin main || true
-            sleep $((RANDOM % 10 + 2))
+          max_retries=10
+          count=0
+          until git push origin main; do
+            count=$((count+1))
+            if [ $count -gt $max_retries ]; then
+              echo "Push failed after $max_retries attempts"
+              exit 1
+            fi
+            backoff=$(( (RANDOM % 15) + 2 ))
+            echo "Race condition. Backoff ${backoff}s then rebase..."
+            sleep $backoff
+            git pull --rebase origin main
           done
 
           echo "[]" > "$OUTBOX"
