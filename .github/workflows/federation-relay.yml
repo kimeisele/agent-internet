@@ -178,10 +178,36 @@ jobs:
             cd ..
           done
 
-      - name: Write self heartbeat payload
+      - name: Restore node keys cache
+        uses: actions/cache/restore@v4
+        with:
+          path: data/federation/.node_keys.json
+          key: node-keys-${{ github.repository }}-v1
+          restore-keys: |
+            node-keys-${{ github.repository }}-
+
+      - name: Install nadi-kit
+        env:
+          GH_TOKEN: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p data/federation
-          echo '[{"agent_id":"agent-internet","operation":"heartbeat","source":"agent-internet","status":"alive","role":"projection_layer"}]' > data/federation/nadi_outbox.json
+          python -m pip install --upgrade "git+https://${GH_TOKEN}@github.com/kimeisele/steward-federation.git#egg=nadi-kit"
+
+      - name: Run NADI heartbeat cycle
+        env:
+          GH_TOKEN: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          nadi sync
+          nadi heartbeat
+          nadi sync
+          echo "Heartbeat + sync complete"
+
+      - name: Save node keys cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/federation/.node_keys.json
+          key: node-keys-${{ github.repository }}-v1
 
       - name: Relay self heartbeat to steward-federation hub
         if: always()
