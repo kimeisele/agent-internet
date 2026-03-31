@@ -1,0 +1,106 @@
+name: Federation Heartbeat
+
+on:
+  schedule:
+    - cron: '3-59/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Restore node keys cache
+        uses: actions/cache/restore@v4
+        with:
+          path: data/federation/.node_keys.json
+          key: node-keys-${{ github.repository }}-v1
+          restore-keys: |
+            node-keys-${{ github.repository }}-
+
+      - name: Install nadi-kit
+        env:
+          GH_TOKEN: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          python -m pip install --upgrade "git+https://${GH_TOKEN}@github.com/kimeisele/steward-federation.git#egg=nadi-kit"
+
+      - name: Run NADI heartbeat cycle
+        env:
+          GH_TOKEN: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          nadi sync
+          nadi heartbeat
+          nadi sync
+          echo "Heartbeat + sync complete"
+
+      - name: Save node keys cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/federation/.node_keys.json
+          key: node-keys-${{ github.repository }}-v1
+
+      - name: Relay outbox to steward-federation hub
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p data/federation
+          OUTBOX="data/federation/nadi_outbox.json"
+
+          if [ ! -f "$OUTBOX" ]; then
+            echo "[]" > "$OUTBOX"
+          fi
+
+          if [ "$(cat "$OUTBOX" | tr -d '[:space:]')" = "[]" ]; then
+            echo "Outbox empty, skipping relay"
+            exit 0
+          fi
+
+          git clone --depth=1 https://x-access-token:${GH_TOKEN}@github.com/kimeisele/steward-federation.git /tmp/hub
+
+          mkdir -p /tmp/hub/nadi
+
+          cp "$OUTBOX" /tmp/hub/nadi/agent-internet_to_steward.json
+
+          cd /tmp/hub
+          git config user.name "federation-bot"
+          git config user.email "bot@federation"
+          git add nadi/agent-internet_to_steward.json
+          git diff --cached --quiet || git commit -m "relay: agent-internet outbox → steward (heartbeat #${{ github.run_number }})"
+          max_retries=10
+          count=0
+          until git push origin main; do
+            count=$((count+1))
+            if [ $count -gt $max_retries ]; then
+              echo "Push failed after $max_retries attempts"
+              exit 1
+            fi
+            backoff=$(( (RANDOM % 15) + 2 ))
+            echo "Race condition. Backoff ${backoff}s then rebase..."
+            sleep $backoff
+            git pull --rebase origin main
+          done
+
+          echo "[]" > "$OUTBOX"
+          echo "Outbox relayed and cleared"
