@@ -9,354 +9,6 @@
       "peers_observed": 1,
       "actions_taken": 1,
       "delivery_rate": 0.0,
-      "timestamp": 1775035159.744103
-    },
-    "timestamp": 1775035159.7441597,
-    "priority": 1,
-    "correlation_id": "",
-    "ttl_s": 7200.0,
-    "id": "94fcad7d-3241-4154-bc6a-ec773a72934b"
-  },
-  {
-    "source": "agent-internet",
-    "target": "steward-test",
-    "operation": "head_agent_status",
-    "payload": {
-      "head_agent": "navigator",
-      "cycle": 1,
-      "peers_observed": 1,
-      "actions_taken": 1,
-      "delivery_rate": 0.0,
-      "timestamp": 1775035159.744103
-    },
-    "timestamp": 1775035159.7441664,
-    "priority": 1,
-    "correlation_id": "",
-    "ttl_s": 7200.0,
-    "id": "daf2f81a-523a-46e5-97ec-eacd304354d1"
-  },
-  {
-    "source": "agent-internet",
-    "target": "steward",
-    "operation": "transport_alert",
-    "payload": {
-      "type": "transport_degraded",
-      "detail": {
-        "type": "transport_degraded",
-        "delivery_rate": 0.0
-      },
-      "source": "navigator"
-    },
-    "timestamp": 1775036960.7719376,
-    "priority": 2,
-    "correlation_id": "",
-    "ttl_s": 7200.0,
-    "id": "281b069c-1841-4a38-90f3-15c5b82bf8e3"
-  },
-  {
-    "source": "agent-internet",
-    "target": "steward",
-    "operation": "federation.agent_claim",
-    "payload": {
-      "node_id": "ag_147bcf4b77233c89",
-      "agent_name": "agent-internet",
-      "public_key": "9a4c31e0908d00903fdf06b3ef492de1ca605a86654f49932959950633e304a4",
-      "capabilities": [
-        "nadi-relay",
-        "federation-discovery",
-        "lotus-addressing",
-        "semantic-search",
-        "authority-projection"
-      ]
-    },
-    "timestamp": 1775036960.7790365,
-    "priority": 2,
-    "correlation_id": "",
-    "ttl_s": 7200.0,
-    "id": "e3442601-60e0-45e5-85d5-844fdea8a0f1"
-  },
-  {
-    "source": "agent-internet",
-    "target": "steward",
-    "operation": "heartbeat",
-    "payload": {
-      "agent_id": "agent-internet",
-      "health": 1.0,
-      "timestamp": 1775036960.7849574,
-      "capabilities": [
-        "nadi-relay",
-        "federation-discovery",
-        "lotus-addressing",
-        "semantic-search",
-        "authority-projection"
-      ],
-      "repo": "kimeisele/agent-internet",
-      "version": "0.1.0",
-      "node_id": "ag_147bcf4b77233c89",
-      "public_key": "9a4c31e0908d00903fdf06b3ef492de1ca605a86654f49932959950633e304a4"
-    },
-    "timestamp": 1775036960.7850845,
-    "priority": 1,
-    "correlation_id": "",
-    "ttl_s": 900.0,
-    "id": "4af9b180-0d5b-457d-931a-a43934b5b9c8"
-  },
-  {
-    "source": "agent-internet",
-    "target": "agent-city",
-    "operation": "heartbeat",
-    "payload": {
-      "agent_id": "agent-internet",
-      "health": 1.0,
-      "timestamp": 1775036960.7849574,
-      "capabilities": [
-        "nadi-relay",
-        "federation-discovery",
-        "lotus-addressing",
-        "semantic-search",
-        "authority-projection"
-      ],
-      "repo": "kimeisele/agent-internet",
-      "version": "0.1.0",
-      "node_id": "ag_147bcf4b77233c89",
-      "public_key": "9a4c31e0908d00903fdf06b3ef492de1ca605a86654f49932959950633e304a4"
-    },
-    "timestamp": 1775036960.7851005,
-    "priority": 1,
-    "correlation_id": "",
-    "ttl_s": 900.0,
-    "id": "b133d109-5022-4fd3-abf1-6ba8a293a654"
-  },
-  {
-    "source": "agent-internet",
-    "target": "agent-world",
-    "operation": "heartbeat",
-    "payload": {
-      "agent_id": "agent-internet",
-      "health": 1.0,
-      "timestamp": 1775036960.7849574,
-      "capabilities": [
-        "nadi-relay",
-        "federation-discovery",
-        "lotus-addressing",
-        "semantic-search",
-        "authority-projection"
-      ],
-      "repo": "kimeisele/agent-internet",
-      "version": "0.1.0",
-      "node_id": "ag_147bcf4b77233c89",
-      "public_key": "9a4c31e0908d00903fdf06b3ef492de1ca605a86654f49932959950633e304a4"
-    },
-    "timestamp": 1775036960.78511,
-    "priority": 1,
-    "correlation_id": "",
-    "ttl_s": 900.0,
-    "id": "f00c764c-b599-44b8-beab-f094d2a6b6ae"
-  },
-  {
-    "source": "agent-internet",
-    "target": "steward-protocol",
-    "operation": "heartbeat",
-    "payload": {
-      "agent_id": "agent-internet",
-      "health": 1.0,
-      "timestamp": 1775036960.7849574,
-      "capabilities": [
-        "nadi-relay",
-        "federation-discovery",
-        "lotus-addressing",
-        "semantic-search",
-        "authority-projection"
-      ],
-      "repo": "kimeisele/agent-internet",
-      "version": "0.1.0",
-      "node_id": "ag_147bcf4b77233c89",
-      "public_key": "9a4c31e0908d00903fdf06b3ef492de1ca605a86654f49932959950633e304a4"
-    },
-    "timestamp": 1775036960.7851188,
-    "priority": 1,
-    "correlation_id": "",
-    "ttl_s": 900.0,
-    "id": "c6863a0e-e7a6-4765-a195-be57d4917dfc"
-  },
-  {
-    "source": "agent-internet",
-    "target": "steward-federation",
-    "operation": "heartbeat",
-    "payload": {
-      "agent_id": "agent-internet",
-      "health": 1.0,
-      "timestamp": 1775036960.7849574,
-      "capabilities": [
-        "nadi-relay",
-        "federation-discovery",
-        "lotus-addressing",
-        "semantic-search",
-        "authority-projection"
-      ],
-      "repo": "kimeisele/agent-internet",
-      "version": "0.1.0",
-      "node_id": "ag_147bcf4b77233c89",
-      "public_key": "9a4c31e0908d00903fdf06b3ef492de1ca605a86654f49932959950633e304a4"
-    },
-    "timestamp": 1775036960.785127,
-    "priority": 1,
-    "correlation_id": "",
-    "ttl_s": 900.0,
-    "id": "9a745e79-a07c-4f3a-bba8-5fb9d8b6daa4"
-  },
-  {
-    "source": "agent-internet",
-    "target": "agent-research",
-    "operation": "heartbeat",
-    "payload": {
-      "agent_id": "agent-internet",
-      "health": 1.0,
-      "timestamp": 1775036960.7849574,
-      "capabilities": [
-        "nadi-relay",
-        "federation-discovery",
-        "lotus-addressing",
-        "semantic-search",
-        "authority-projection"
-      ],
-      "repo": "kimeisele/agent-internet",
-      "version": "0.1.0",
-      "node_id": "ag_147bcf4b77233c89",
-      "public_key": "9a4c31e0908d00903fdf06b3ef492de1ca605a86654f49932959950633e304a4"
-    },
-    "timestamp": 1775036960.785135,
-    "priority": 1,
-    "correlation_id": "",
-    "ttl_s": 900.0,
-    "id": "533a373d-0682-4f97-9f6d-726b858ce721"
-  },
-  {
-    "source": "agent-internet",
-    "target": "steward-test",
-    "operation": "heartbeat",
-    "payload": {
-      "agent_id": "agent-internet",
-      "health": 1.0,
-      "timestamp": 1775036960.7849574,
-      "capabilities": [
-        "nadi-relay",
-        "federation-discovery",
-        "lotus-addressing",
-        "semantic-search",
-        "authority-projection"
-      ],
-      "repo": "kimeisele/agent-internet",
-      "version": "0.1.0",
-      "node_id": "ag_147bcf4b77233c89",
-      "public_key": "9a4c31e0908d00903fdf06b3ef492de1ca605a86654f49932959950633e304a4"
-    },
-    "timestamp": 1775036960.7851436,
-    "priority": 1,
-    "correlation_id": "",
-    "ttl_s": 900.0,
-    "id": "0d2c2645-308d-4d24-b6a3-e0b00467f41f"
-  },
-  {
-    "source": "agent-internet",
-    "target": "steward",
-    "operation": "head_agent_status",
-    "payload": {
-      "head_agent": "navigator",
-      "cycle": 1,
-      "peers_observed": 1,
-      "actions_taken": 1,
-      "delivery_rate": 0.0,
-      "timestamp": 1775036960.7914927
-    },
-    "timestamp": 1775036960.7914963,
-    "priority": 1,
-    "correlation_id": "",
-    "ttl_s": 7200.0,
-    "id": "b98282b9-3720-43c9-b2a2-c23d57ad40ca"
-  },
-  {
-    "source": "agent-internet",
-    "target": "agent-city",
-    "operation": "head_agent_status",
-    "payload": {
-      "head_agent": "navigator",
-      "cycle": 1,
-      "peers_observed": 1,
-      "actions_taken": 1,
-      "delivery_rate": 0.0,
-      "timestamp": 1775036960.7914927
-    },
-    "timestamp": 1775036960.791515,
-    "priority": 1,
-    "correlation_id": "",
-    "ttl_s": 7200.0,
-    "id": "0f7c54b8-8629-436a-81e0-2b28d1f70374"
-  },
-  {
-    "source": "agent-internet",
-    "target": "agent-world",
-    "operation": "head_agent_status",
-    "payload": {
-      "head_agent": "navigator",
-      "cycle": 1,
-      "peers_observed": 1,
-      "actions_taken": 1,
-      "delivery_rate": 0.0,
-      "timestamp": 1775036960.7914927
-    },
-    "timestamp": 1775036960.7915268,
-    "priority": 1,
-    "correlation_id": "",
-    "ttl_s": 7200.0,
-    "id": "ce02199c-3d94-4e59-9c60-8111b1c06ee7"
-  },
-  {
-    "source": "agent-internet",
-    "target": "steward-protocol",
-    "operation": "head_agent_status",
-    "payload": {
-      "head_agent": "navigator",
-      "cycle": 1,
-      "peers_observed": 1,
-      "actions_taken": 1,
-      "delivery_rate": 0.0,
-      "timestamp": 1775036960.7914927
-    },
-    "timestamp": 1775036960.7915363,
-    "priority": 1,
-    "correlation_id": "",
-    "ttl_s": 7200.0,
-    "id": "29e2d9dc-e302-410e-88ff-d4488e8fe012"
-  },
-  {
-    "source": "agent-internet",
-    "target": "steward-federation",
-    "operation": "head_agent_status",
-    "payload": {
-      "head_agent": "navigator",
-      "cycle": 1,
-      "peers_observed": 1,
-      "actions_taken": 1,
-      "delivery_rate": 0.0,
-      "timestamp": 1775036960.7914927
-    },
-    "timestamp": 1775036960.791545,
-    "priority": 1,
-    "correlation_id": "",
-    "ttl_s": 7200.0,
-    "id": "db11761f-92a2-4e15-a89d-3cef6dd3a0b1"
-  },
-  {
-    "source": "agent-internet",
-    "target": "agent-research",
-    "operation": "head_agent_status",
-    "payload": {
-      "head_agent": "navigator",
-      "cycle": 1,
-      "peers_observed": 1,
-      "actions_taken": 1,
-      "delivery_rate": 0.0,
       "timestamp": 1775036960.7914927
     },
     "timestamp": 1775036960.7915528,
@@ -3130,5 +2782,353 @@
     "correlation_id": "",
     "ttl_s": 7200.0,
     "id": "2893cd2d-4cbc-447d-865b-97e6cd87b194"
+  },
+  {
+    "source": "agent-internet",
+    "target": "steward",
+    "operation": "transport_alert",
+    "payload": {
+      "type": "transport_degraded",
+      "detail": {
+        "type": "transport_degraded",
+        "delivery_rate": 0.0
+      },
+      "source": "navigator"
+    },
+    "timestamp": 1775053390.392221,
+    "priority": 2,
+    "correlation_id": "",
+    "ttl_s": 7200.0,
+    "id": "d5b10c62-1bd0-4bd1-a56b-be057ea3dd0f"
+  },
+  {
+    "source": "agent-internet",
+    "target": "steward",
+    "operation": "federation.agent_claim",
+    "payload": {
+      "node_id": "ag_147bcf4b77233c89",
+      "agent_name": "agent-internet",
+      "public_key": "9a4c31e0908d00903fdf06b3ef492de1ca605a86654f49932959950633e304a4",
+      "capabilities": [
+        "nadi-relay",
+        "federation-discovery",
+        "lotus-addressing",
+        "semantic-search",
+        "authority-projection"
+      ]
+    },
+    "timestamp": 1775053390.3998387,
+    "priority": 2,
+    "correlation_id": "",
+    "ttl_s": 7200.0,
+    "id": "eddabc90-908b-45dd-8418-a2861cd46a80"
+  },
+  {
+    "source": "agent-internet",
+    "target": "steward",
+    "operation": "heartbeat",
+    "payload": {
+      "agent_id": "agent-internet",
+      "health": 1.0,
+      "timestamp": 1775053390.4077868,
+      "capabilities": [
+        "nadi-relay",
+        "federation-discovery",
+        "lotus-addressing",
+        "semantic-search",
+        "authority-projection"
+      ],
+      "repo": "kimeisele/agent-internet",
+      "version": "0.1.0",
+      "node_id": "ag_147bcf4b77233c89",
+      "public_key": "9a4c31e0908d00903fdf06b3ef492de1ca605a86654f49932959950633e304a4"
+    },
+    "timestamp": 1775053390.4079578,
+    "priority": 1,
+    "correlation_id": "",
+    "ttl_s": 900.0,
+    "id": "c9d91971-9e4a-4e72-889a-00c9e60620dc"
+  },
+  {
+    "source": "agent-internet",
+    "target": "agent-city",
+    "operation": "heartbeat",
+    "payload": {
+      "agent_id": "agent-internet",
+      "health": 1.0,
+      "timestamp": 1775053390.4077868,
+      "capabilities": [
+        "nadi-relay",
+        "federation-discovery",
+        "lotus-addressing",
+        "semantic-search",
+        "authority-projection"
+      ],
+      "repo": "kimeisele/agent-internet",
+      "version": "0.1.0",
+      "node_id": "ag_147bcf4b77233c89",
+      "public_key": "9a4c31e0908d00903fdf06b3ef492de1ca605a86654f49932959950633e304a4"
+    },
+    "timestamp": 1775053390.4079828,
+    "priority": 1,
+    "correlation_id": "",
+    "ttl_s": 900.0,
+    "id": "e68aa4a9-3c94-48e9-9919-5b1f97a70671"
+  },
+  {
+    "source": "agent-internet",
+    "target": "agent-world",
+    "operation": "heartbeat",
+    "payload": {
+      "agent_id": "agent-internet",
+      "health": 1.0,
+      "timestamp": 1775053390.4077868,
+      "capabilities": [
+        "nadi-relay",
+        "federation-discovery",
+        "lotus-addressing",
+        "semantic-search",
+        "authority-projection"
+      ],
+      "repo": "kimeisele/agent-internet",
+      "version": "0.1.0",
+      "node_id": "ag_147bcf4b77233c89",
+      "public_key": "9a4c31e0908d00903fdf06b3ef492de1ca605a86654f49932959950633e304a4"
+    },
+    "timestamp": 1775053390.4079926,
+    "priority": 1,
+    "correlation_id": "",
+    "ttl_s": 900.0,
+    "id": "191231c5-6462-4a80-86dc-39ce25d2dcf8"
+  },
+  {
+    "source": "agent-internet",
+    "target": "steward-protocol",
+    "operation": "heartbeat",
+    "payload": {
+      "agent_id": "agent-internet",
+      "health": 1.0,
+      "timestamp": 1775053390.4077868,
+      "capabilities": [
+        "nadi-relay",
+        "federation-discovery",
+        "lotus-addressing",
+        "semantic-search",
+        "authority-projection"
+      ],
+      "repo": "kimeisele/agent-internet",
+      "version": "0.1.0",
+      "node_id": "ag_147bcf4b77233c89",
+      "public_key": "9a4c31e0908d00903fdf06b3ef492de1ca605a86654f49932959950633e304a4"
+    },
+    "timestamp": 1775053390.4080014,
+    "priority": 1,
+    "correlation_id": "",
+    "ttl_s": 900.0,
+    "id": "02275ab1-1ba5-4e38-bea0-be4a78dc6992"
+  },
+  {
+    "source": "agent-internet",
+    "target": "steward-federation",
+    "operation": "heartbeat",
+    "payload": {
+      "agent_id": "agent-internet",
+      "health": 1.0,
+      "timestamp": 1775053390.4077868,
+      "capabilities": [
+        "nadi-relay",
+        "federation-discovery",
+        "lotus-addressing",
+        "semantic-search",
+        "authority-projection"
+      ],
+      "repo": "kimeisele/agent-internet",
+      "version": "0.1.0",
+      "node_id": "ag_147bcf4b77233c89",
+      "public_key": "9a4c31e0908d00903fdf06b3ef492de1ca605a86654f49932959950633e304a4"
+    },
+    "timestamp": 1775053390.4080102,
+    "priority": 1,
+    "correlation_id": "",
+    "ttl_s": 900.0,
+    "id": "13cf35e4-6c9c-4f0e-8f27-231368f43f8c"
+  },
+  {
+    "source": "agent-internet",
+    "target": "agent-research",
+    "operation": "heartbeat",
+    "payload": {
+      "agent_id": "agent-internet",
+      "health": 1.0,
+      "timestamp": 1775053390.4077868,
+      "capabilities": [
+        "nadi-relay",
+        "federation-discovery",
+        "lotus-addressing",
+        "semantic-search",
+        "authority-projection"
+      ],
+      "repo": "kimeisele/agent-internet",
+      "version": "0.1.0",
+      "node_id": "ag_147bcf4b77233c89",
+      "public_key": "9a4c31e0908d00903fdf06b3ef492de1ca605a86654f49932959950633e304a4"
+    },
+    "timestamp": 1775053390.4080179,
+    "priority": 1,
+    "correlation_id": "",
+    "ttl_s": 900.0,
+    "id": "ed5ce979-4ded-485d-a834-30018c80833e"
+  },
+  {
+    "source": "agent-internet",
+    "target": "steward-test",
+    "operation": "heartbeat",
+    "payload": {
+      "agent_id": "agent-internet",
+      "health": 1.0,
+      "timestamp": 1775053390.4077868,
+      "capabilities": [
+        "nadi-relay",
+        "federation-discovery",
+        "lotus-addressing",
+        "semantic-search",
+        "authority-projection"
+      ],
+      "repo": "kimeisele/agent-internet",
+      "version": "0.1.0",
+      "node_id": "ag_147bcf4b77233c89",
+      "public_key": "9a4c31e0908d00903fdf06b3ef492de1ca605a86654f49932959950633e304a4"
+    },
+    "timestamp": 1775053390.4080272,
+    "priority": 1,
+    "correlation_id": "",
+    "ttl_s": 900.0,
+    "id": "77c71de0-ea32-4fcb-bb1e-46bda1a9631d"
+  },
+  {
+    "source": "agent-internet",
+    "target": "steward",
+    "operation": "head_agent_status",
+    "payload": {
+      "head_agent": "navigator",
+      "cycle": 1,
+      "peers_observed": 1,
+      "actions_taken": 1,
+      "delivery_rate": 0.0,
+      "timestamp": 1775053390.4147942
+    },
+    "timestamp": 1775053390.4147997,
+    "priority": 1,
+    "correlation_id": "",
+    "ttl_s": 7200.0,
+    "id": "5b05e5ee-9665-4c3e-8c7e-631da0331870"
+  },
+  {
+    "source": "agent-internet",
+    "target": "agent-city",
+    "operation": "head_agent_status",
+    "payload": {
+      "head_agent": "navigator",
+      "cycle": 1,
+      "peers_observed": 1,
+      "actions_taken": 1,
+      "delivery_rate": 0.0,
+      "timestamp": 1775053390.4147942
+    },
+    "timestamp": 1775053390.4148223,
+    "priority": 1,
+    "correlation_id": "",
+    "ttl_s": 7200.0,
+    "id": "d7ff4d75-e8ed-4962-866f-162feaef4f3a"
+  },
+  {
+    "source": "agent-internet",
+    "target": "agent-world",
+    "operation": "head_agent_status",
+    "payload": {
+      "head_agent": "navigator",
+      "cycle": 1,
+      "peers_observed": 1,
+      "actions_taken": 1,
+      "delivery_rate": 0.0,
+      "timestamp": 1775053390.4147942
+    },
+    "timestamp": 1775053390.4148326,
+    "priority": 1,
+    "correlation_id": "",
+    "ttl_s": 7200.0,
+    "id": "f70556fb-44d4-4b16-902b-9bdbb5e59496"
+  },
+  {
+    "source": "agent-internet",
+    "target": "steward-protocol",
+    "operation": "head_agent_status",
+    "payload": {
+      "head_agent": "navigator",
+      "cycle": 1,
+      "peers_observed": 1,
+      "actions_taken": 1,
+      "delivery_rate": 0.0,
+      "timestamp": 1775053390.4147942
+    },
+    "timestamp": 1775053390.4148414,
+    "priority": 1,
+    "correlation_id": "",
+    "ttl_s": 7200.0,
+    "id": "dbad1508-c5d9-4054-805f-c2ac923339f4"
+  },
+  {
+    "source": "agent-internet",
+    "target": "steward-federation",
+    "operation": "head_agent_status",
+    "payload": {
+      "head_agent": "navigator",
+      "cycle": 1,
+      "peers_observed": 1,
+      "actions_taken": 1,
+      "delivery_rate": 0.0,
+      "timestamp": 1775053390.4147942
+    },
+    "timestamp": 1775053390.414849,
+    "priority": 1,
+    "correlation_id": "",
+    "ttl_s": 7200.0,
+    "id": "52644d6f-fd4f-4f3a-9484-80dc279cae2a"
+  },
+  {
+    "source": "agent-internet",
+    "target": "agent-research",
+    "operation": "head_agent_status",
+    "payload": {
+      "head_agent": "navigator",
+      "cycle": 1,
+      "peers_observed": 1,
+      "actions_taken": 1,
+      "delivery_rate": 0.0,
+      "timestamp": 1775053390.4147942
+    },
+    "timestamp": 1775053390.4148564,
+    "priority": 1,
+    "correlation_id": "",
+    "ttl_s": 7200.0,
+    "id": "e16d8e28-4fe6-459e-909b-4fda7fa1b4ee"
+  },
+  {
+    "source": "agent-internet",
+    "target": "steward-test",
+    "operation": "head_agent_status",
+    "payload": {
+      "head_agent": "navigator",
+      "cycle": 1,
+      "peers_observed": 1,
+      "actions_taken": 1,
+      "delivery_rate": 0.0,
+      "timestamp": 1775053390.4147942
+    },
+    "timestamp": 1775053390.4148629,
+    "priority": 1,
+    "correlation_id": "",
+    "ttl_s": 7200.0,
+    "id": "b463f095-f867-44fa-ac16-8d12f6f6abcf"
   }
 ]
