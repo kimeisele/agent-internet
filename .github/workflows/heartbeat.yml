@@ -29,13 +29,13 @@ jobs:
           pip install --upgrade pip
           pip install -e .[dev]
 
-      - name: Restore node keys cache
-        uses: actions/cache/restore@v4
-        with:
-          path: data/federation/.node_keys.json
-          key: node-keys-${{ github.repository }}-v1
-          restore-keys: |
-            node-keys-${{ github.repository }}-
+      - name: Inject node identity from GitHub Secret
+        env:
+          NODE_KEYS: ${{ secrets.NODE_PRIVATE_KEY }}
+        run: |
+          mkdir -p data/federation
+          echo "$NODE_KEYS" > data/federation/.node_keys.json
+          echo "✅ Node identity injected from NODE_PRIVATE_KEY secret"
 
       - name: Install nadi-kit
         env:
@@ -51,13 +51,6 @@ jobs:
           nadi sync
           nadi heartbeat
           echo "Heartbeat generated (outbox will be relayed before final sync)"
-
-      - name: Save node keys cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: data/federation/.node_keys.json
-          key: node-keys-${{ github.repository }}-v1
 
       - name: Relay outbox to steward-federation hub
         if: always()
