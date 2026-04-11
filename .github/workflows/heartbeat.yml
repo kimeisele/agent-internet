@@ -38,18 +38,17 @@ jobs:
           echo "✅ Node identity injected from NODE_PRIVATE_KEY secret"
 
       - name: Install nadi-kit
-        env:
-          GH_TOKEN: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
         run: |
-          python -m pip install --upgrade "git+https://${GH_TOKEN}@github.com/kimeisele/steward-federation.git#egg=nadi-kit"
+          python -m pip install cryptography
+          curl -s "https://raw.githubusercontent.com/kimeisele/steward-federation/main/nadi_kit.py" -o nadi_kit.py
 
       - name: Run NADI heartbeat cycle
         env:
           GH_TOKEN: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
         run: |
-          nadi sync
-          nadi heartbeat
+          python3 nadi_kit.py sync
+          python3 nadi_kit.py heartbeat
           echo "Heartbeat generated (outbox will be relayed before final sync)"
 
       - name: Relay outbox to steward-federation hub
@@ -103,5 +102,5 @@ jobs:
           GH_TOKEN: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
         run: |
-          nadi sync
+          python3 nadi_kit.py sync
           echo "Final sync complete"
