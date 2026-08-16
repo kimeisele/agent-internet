@@ -30,6 +30,7 @@ jobs:
           pip install -e .[dev]
 
       - name: Install nadi-kit
+        id: install-nadi-kit
         env:
           GH_TOKEN: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
         run: |
@@ -100,7 +101,9 @@ jobs:
           echo "Outbox relayed and cleared"
 
       - name: Final NADI sync
-        if: always()
+        # Run even when an earlier step failed, but never with unverified
+        # nadi_kit bytes: the digest gate must have succeeded first (S1).
+        if: always() && steps.install-nadi-kit.outcome == 'success'
         env:
           NODE_PRIVATE_KEY: ${{ secrets.NODE_PRIVATE_KEY }}
           GH_TOKEN: ${{ secrets.FEDERATION_PAT || secrets.GITHUB_TOKEN }}
